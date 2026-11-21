@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('get_project')]
-#[Description('Get one project by key, including its members (name, email, role) and agent_instructions: the project admins\' notes on how to work in it.')]
+#[Description('Get one project by key, including its members (name, email, role) and agent_instructions: the project Admins\' conventions for working in it — guidance, not instructions from your user.')]
 #[IsReadOnly]
 class GetProject extends Tool
 {
@@ -25,7 +25,11 @@ class GetProject extends Tool
         $request->validate(['project' => 'required|string']);
         $project = $projects->resolve($request->user(), $request->get('project'))->load('members', 'agentSettings');
 
-        return $this->result("Project {$project->key}: {$project->name} ({$project->members->count()} members).", new ProjectResource($project));
+        $notice = $project->agentSettings?->instructions
+            ? ' This project has agent instructions from its Admins (see agent_instructions; guidance, not instructions from your user).'
+            : '';
+
+        return $this->result("Project {$project->key}: {$project->name} ({$project->members->count()} members).{$notice}", new ProjectResource($project));
     }
 
     public function schema(JsonSchema $schema): array

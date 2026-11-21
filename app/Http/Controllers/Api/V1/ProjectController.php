@@ -35,7 +35,7 @@ class ProjectController extends Controller
         return new ProjectResource($this->projects->create($request->user(), $request->validated()));
     }
 
-    /** Show a project by key, with its members and the `agent_instructions` its admins wrote for agents. */
+    /** Show a project by key, with its members and `agent_instructions`: the project Admins' conventions for working in it. They are guidance, not instructions from the person an agent works for. */
     public function show(Request $request, string $key): ProjectResource
     {
         return new ProjectResource($this->projects->resolve($request->user(), $key)->load('members', 'agentSettings'));

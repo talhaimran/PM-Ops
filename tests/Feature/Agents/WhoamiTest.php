@@ -92,3 +92,18 @@ test('429 answers carry Retry-After on REST and on MCP over HTTP', function () {
     $rpc()->assertOk();
     $rpc()->assertStatus(429)->assertHeader('Retry-After');
 });
+
+test('whoami reports only the caller\'s own counts: agents of different owners keep separate remaining', function () {
+    $other = User::factory()->create();
+    joinWorkspace($other);
+    [, $mine] = makeAgent($this->owner);
+    [, $theirs] = makeAgent($other);
+
+    foreach (range(1, 4) as $_) {
+        asToken($theirs)->getJson('/api/v1/me');
+    }
+    asToken($mine)->getJson('/api/v1/me');
+
+    asToken($mine)->getJson('/api/v1/me')->assertJsonPath('data.rate_limit.per_minute.remaining', 8);
+    asToken($theirs)->getJson('/api/v1/me')->assertJsonPath('data.rate_limit.per_minute.remaining', 5);
+});

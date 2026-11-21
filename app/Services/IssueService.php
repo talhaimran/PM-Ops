@@ -290,7 +290,7 @@ class IssueService
             ? $project->issues()->getQuery()
             : Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'));
 
-        [$perPage, $page] = Pagination::resolve($params['cursor'] ?? null, $params['per_page'] ?? null, $params['page'] ?? null);
+        [$perPage, $page] = Pagination::resolve($params['cursor'] ?? null, $params['per_page'] ?? null, $params['page'] ?? null, max: $params['max_per_page'] ?? 100);
 
         return $this->sort($this->filter($query, $params), $params['sort'] ?? null)
             ->with(self::DISPLAY)

@@ -7,7 +7,8 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
 
 /**
- * A-L4: `cursor` beside `page`. A cursor is "the next page of this listing": it carries the page and the page size, so
+ * A-L4: `cursor` beside `page`. A cursor is a convenience, not an access token: it grants nothing page= doesn't; every
+ * query is still authorized, and the page size in it is capped at the endpoint's max. A cursor is "the next page of this listing": it carries the page and the page size, so
  * changing per_page mid-walk can't misalign it. Every list that uses it is totally ordered (ties break by id).
  * shortcut: offset-based, so a row added or removed between two requests can shift a page by one; switch to keyset
  * cursors per sort if lists ever get large or busy.

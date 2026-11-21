@@ -24,7 +24,7 @@ class ListProjects extends Tool
     {
         $data = $request->validate(['page' => 'integer|min:1', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
 
-        return $this->paginated('projects', $projects->listFor($request->user(), $data['per_page'] ?? 25, $data['page'] ?? 1, $data['cursor'] ?? null), ProjectResource::class);
+        return $this->paginated('projects', $projects->listFor($request->user(), $data['per_page'] ?? 25, $data['page'] ?? 1, $data['cursor'] ?? null, 50), ProjectResource::class);
     }
 
     public function schema(JsonSchema $schema): array

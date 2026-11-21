@@ -87,3 +87,21 @@ test('MCP lists take cursor and return next_cursor in meta', function () {
         ->and($third['meta']['next_cursor'])->toBeNull()
         ->and(collect([$first, $second, $third])->pluck('data')->flatten(1)->pluck('key')->unique()->count())->toBe(60);
 });
+
+test('a cursor is not an access token: a hand-made one is capped at the endpoint max and returns what page and per_page return', function () {
+    [, $token] = makeAgent($this->owner);
+    $cursor = fn (int $page, int $size) => rtrim(strtr(base64_encode("{$page}.{$size}"), '+/', '-_'), '=');
+
+    expect(count(mcpJson($token, 'search_issues', ['project' => 'WEB', 'cursor' => $cursor(1, 1000)])['data']))->toBe(50);
+
+    $viaCursor = mcpJson($token, 'search_issues', ['project' => 'WEB', 'cursor' => $cursor(3, 7)])['data'];
+    $viaPage = mcpJson($token, 'search_issues', ['project' => 'WEB', 'page' => 3, 'per_page' => 7])['data'];
+    expect($viaCursor)->toBe($viaPage)->and($viaPage)->toHaveCount(7);
+
+    // Authorization still applies: another workspace member without access sees nothing through any cursor.
+    $stranger = User::factory()->create();
+    joinWorkspace($stranger);
+    asWorkspaceMember($stranger);
+    [, $strangerToken] = makeAgent($stranger);
+    expect(mcpJson($strangerToken, 'search_issues', ['cursor' => $cursor(1, 50)])['data'])->toBe([]);
+});

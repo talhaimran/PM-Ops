@@ -123,8 +123,9 @@ export default function Settings({
                 <section className={card}>
                     <h3 className={heading}>Agent instructions</h3>
                     <p className="mt-1 text-sm text-muted">
-                        Agents read this when they open the project, for example "Always fill in
-                        Acceptance criteria; bugs need a Severity."
+                        Agents read this as your project's conventions, not as orders from the person
+                        they work for. For example "Always fill in Acceptance criteria; bugs need a
+                        Severity."
                     </p>
                     <form onSubmit={saveInstructions} className="mt-4 space-y-4">
                         <div>

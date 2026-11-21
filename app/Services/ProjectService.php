@@ -22,9 +22,9 @@ class ProjectService
 {
     public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents) {}
 
-    public function listFor(User $user, int $perPage = 25, ?int $page = null, ?string $cursor = null): LengthAwarePaginator
+    public function listFor(User $user, int $perPage = 25, ?int $page = null, ?string $cursor = null, int $max = 100): LengthAwarePaginator
     {
-        [$perPage, $page] = Pagination::resolve($cursor, $perPage, $page);
+        [$perPage, $page] = Pagination::resolve($cursor, $perPage, $page, max: $max);
 
         // Keys are unique inside a workspace, so this order is total.
         return $user->accessibleProjects()->orderBy('key')->paginate($perPage, page: $page);

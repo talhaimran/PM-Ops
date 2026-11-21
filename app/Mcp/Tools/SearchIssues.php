@@ -30,7 +30,7 @@ class SearchIssues extends Tool
         $params = $request->validate([...$rules->rules(), 'per_page' => ['nullable', 'integer', 'min:1', 'max:50']], $rules->messages());
         $project = isset($params['project']) ? $projects->resolve($request->user(), $params['project']) : null;
 
-        return $this->paginated('issues', $issues->list($request->user(), $project, $params), IssueCardResource::class, $params['fields'] ?? null);
+        return $this->paginated('issues', $issues->list($request->user(), $project, [...$params, 'max_per_page' => 50]), IssueCardResource::class, $params['fields'] ?? null);
     }
 
     public function schema(JsonSchema $schema): array
