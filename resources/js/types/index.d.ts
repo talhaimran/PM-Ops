@@ -39,6 +39,8 @@ export interface Project {
     key: string;
     name: string;
     description: string | null;
+    // Only on the project settings page: notes the project's admins wrote for agents.
+    agent_instructions?: string | null;
     my_role: ProjectRole | null;
     members?: Member[];
 }

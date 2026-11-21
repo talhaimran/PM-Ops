@@ -11,8 +11,10 @@ use App\Enums\SprintState;
 use App\Models\Agent;
 use App\Models\Column;
 use App\Models\Project;
+use App\Models\ProjectAgentSettings;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -20,9 +22,12 @@ class ProjectService
 {
     public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents) {}
 
-    public function listFor(User $user, int $perPage = 25, ?int $page = null): LengthAwarePaginator
+    public function listFor(User $user, int $perPage = 25, ?int $page = null, ?string $cursor = null): LengthAwarePaginator
     {
-        return $user->accessibleProjects()->orderBy('key')->paginate(max(1, min($perPage, 100)), page: $page);
+        [$perPage, $page] = Pagination::resolve($cursor, $perPage, $page);
+
+        // Keys are unique inside a workspace, so this order is total.
+        return $user->accessibleProjects()->orderBy('key')->paginate($perPage, page: $page);
     }
 
     /** @param array{key: string, name: string, description?: ?string} $data */
@@ -48,12 +53,30 @@ class ProjectService
         });
     }
 
-    /** @param array{name?: string, description?: ?string} $data */
+    /** @param array{name?: string, description?: ?string, agent_instructions?: ?string} $data */
     public function update(Project $project, array $data): Project
     {
-        $project->update($data);
+        return DB::transaction(function () use ($project, $data) {
+            if (array_key_exists('agent_instructions', $data)) {
+                $this->setInstructions($project, $data['agent_instructions']);
+            }
+            $project->update(Arr::except($data, 'agent_instructions'));
 
-        return $project;
+            return $project;
+        });
+    }
+
+    /** A4: empty means none. The audit row says the text changed, never what it says (it may be long). */
+    private function setInstructions(Project $project, ?string $text): void
+    {
+        $text = trim((string) $text) ?: null;
+        $settings = ProjectAgentSettings::firstOrNew(['project_id' => $project->id]);
+        if ($settings->instructions === $text) {
+            return;
+        }
+        $settings->instructions = $text;
+        $settings->save();
+        $this->audit->log('project.agent_settings_changed', $project, ['instructions_changed' => true], $this->current->get());
     }
 
     public function delete(Project $project): void

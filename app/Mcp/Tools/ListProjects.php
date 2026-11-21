@@ -22,15 +22,16 @@ class ListProjects extends Tool
 
     public function handle(Request $request, ProjectService $projects): Response
     {
-        $data = $request->validate(['page' => 'integer|min:1', 'per_page' => 'integer|min:1|max:50']);
+        $data = $request->validate(['page' => 'integer|min:1', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
 
-        return $this->paginated('projects', $projects->listFor($request->user(), $data['per_page'] ?? 25, $data['page'] ?? 1), ProjectResource::class);
+        return $this->paginated('projects', $projects->listFor($request->user(), $data['per_page'] ?? 25, $data['page'] ?? 1, $data['cursor'] ?? null), ProjectResource::class);
     }
 
     public function schema(JsonSchema $schema): array
     {
         return [
             'page' => $schema->integer()->min(1)->description('Page number, default 1.'),
+            'cursor' => $schema->string()->description('next_cursor from the previous page; use instead of page.'),
             'per_page' => $schema->integer()->min(1)->max(50)->description('Items per page, default 25, max 50.'),
         ];
     }

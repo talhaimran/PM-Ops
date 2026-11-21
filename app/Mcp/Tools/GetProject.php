@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('get_project')]
-#[Description('Get one project by key, including its members (name, email, role).')]
+#[Description('Get one project by key, including its members (name, email, role) and agent_instructions: the project admins\' notes on how to work in it.')]
 #[IsReadOnly]
 class GetProject extends Tool
 {
@@ -23,7 +23,7 @@ class GetProject extends Tool
     public function handle(Request $request, ProjectService $projects): Response
     {
         $request->validate(['project' => 'required|string']);
-        $project = $projects->resolve($request->user(), $request->get('project'))->load('members');
+        $project = $projects->resolve($request->user(), $request->get('project'))->load('members', 'agentSettings');
 
         return $this->result("Project {$project->key}: {$project->name} ({$project->members->count()} members).", new ProjectResource($project));
     }

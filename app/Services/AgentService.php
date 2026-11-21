@@ -14,8 +14,11 @@ use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -190,6 +193,28 @@ class AgentService
                 'expires_at' => $agent->token?->expires_at,
                 'created_at' => $agent->created_at,
             ])->all();
+    }
+
+    /**
+     * A3 whoami: the calling agent (null for a person), its owner, workspace, projects and what is left of its rate
+     * limits. The limits come from the `api` limiter the throttle middleware uses, read with the same keys.
+     */
+    public function whoami(User $user): array
+    {
+        $agent = $user->agent();
+        $workspace = $this->current->id() ? $this->current->get() : null;
+        $limits = collect(Arr::wrap(RateLimiter::limiter('api')(tap(Request::create('/'), fn (Request $r) => $r->setUserResolver(fn () => $user)))));
+        $left = fn (int $seconds) => ($limit = $limits->firstWhere('decaySeconds', $seconds))
+            ? ['limit' => $limit->maxAttempts, 'remaining' => RateLimiter::remaining(md5('api'.$limit->key), $limit->maxAttempts)]
+            : ['limit' => null, 'remaining' => null];
+
+        return [
+            'agent' => $agent ? ['id' => $agent->id, 'name' => $agent->name, 'level' => $agent->permission_level->value, 'status' => $agent->status->value] : null,
+            'owner' => ['name' => $user->name, 'email' => $user->email],
+            'workspace' => $workspace ? ['slug' => $workspace->slug, 'name' => $workspace->name, 'owner_role' => $user->workspaceRole($workspace)?->value] : null,
+            'projects' => ($agent ? $this->projectKeys($agent) : []) ?: 'all',
+            'rate_limit' => ['per_minute' => $left(60), 'per_day' => $left(86400)],
+        ];
     }
 
     /**

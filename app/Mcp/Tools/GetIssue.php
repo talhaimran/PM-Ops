@@ -22,17 +22,20 @@ class GetIssue extends Tool
 
     public function handle(Request $request, IssueService $issues): Response
     {
-        $request->validate(['issue' => 'required|string']);
+        $data = $request->validate(['issue' => 'required|string', 'fields' => 'nullable|string|max:500']);
         $issue = $issues->loadFull($issues->resolve($request->user(), $request->get('issue')));
 
         return $this->result(
             "{$issue->key} [{$issue->type->value}, {$issue->column->name}, {$issue->priority->value}]: {$issue->title}",
-            new IssueResource($issue),
+            (new IssueResource($issue))->fields($data['fields'] ?? null),
         );
     }
 
     public function schema(JsonSchema $schema): array
     {
-        return ['issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required()];
+        return [
+            'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
+            'fields' => $schema->string()->description('Comma-separated keys to return, e.g. "title,status,comments"; key is always included.'),
+        ];
     }
 }

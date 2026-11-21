@@ -23,17 +23,21 @@ class MyIssues extends Tool
 
     public function handle(Request $request, DashboardService $dashboard): Response
     {
-        $limit = $request->validate(['limit' => 'nullable|integer|min:1|max:50'])['limit'] ?? 25;
+        $data = $request->validate(['limit' => 'nullable|integer|min:1|max:50', 'fields' => 'nullable|string|max:500']);
+        $limit = $data['limit'] ?? 25;
         $issues = $dashboard->myIssues($request->user(), $limit);
 
         return $this->result(
             "You have {$issues->count()} open assigned ".Str::plural('issue', $issues->count()).($issues->count() === $limit ? " (showing the first {$limit})" : '').'.',
-            IssueCardResource::collection($issues)->resolve(),
+            IssueCardResource::collectionWith($issues, $data['fields'] ?? null)->resolve(),
         );
     }
 
     public function schema(JsonSchema $schema): array
     {
-        return ['limit' => $schema->integer()->min(1)->max(50)->description('Default 25.')];
+        return [
+            'limit' => $schema->integer()->min(1)->max(50)->description('Default 25.'),
+            'fields' => $schema->string()->description('Comma-separated keys to return, e.g. "title,status"; key is always included.'),
+        ];
     }
 }

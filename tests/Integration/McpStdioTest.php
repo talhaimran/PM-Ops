@@ -61,3 +61,25 @@ test('stdio server refuses to start without a valid token', function () {
     expect($result->successful())->toBeFalse()
         ->and($result->errorOutput().$result->output())->toContain('PM_MCP_TOKEN');
 });
+
+test('stdio server answers whoami as the agent, with its limits', function () {
+    $user = User::factory()->create(['name' => 'Ada']);
+    makeProject($user, 'WEB');
+    $token = makeAgent($user, AgentLevel::Read, ['WEB'], 'stdio-reader')[1];
+
+    [$result, $responses] = runStdio([
+        ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'initialize', 'params' => ['protocolVersion' => '2025-06-18', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pest', 'version' => '1']]],
+        ['jsonrpc' => '2.0', 'method' => 'notifications/initialized'],
+        ['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'whoami', 'arguments' => (object) []]],
+        ['jsonrpc' => '2.0', 'id' => 3, 'method' => 'tools/call', 'params' => ['name' => 'get_updates', 'arguments' => (object) []]],
+    ], ['PM_MCP_TOKEN' => $token]);
+
+    $text = $responses[2]['result']['content'][0]['text'];
+    $me = json_decode(substr($text, strpos($text, "\n\n") + 2), true);
+
+    expect($result->successful())->toBeTrue($result->errorOutput())
+        ->and($me['agent']['name'])->toBe('stdio-reader')->and($me['agent']['level'])->toBe('read')
+        ->and($me['owner']['name'])->toBe('Ada')->and($me['projects'])->toBe(['WEB'])
+        ->and($me['rate_limit']['per_minute']['limit'])->toBe(config('pm.api_rate_limit'))
+        ->and($responses[3]['result']['content'][0]['text'])->toContain('"updates":[]');
+});

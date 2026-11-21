@@ -15,6 +15,8 @@ class IssueListRequest extends BoardFilterRequest
             'sort' => ['nullable', Rule::in(self::sorts())],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],
+            'cursor' => ['nullable', 'string', 'max:100'],
+            'fields' => ['nullable', 'string', 'max:500'],
             'project' => ['nullable', 'string', 'max:10'],
         ];
     }

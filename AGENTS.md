@@ -13,7 +13,7 @@ Connection setup (tokens, Claude Code, Claude Desktop) is in the [README](README
 - **A token belongs to one workspace.** It sees only the projects and people of the workspace it was made in; another workspace's projects look like they don't exist. A human makes one agent per workspace in Settings → Agents. If you were removed from the workspace, the token stops working; if the workspace is scheduled for deletion, every call returns 403 saying so.
 - **Workspace Owners and Admins see every project, read-only, until they join it.** Writing to a project you haven't joined returns 403 `You haven't joined WEB. Join it as Admin to make changes.` Ask the human to join it in the web app.
 - **Plan limits are hard stops.** Adding a project, a person or an invitation past the workspace's plan returns 403 with `"error": "plan_limit"` (REST) or a tool error (MCP), e.g. `Your plan allows 1 project. Upgrade to add more.` Don't retry; tell the human. On REST the body also has `limit`, `allowed`, `current` and `upgrade_url`.
-- **Results are a one-line summary followed by compact JSON.** Lists are paginated (`page`, `per_page` up to 50); the summary says when to pass `page=N`.
+- **Results are a one-line summary followed by compact JSON.** Lists are paginated (`per_page` up to 50). Walk one with `cursor`: pass the `next_cursor` from `meta` of the previous answer (it is `null` on the last page); `page=N` still works. `fields` (comma-separated top-level keys, e.g. `fields: "title,status"`) trims `get_issue`, `search_issues` and `my_issues`; `key` always stays, and an unknown name errors with the valid ones.
 - **Everything you do is logged** on the issue as "via mcp" with your agent's name, so humans can see what an agent changed.
 
 ## Data model
@@ -41,16 +41,18 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 
 | Tool | What it does | Required | Optional |
 |---|---|---|---|
-| `list_projects` | Projects you're in, with your role | | page, per_page |
-| `get_project` | One project with members | project | |
+| `list_projects` | Projects you're in, with your role | | page, per_page, cursor |
+| `get_project` | One project with members and `agent_instructions` (the admins' notes for agents; follow them) | project | |
+| `whoami` | Your agent (name, level, status), its owner, the workspace, your projects (or `"all"`) and the rate limit left per minute and per day | | |
+| `get_updates` | How your approval requests ended (approved, rejected, expired, stale), oldest first, with who decided and why. Pass the returned `next_cursor` to get only newer ones; REST: `GET /api/v1/me/updates` | | cursor, per_page |
 | `create_project` | People only: agents get "Only people can change project settings. Do this in the web app." | key, name | description |
 | `update_project` | People only (as above) | project | name, description |
 | `delete_project` | People only (as above) | project, confirm | |
 | `create_issue` | Create an issue, sub-task (`parent`) or epic | project, title | description, type, priority, status, assignee, labels, story_points, due_date, epic, parent, sprint |
-| `get_issue` | Issue with sub-tasks, epic issues, comments and `pending_approvals` | issue | |
+| `get_issue` | Issue with sub-tasks, epic issues, comments and `pending_approvals` | issue | fields |
 | `update_issue` | Change only the fields you send; `null` clears. A status of the last column (Done) waits for a person's approval | issue | title, description, type, priority, status, assignee, labels, story_points, due_date, epic, parent, sprint, reason |
 | `delete_issue` | Delete an issue and its sub-tasks. Soft: they disappear from every tool and response; a person can restore them in the web app for 30 days | issue, confirm | |
-| `get_issue_activity` | Change history, newest first | issue | page, per_page |
+| `get_issue_activity` | Change history, newest first | issue | page, per_page, cursor |
 | `add_comment` | Markdown comment | issue, body | |
 | `update_comment` | Edit your own comment | comment_id, body | |
 | `delete_comment` | Delete your comment (admins: any). Soft, like issues | comment_id | |
@@ -59,7 +61,7 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `move_issue` | Change status and/or position on the board. Moving to the last column (Done) waits for a person's approval | issue | status, position, after, reason |
 | `list_columns` | Columns (= statuses) with counts | project | |
 | `create_column` / `update_column` / `delete_column` | People only (as above) | project (+ name or column) | position, name, move_issues_to |
-| `list_sprints` | Sprints with dates and points | project | state, page |
+| `list_sprints` | Sprints with dates and points | project | state, page, per_page, cursor |
 | `create_sprint` | Planned sprint (default name "WEB Sprint N") | project | name, goal, start_date, end_date |
 | `update_sprint` | Rename or re-date (not completed sprints) | project, sprint | name, goal, start_date, end_date |
 | `delete_sprint` | Delete a planned sprint; its issues go to the backlog | project, sprint | |
@@ -67,8 +69,8 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `complete_sprint` | Close the active sprint and move unfinished issues | project, sprint, move_open_issues_to, confirm | |
 | `get_backlog` | Open sprints and backlog in rank order | project | |
 | `rank_backlog` | Reorder within, or move between, backlog and sprints | issue | sprint, position, after |
-| `search_issues` | Filter and sort issues across projects | | q, project, assignee, type, priority, label, sprint, sort, page, per_page |
-| `my_issues` | Your open assigned issues, by priority then due date | | limit |
+| `search_issues` | Filter and sort issues across projects | | q, project, assignee, type, priority, label, sprint, sort, page, per_page, cursor, fields |
+| `my_issues` | Your open assigned issues, by priority then due date | | limit, fields |
 | `project_summary` | Counts per status and type, open/overdue, sprint progress | project | |
 | `bulk_create_issues` | Up to 50 creates, all or nothing | project, issues[] | |
 | `bulk_update_issues` | Up to 50 updates by key, all or nothing (Done waits for approval, as above) | updates[] | |
@@ -82,6 +84,7 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 ## Common workflows
 
 **Get oriented**
+0. `whoami` once: it shows your level, your projects and how much rate limit you have left.
 1. `list_projects`, then read `project://WEB` (or `get_project` + `list_columns` + `list_labels`).
 2. `project_summary {project: "WEB"}` for status counts and the active sprint.
 3. `my_issues` for what's assigned to you.
@@ -97,7 +100,7 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 
 **Work an issue:** `move_issue {issue: "WEB-12", status: "In Progress"}`, then `add_comment` with progress notes, then `move_issue {issue: "WEB-12", status: "Done", reason: "PR merged, checks green"}` (or whatever the last column is called).
 
-**Done needs a person.** An agent's move to the last column doesn't happen at once: it opens an approval request and answers `pending_approval` ("WEB-12 needs a person's approval to move to Done (request 41, expires …)"; REST answers 202). Asking again returns the same request. Your owner or a project admin approves or rejects it in the web app; `get_issue` lists the requests still waiting. Requests expire after 7 days; then ask again. Agents can't create issues directly in the last column. Project settings, columns, members and invitations are people-only.
+**Done needs a person.** An agent's move to the last column doesn't happen at once: it opens an approval request and answers `pending_approval` ("WEB-12 needs a person's approval to move to Done (request 41, expires …)"; REST answers 202). Asking again returns the same request. Your owner or a project admin approves or rejects it in the web app; `get_issue` lists the requests still waiting. `get_updates` (REST `GET /api/v1/me/updates`) tells you how they ended: call it now and then and keep the last `next_cursor`. Requests expire after 7 days; then ask again. Agents can't create issues directly in the last column. Project settings, columns, members and invitations are people-only.
 
 **Break down a story:** `create_issue` once per sub-task with `parent: "WEB-7"`. Don't nest deeper, since sub-tasks can't have sub-tasks. For many at once, use `bulk_create_issues`.
 
@@ -164,7 +167,21 @@ REST errors use HTTP status codes:
 | 403 | Role, agent level, scope, a paused agent or agents turned off (`agent_paused`, `agents_disabled`), a project you haven't joined, a locked workspace, or a plan limit (`"error": "plan_limit"`); the message says which |
 | 404 | Not found or not visible to you; the message lists what you can see |
 | 422 | Invalid input; `errors.field` lists the valid options. Bulk errors are keyed `issues.3.status` / `updates.1.key` |
-| 429 | Rate limited per token, per minute and per day; wait for `Retry-After` |
+| 429 | Rate limited per agent, per minute and per day; wait for `Retry-After` seconds (`whoami` or `GET /api/v1/me` shows what is left) |
+
+## Project instructions
+
+Each project can carry `agent_instructions`: notes its admins wrote for agents ("always fill Acceptance criteria; bugs need a Severity"). `get_project` (or `GET /api/v1/projects/WEB`) returns them, `null` when there are none. Read them before you create or edit issues in a project, and follow them. Only people edit them, in the project's settings.
+
+## For coding agents (paste into your repo's AGENTS.md or CLAUDE.md)
+
+```markdown
+## Issue tracking (PmOps)
+- Work on one issue at a time and put its key in the branch name and every commit, e.g. `WEB-12-fix-checkout`.
+- Before starting, `get_issue` it and `get_project` for the project's agent instructions; move it to In Progress.
+- When you finish, `add_comment` on the issue with a short summary (what changed, the PR link) and move it to In Review.
+  Moving to Done needs a person's approval; ask with `reason`, then check `get_updates`.
+```
 
 ## Etiquette for agents
 

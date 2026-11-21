@@ -7,6 +7,7 @@ use App\Http\Requests\Sprints\CompleteSprintRequest;
 use App\Http\Requests\Sprints\SprintRequest;
 use App\Http\Requests\Sprints\StartSprintRequest;
 use App\Http\Resources\SprintResource;
+use App\Services\Pagination;
 use App\Services\ProjectService;
 use App\Services\SprintService;
 use Illuminate\Http\Request;
@@ -25,8 +26,9 @@ class SprintController extends Controller
         $query = $this->sprints->withStats($project->sprints()->getQuery(), $project)
             ->when($request->query('state'), fn ($q, $state) => $q->where('state', $state))
             ->orderByDesc('id');
+        [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'));
 
-        return SprintResource::collection($query->paginate(min($request->integer('per_page', 25), 100)));
+        return Pagination::collection(SprintResource::class, $query->paginate($perPage, page: $page));
     }
 
     /** Create a planned sprint. Name defaults to "{KEY} Sprint N". */

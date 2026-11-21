@@ -37,6 +37,11 @@ class ApprovalRequest extends Model
         return $this->belongsTo(Agent::class);
     }
 
+    public function decider(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'decided_by');
+    }
+
     public function owner(): BelongsTo
     {
         return $this->belongsTo(User::class, 'owner_user_id');

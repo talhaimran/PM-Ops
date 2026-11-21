@@ -62,6 +62,10 @@ function isolationRouteCases(): array
         'POST api/v1/issues/{key}/move' => ['api/v1/issues/{I}/move', ['status' => '{COLN}']],
         'POST api/v1/issues/{key}/rank' => ['api/v1/issues/{I}/rank', ['sprint' => '{SN}']],
         'GET api/v1/me/issues' => ['api/v1/me/issues', []],
+        // Take no id: whoami names only the token's own workspace; updates are only the calling agent's, in A.
+        // Not compared: the rate-limit counter it reports differs between any two calls.
+        'GET api/v1/me' => ['api/v1/me', [], false],
+        'GET api/v1/me/updates' => ['api/v1/me/updates', []],
         'GET api/v1/projects' => ['api/v1/projects', []],
         // B has OPS too: creating it in A must work (keys are unique per workspace) and reveal nothing.
         'POST api/v1/projects' => ['api/v1/projects', ['key' => '{P}', 'name' => 'x'], false],
@@ -237,6 +241,8 @@ function isolationToolCases(): array
         Tools\RankBacklog::class => ['issue' => '{I}', 'sprint' => '{SN}'],
         Tools\SearchIssues::class => ['q' => 'secret'],
         Tools\MyIssues::class => [],
+        Tools\Whoami::class => [],
+        Tools\GetUpdates::class => [],
         Tools\ProjectSummary::class => ['project' => '{P}'],
         Tools\BulkCreateIssues::class => ['project' => '{P}', 'issues' => [['title' => 'x']]],
         Tools\BulkUpdateIssues::class => ['updates' => [['key' => '{I}', 'title' => 'x']]],
