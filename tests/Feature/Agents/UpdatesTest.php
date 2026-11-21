@@ -28,8 +28,11 @@ function askDone(string $token, int $n): int
     return asToken($token)->postJson("/api/v1/issues/WEB-{$n}/move", ['status' => 'Done'])->assertStatus(202)->json('approval_request.id');
 }
 
+/** Polls a second later: updates are only read once their second is complete. */
 function updatesFor(string $token, string $query = '')
 {
+    test()->travel(1)->seconds();
+
     return asToken($token)->getJson('/api/v1/me/updates'.$query)->assertOk();
 }
 
@@ -132,9 +135,29 @@ test('get_updates over MCP returns {updates, next_cursor} for the calling agent 
     $id = askDone($this->token, 1);
     app(ApprovalService::class)->reject(ApprovalRequest::findOrFail($id), $this->owner, 'Needs tests');
 
+    $this->travel(1)->seconds();
     Auth::setUser($this->owner->fresh()->withAccessToken($this->agent->token()->sole()));
     PmServer::tool(GetUpdates::class)->assertOk()->assertSee(['"kind":"approval.rejected"', '"issue":"WEB-1"', '"note":"Needs tests"', '"next_cursor":"']);
 
     Auth::setUser($this->owner->fresh()->withAccessToken($this->other->token()->sole()));
     PmServer::tool(GetUpdates::class)->assertOk()->assertSee(['"updates":[]'])->assertDontSee('WEB-1');
+});
+
+test('an outcome is only read once its second is complete, so a late-decided lower id is never skipped', function () {
+    $this->freezeTime();
+    $high = askDone($this->token, 2);
+    $low = askDone($this->token, 1);
+    [$low, $high] = [min($low, $high), max($low, $high)];
+    app(ApprovalService::class)->reject(ApprovalRequest::findOrFail($high), $this->owner, null);
+
+    // (a) decided "now": not returned yet, and no cursor is handed out for the open second.
+    $first = asToken($this->token)->getJson('/api/v1/me/updates')->assertOk()->json();
+    expect($first['data'])->toBe([])->and($first['meta']['next_cursor'])->toBeNull();
+
+    // (b) the lower id is decided in the same second, after that poll.
+    app(ApprovalService::class)->reject(ApprovalRequest::findOrFail($low), $this->owner, null);
+    $this->travel(1)->seconds();
+
+    $ids = collect(asToken($this->token)->getJson('/api/v1/me/updates')->json('data'))->pluck('approval_request_id')->all();
+    expect($ids)->toBe([$low, $high]);
 });

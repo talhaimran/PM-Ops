@@ -180,7 +180,7 @@ class ApprovalService
      * A-L3: how $agent's requests ended, oldest first, after `cursor` (a position, not a page: pass back the last
      * next_cursor to poll). Only that agent's own requests, in projects its owner can still reach. A request's last
      * change is its end, so updated_at is when it happened; ties break by id.
-     * shortcut: a request ended in the same second as the cursor, with a lower id than the cursor's, is missed; add an events table if that matters.
+     * Only complete seconds are read (updated_at before this second), so an outcome can't land behind a cursor: it shows up at most ~1s late, never skipped.
      *
      * @return array{updates: list<array>, next_cursor: ?string}
      */
@@ -192,7 +192,7 @@ class ApprovalService
         [$at, $id] = $cursor ? $this->decodeUpdateCursor($cursor) : [null, 0];
         $ended = collect([ApprovalStatus::Approved, ApprovalStatus::Rejected, ApprovalStatus::Expired, ApprovalStatus::Stale])->map->value->all();
 
-        $rows = ApprovalRequest::where('agent_id', $agent->id)->whereIn('status', $ended)
+        $rows = ApprovalRequest::where('agent_id', $agent->id)->whereIn('status', $ended)->where('updated_at', '<', now()->startOfSecond())
             ->whereIn('issue_id', Issue::withTrashed()->whereIn('project_id', $user->accessibleProjects()->select('projects.id'))->select('issues.id'))
             ->when($at, fn ($q) => $q->where(fn ($q) => $q->where('updated_at', '>', $at)->orWhere(fn ($q) => $q->where('updated_at', $at)->where('id', '>', $id))))
             ->with(['issue' => fn ($q) => $q->withTrashed(), 'issue.project', 'decider:id,name'])
