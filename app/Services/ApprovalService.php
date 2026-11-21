@@ -217,7 +217,7 @@ class ApprovalService
     private function decodeUpdateCursor(string $cursor): array
     {
         $parts = explode('.', (string) base64_decode(strtr($cursor, '-_', '+/'), true));
-        if (count($parts) !== 2 || ! ctype_digit($parts[0]) || ! ctype_digit($parts[1])) {
+        if (count($parts) !== 2 || ! ctype_digit($parts[0]) || ! ctype_digit($parts[1]) || strlen($parts[0]) > 10 || strlen($parts[1]) > 18 || (int) $parts[0] > now()->timestamp) {
             throw ValidationException::withMessages(['cursor' => 'Invalid cursor. Pass the next_cursor from the previous get_updates response unchanged, or leave it out to start from the beginning.']);
         }
 

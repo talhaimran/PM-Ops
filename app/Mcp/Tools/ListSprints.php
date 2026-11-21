@@ -25,7 +25,7 @@ class ListSprints extends Tool
 
     public function handle(Request $request, ProjectService $projects, SprintService $sprints): Response
     {
-        $data = $request->validate(['project' => 'required|string', 'state' => 'nullable|in:planned,active,completed', 'page' => 'integer|min:1', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
+        $data = $request->validate(['project' => 'required|string', 'state' => 'nullable|in:planned,active,completed', 'page' => 'integer|min:1|max:10000', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
         $project = $projects->resolve($request->user(), $data['project']);
         [$perPage, $pageNumber] = Pagination::resolve($data['cursor'] ?? null, $data['per_page'] ?? null, $data['page'] ?? null, max: 50);
         $page = $sprints->withStats($project->sprints()->getQuery(), $project)
@@ -41,7 +41,7 @@ class ListSprints extends Tool
         return [
             'project' => $schema->string()->description('Project key, e.g. WEB.')->required(),
             'state' => $schema->string()->enum(SprintState::class),
-            'page' => $schema->integer()->min(1),
+            'page' => $schema->integer()->min(1)->max(10000),
         ];
     }
 }

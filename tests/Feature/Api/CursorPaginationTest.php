@@ -88,11 +88,12 @@ test('MCP lists take cursor and return next_cursor in meta', function () {
         ->and(collect([$first, $second, $third])->pluck('data')->flatten(1)->pluck('key')->unique()->count())->toBe(60);
 });
 
-test('a cursor is not an access token: a hand-made one is capped at the endpoint max and returns what page and per_page return', function () {
+test('a cursor is not an access token: a hand-made one over the endpoint max is rejected and one within it returns what page and per_page return', function () {
     [, $token] = makeAgent($this->owner);
     $cursor = fn (int $page, int $size) => rtrim(strtr(base64_encode("{$page}.{$size}"), '+/', '-_'), '=');
 
-    expect(count(mcpJson($token, 'search_issues', ['project' => 'WEB', 'cursor' => $cursor(1, 1000)])['data']))->toBe(50);
+    asToken($token, ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'search_issues', 'arguments' => ['project' => 'WEB', 'cursor' => $cursor(1, 1000)]]])
+        ->assertOk()->assertJsonPath('result.isError', true);
 
     $viaCursor = mcpJson($token, 'search_issues', ['project' => 'WEB', 'cursor' => $cursor(3, 7)])['data'];
     $viaPage = mcpJson($token, 'search_issues', ['project' => 'WEB', 'page' => 3, 'per_page' => 7])['data'];
