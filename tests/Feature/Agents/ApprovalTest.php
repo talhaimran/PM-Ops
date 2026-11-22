@@ -187,6 +187,16 @@ test("the agent's owner approves: the issue moves as the owner, with the agent a
         ->where('activity.0.changes', ['status' => ['from' => 'In Review', 'to' => 'Done']]));
 });
 
+test('REST and MCP activity lists show the agent behind an approved move', function () {
+    $id = askForDone($this, 'move_issue');
+    $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
+    $agent = ['name' => "Talha's agent", 'owner' => 'Talha Imran'];
+
+    asToken($this->plain)->getJson('/api/v1/issues/WEB-1/activity')->assertOk()
+        ->assertJsonPath('data.0.action', 'approved')->assertJsonPath('data.0.agent', $agent);
+    expect(mcpJson($this->plain, 'get_issue_activity', ['issue' => 'WEB-1'])['data'][0])->toMatchArray(['action' => 'approved', 'agent' => $agent]);
+});
+
 test('undo after approving puts the issue back', function () {
     $id = askForDone($this, 'move_issue');
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"));

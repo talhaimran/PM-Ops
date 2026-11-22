@@ -97,7 +97,10 @@ class AgentService
             $this->ensureNotRevoked($agent);
             $before = ['name' => $agent->name, 'level' => $agent->permission_level->value, 'projects' => $this->projectKeys($agent)];
             if (isset($data['name'])) {
-                $this->ensureUniqueName($this->agentsOf($agent->workspace_id, $agent->owner_user_id)->whereKeyNot($agent->id), trim($data['name']));
+                // Skipped when unchanged, so an agent that migrated with a duplicate name can still be edited.
+                if (trim($data['name']) !== $agent->name) {
+                    $this->ensureUniqueName($this->agentsOf($agent->workspace_id, $agent->owner_user_id)->whereKeyNot($agent->id), trim($data['name']));
+                }
                 $agent->name = trim($data['name']);
             }
             if (array_key_exists('description', $data)) {
@@ -279,7 +282,8 @@ class AgentService
     }
 
     /**
-     * Refuses a paused or revoked agent (REST, MCP over HTTP, and every stdio tool call). Re-reads the agent, so a
+     * Refuses a paused or revoked agent, one in a workspace scheduled for deletion, or one whose owner lacks the
+     * workspace's required two-factor (REST, MCP over HTTP, OAuth and every stdio tool call). Re-reads the agent, so a
      * long-lived process sees a pause, revoke or level change at its next call. Bumps last_used_at at most once a minute.
      */
     public function ensureUsable(?Agent $agent): void
@@ -295,6 +299,10 @@ class AgentService
 
         $deny = fn (int $status, string $error, string $message) => throw new HttpResponseException(response()->json(['error' => $error, 'message' => $message], $status));
         $workspace = $agent->workspace()->first();
+        // The same answer ResolveTokenWorkspace gives; this is what stops a long-lived stdio server.
+        if ($workspace?->deletion_scheduled_at) {
+            throw new HttpResponseException(response()->json(['message' => app(WorkspaceService::class)->lockedMessage($workspace, $agent->owner()->first())], 403));
+        }
         if ($workspace && ! $workspace->setting('agents_enabled')) {
             $deny(403, 'agents_disabled', self::disabledMessage($workspace));
         }
@@ -303,6 +311,10 @@ class AgentService
             AgentStatus::Revoked => $deny(401, 'agent_revoked', "{$agent->label()} was revoked. Its owner can create a new agent in Settings → Agents."),
             AgentStatus::Active => null,
         };
+        // Spec 8: the owner of an agent in a require_2fa workspace needs two-factor, like any member.
+        if ($workspace?->setting('require_2fa') && ! ($owner = $agent->owner()->first())?->hasEnabledTwoFactorAuthentication()) {
+            $deny(403, 'two_factor_required', "{$workspace->name} requires two-factor sign-in. ".Str::before(trim($owner?->name ?? 'The owner'), ' ').' must turn it on before their agents can work.');
+        }
 
         if (! $agent->last_used_at?->gt(now()->subMinute())) {
             // A query, not save(): last use is not an edit, so updated_at stays.

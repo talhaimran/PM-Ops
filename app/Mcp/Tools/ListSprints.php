@@ -42,6 +42,8 @@ class ListSprints extends Tool
             'project' => $schema->string()->description('Project key, e.g. WEB.')->required(),
             'state' => $schema->string()->enum(SprintState::class),
             'page' => $schema->integer()->min(1)->max(10000),
+            'cursor' => $schema->string()->description('next_cursor from the previous page; use instead of page.'),
+            'per_page' => $schema->integer()->min(1)->max(50)->description('Items per page, default 25, max 50.'),
         ];
     }
 }

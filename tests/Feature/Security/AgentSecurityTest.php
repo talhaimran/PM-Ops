@@ -26,6 +26,8 @@ use App\Services\LabelService;
 use App\Services\ProjectService;
 use App\Services\SprintService;
 use App\Services\WorkspaceMemberService;
+use App\Services\WorkspaceService;
+use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\PersonalAccessToken;
 
 /*
@@ -280,4 +282,80 @@ test('scan F2: an agent scoped to two projects stays active after the first is d
 
     app(ProjectService::class)->delete($this->api->fresh());
     expect($agent->fresh()->status)->toBe(AgentStatus::Revoked);
+});
+
+test('final review: an agent edits only its own comments; a person only their own hand-typed ones', function () {
+    $issue = Issue::firstOrFail();
+    $typed = app(CommentService::class)->add($issue, $this->owner, 'Typed by Talha');
+    [, $a] = makeAgent($this->owner, AgentLevel::Write, name: 'agent-a');
+    [, $b] = makeAgent($this->owner, AgentLevel::Write, name: 'agent-b');
+    $byA = asToken($a)->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'From A'])->assertCreated()->json('data.id');
+
+    // REST: the owner's Write agent can't rewrite the owner's own words, nor a sibling agent's.
+    asToken($a)->patchJson("/api/v1/comments/{$typed->id}", ['body' => 'forged'])->assertForbidden();
+    asToken($b)->patchJson("/api/v1/comments/{$byA}", ['body' => 'forged'])->assertForbidden();
+    // MCP over HTTP: same.
+    asToken($a, ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
+        'params' => ['name' => 'update_comment', 'arguments' => ['comment_id' => $typed->id, 'body' => 'forged']]])->assertOk()->assertJsonPath('result.isError', true);
+    expect($typed->fresh()->body)->toBe('Typed by Talha')->and(Comment::find($byA)->body)->toBe('From A');
+
+    // An agent edits its own.
+    asToken($a)->patchJson("/api/v1/comments/{$byA}", ['body' => 'A again'])->assertOk();
+
+    // On the web the person edits their typed comment, not their agent's.
+    $this->flushHeaders();
+    app('auth')->forgetGuards();
+    $this->actingAs($this->owner)->get(w('/issues/WEB-1'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('issue.comments.0.body', 'Typed by Talha')->where('issue.comments.0.can_edit', true)
+        ->where('issue.comments.1.body', 'A again')->where('issue.comments.1.can_edit', false));
+    $this->patchJson(w("/comments/{$byA}"), ['body' => 'person on agent'])->assertForbidden();
+    $this->patchJson(w("/comments/{$typed->id}"), ['body' => 'Typed again'])->assertRedirect();
+    expect($typed->fresh()->body)->toBe('Typed again');
+});
+
+test('final review: a migrated duplicate-named agent can still be edited when its name is unchanged', function () {
+    [$one] = makeAgent($this->owner, AgentLevel::Write, name: 'twin');
+    [$two] = makeAgent($this->owner, AgentLevel::Write, name: 'other');
+    Agent::whereKey($two->id)->update(['name' => 'twin']);
+
+    $this->agents->update($two->fresh(), $this->owner, ['name' => 'twin', 'description' => 'edited']);
+
+    expect($two->fresh()->description)->toBe('edited');
+    // A real rename onto a taken name is still refused.
+    expect(fn () => $this->agents->update($one->fresh(), $this->owner, ['name' => 'twin ']))->not->toThrow(ValidationException::class);
+    makeAgent($this->owner, AgentLevel::Write, name: 'taken');
+    expect(fn () => $this->agents->update($one->fresh(), $this->owner, ['name' => 'taken']))->toThrow(ValidationException::class);
+});
+
+test('final review: a workspace scheduled for deletion stops agents on REST, MCP over HTTP and a running stdio server', function () {
+    [, $plain] = makeAgent($this->owner, AgentLevel::Write);
+    LocalPmServer::authenticate($plain);
+    PmServer::tool(ListProjects::class)->assertOk();
+
+    app(WorkspaceService::class)->scheduleDeletion($this->ws, $this->owner, 'acme');
+    $message = app(WorkspaceService::class)->lockedMessage($this->ws->fresh(), $this->owner);
+
+    asToken($plain)->getJson('/api/v1/projects')->assertForbidden()->assertJsonPath('message', $message);
+    mcpToolsList($plain)->assertForbidden()->assertJsonPath('message', $message);
+    PmServer::tool(ListProjects::class)->assertHasErrors([$message]);
+});
+
+test('final review: with require_2fa on, an owner without two-factor has every agent refused: REST, MCP, stdio and OAuth', function () {
+    [$agent, $plain] = makeAgent($this->owner, AgentLevel::Write);
+    $oauth = oauthConnect($this->owner, $agent->id);
+    LocalPmServer::authenticate($plain);
+    PmServer::tool(ListProjects::class)->assertOk();
+
+    $this->ws->forceFill(['settings' => [...$this->ws->settings ?? [], 'require_2fa' => true]])->save();
+    $refused = ['error' => 'two_factor_required', 'message' => 'Acme requires two-factor sign-in. Talha must turn it on before their agents can work.'];
+
+    asToken($plain)->getJson('/api/v1/projects')->assertForbidden()->assertExactJson($refused);
+    mcpToolsList($plain)->assertForbidden()->assertExactJson($refused);
+    mcpToolsList($oauth['access_token'])->assertForbidden()->assertExactJson($refused);
+    PmServer::tool(ListProjects::class)->assertHasErrors([$refused['message']]);
+
+    enableTwoFactor($this->owner);
+    asToken($plain)->getJson('/api/v1/projects')->assertOk();
+    mcpToolsList($oauth['access_token'])->assertOk();
+    PmServer::tool(ListProjects::class)->assertOk();
 });
