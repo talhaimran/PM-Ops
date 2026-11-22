@@ -3,6 +3,9 @@
 namespace App\Providers;
 
 use App\Enums\Entitlement;
+use App\Http\Controllers\Web\OAuthController;
+use App\Mcp\OAuth\AgentAccessTokenRepository;
+use App\Mcp\OAuth\AgentAuthCodeRepository;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\AuditLogger;
@@ -13,15 +16,20 @@ use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Markdown;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Laravel\Passport\Bridge\AccessTokenRepository;
+use Laravel\Passport\Bridge\AuthCodeRepository;
+use Laravel\Passport\Passport;
 use Laravel\Sanctum\PersonalAccessToken;
 
 class AppServiceProvider extends ServiceProvider
@@ -32,6 +40,12 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(CurrentWorkspace::class);
+
+        // A-D3: OAuth for MCP clients. Only the routes in routes/ai.php; tokens carry the agent picked on consent.
+        Passport::ignoreRoutes();
+        $this->app->bind(AuthCodeRepository::class, AgentAuthCodeRepository::class);
+        $this->app->bind(AccessTokenRepository::class, AgentAccessTokenRepository::class);
+        $this->app->when(OAuthController::class)->needs(StatefulGuard::class)->give(fn () => Auth::guard('web'));
     }
 
     /**
@@ -47,15 +61,18 @@ class AppServiceProvider extends ServiceProvider
         // Every token belongs to the workspace it was made in (spec 7.0a); one made outside a workspace is never accepted.
         PersonalAccessToken::creating(fn (PersonalAccessToken $token) => $token->workspace_id ??= app(CurrentWorkspace::class)->id());
 
+        Passport::authorizationView(OAuthController::consent(...));
+        // Every call re-checks the agent anyway; short access tokens keep a leaked one short-lived. Clients refresh.
+        Passport::tokensExpireIn(now()->addHour());
+
         // Per-agent API budget (spec 7.0c, 8 A3): api_per_minute and api_per_day of the token's workspace, else
         // PM_API_RATE_LIMIT per minute and no daily limit. Keyed by agent, so a regenerated token keeps the count and
-        // another agent of the same owner isn't slowed. Runs before ResolveTokenWorkspace, so it reads the token.
+        // another agent of the same owner isn't slowed. Runs before ResolveTokenWorkspace, so it reads the token's agent.
         RateLimiter::for('api', function (Request $request) {
             $user = $request->user();
-            $token = $user?->currentAccessToken();
-            $token = $token instanceof PersonalAccessToken ? $token : null;
-            $by = $token?->agent_id ? "agent:{$token->agent_id}" : ($user ? "user:{$user->id}" : "ip:{$request->ip()}");
-            $workspace = $token?->workspace_id ? Workspace::find($token->workspace_id) : null;
+            $agent = $user?->agent();
+            $by = $agent ? "agent:{$agent->id}" : ($user ? "user:{$user->id}" : "ip:{$request->ip()}");
+            $workspace = $agent ? Workspace::find($agent->workspace_id) : null;
             $entitlements = app(Entitlements::class);
             $perMinute = ($workspace ? $entitlements->get($workspace, Entitlement::ApiPerMinute) : null) ?? (int) config('pm.api_rate_limit');
             $perDay = $workspace ? $entitlements->get($workspace, Entitlement::ApiPerDay) : null;

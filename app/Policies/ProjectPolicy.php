@@ -8,7 +8,6 @@ use App\Models\Workspace;
 use App\Services\CurrentWorkspace;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Gate;
-use Laravel\Sanctum\PersonalAccessToken;
 
 class ProjectPolicy
 {
@@ -114,7 +113,7 @@ class ProjectPolicy
     /** Owner's role first ($allowed), then A-D2: any agent token is refused, whatever its level. */
     private function peopleOnly(User $user, Response $allowed): Response
     {
-        return $allowed->denied() || ! $user->currentAccessToken() instanceof PersonalAccessToken
+        return $allowed->denied() || ! $user->viaToken()
             ? $allowed
             : Response::deny(self::PEOPLE_ONLY);
     }

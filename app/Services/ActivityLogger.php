@@ -30,7 +30,8 @@ class ActivityLogger
             'action' => $action,
             'changes' => $changes,
             'via' => self::via($user),
-            'token_name' => self::token($user)?->name,
+            // An OAuth token has no name of its own: it is the agent's.
+            'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
             'agent_id' => $approval?->agent_id ?? $user?->agent()?->id,
         ]);
     }
@@ -46,10 +47,10 @@ class ActivityLogger
         }
     }
 
-    /** How the change came in: mcp (set by the MCP server), api (a personal access token), else web. AuditLogger uses it too. */
+    /** How the change came in: mcp (set by the MCP server), api (a bearer token), else web. AuditLogger uses it too. */
     public static function via(?User $user): string
     {
-        return app()->bound(self::VIA_BINDING) ? app(self::VIA_BINDING) : (self::token($user) ? 'api' : 'web');
+        return app()->bound(self::VIA_BINDING) ? app(self::VIA_BINDING) : ($user?->viaToken() ? 'api' : 'web');
     }
 
     public static function token(?User $user): ?PersonalAccessToken

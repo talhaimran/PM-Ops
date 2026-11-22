@@ -27,6 +27,7 @@ interface AgentRow {
     owner: { id: number; name: string; email: string };
     last_used_at: string | null;
     expires_at: string | null;
+    connections: string[];
 }
 
 const levels: Record<Level, { label: string; hint: string; tint: string }> = {
@@ -211,6 +212,11 @@ function AgentTable({
                                 <td className="min-w-[12rem] px-3 py-2">
                                     <AgentLabel agent={{ name: a.name, owner: a.owner.name }} />
                                     {a.description && <div className="mt-0.5 text-sm text-muted">{a.description}</div>}
+                                    {a.connections.length > 0 && (
+                                        <div className="mt-0.5 text-sm text-muted">
+                                            Connected: {a.connections.join(', ')}, last used {a.last_used_at ? new Date(a.last_used_at).toLocaleString() : 'never'}
+                                        </div>
+                                    )}
                                 </td>
                                 <td className="px-3 py-2">
                                     <Pill tint={levels[a.level].tint}>{levels[a.level].label}</Pill>

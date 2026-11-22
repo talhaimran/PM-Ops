@@ -28,6 +28,7 @@ composer install
 npm install
 cp .env.example .env
 php artisan key:generate
+php artisan passport:keys    # signing keys for MCP clients' OAuth tokens (storage/oauth-*.key, not committed)
 ```
 
 Create the databases and a user that matches `.env` (`pm_monkey` / `pm_monkey` by default; change both for anything beyond local use):
@@ -197,6 +198,8 @@ The same server (`App\Mcp\Servers\PmServer`, 36 tools plus `issue://{key}` and `
 |---|---|---|
 | HTTP | `POST http://localhost:8000/mcp` (the app must be running) | `Authorization: Bearer <token>` header |
 | stdio | `php artisan mcp:start pm` (the client starts it) | `PM_MCP_TOKEN=<token>` environment variable |
+
+**OAuth (HTTP only).** A client that speaks MCP OAuth (Claude Desktop's and claude.ai's custom connectors, the MCP Inspector) needs no token: add `http://localhost:8000/mcp` as the server URL. It registers itself, opens a consent screen in the browser, and you pick which of your agents (in your current workspace) it acts as, or create "{First name}'s {client} agent" at Read and write. Each connection shows under that agent in Settings → Agents; pausing or revoking the agent stops it. OAuth tokens work on `/mcp` only, not the REST API. In production, set `PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY` instead of the key files if storage isn't persistent.
 
 Use the **absolute path** to `php` (`which php`, e.g. `/opt/homebrew/bin/php`) and to `artisan`, because desktop apps don't inherit your shell `PATH`. The stdio server needs MySQL reachable, but not `php artisan serve`.
 
