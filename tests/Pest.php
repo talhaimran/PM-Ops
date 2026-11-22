@@ -241,8 +241,11 @@ function enableTwoFactor(User $user): array
     return $codes;
 }
 
+/** A redirect URI the default PM_MCP_REDIRECT_DOMAINS allows (claude.ai's connector callback). */
+const OAUTH_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+
 /** Registers an MCP client through laravel/mcp's dynamic client registration, as Claude Desktop does; returns its id. */
-function oauthClient(string $name = 'Claude Desktop', string $redirect = 'https://client.example/callback'): string
+function oauthClient(string $name = 'Claude Desktop', string $redirect = OAUTH_REDIRECT): string
 {
     if (! file_exists(storage_path('oauth-private.key'))) {
         Artisan::call('passport:keys', ['--force' => true]);
@@ -263,7 +266,7 @@ function pkce(): array
 function oauthAuthorizeUrl(string $clientId, string $challenge, array $query = []): string
 {
     return '/oauth/authorize?'.http_build_query([
-        'client_id' => $clientId, 'redirect_uri' => 'https://client.example/callback', 'response_type' => 'code',
+        'client_id' => $clientId, 'redirect_uri' => OAUTH_REDIRECT, 'response_type' => 'code',
         'scope' => 'mcp:use', 'state' => 'state-123', 'code_challenge' => $challenge, 'code_challenge_method' => 'S256', ...$query,
     ]);
 }
@@ -285,7 +288,7 @@ function oauthExchange(string $clientId, string $code, string $verifier)
     app('auth')->forgetGuards();
 
     return test()->postJson('/oauth/token', [
-        'grant_type' => 'authorization_code', 'client_id' => $clientId, 'redirect_uri' => 'https://client.example/callback',
+        'grant_type' => 'authorization_code', 'client_id' => $clientId, 'redirect_uri' => OAUTH_REDIRECT,
         'code_verifier' => $verifier, 'code' => $code,
     ]);
 }

@@ -191,7 +191,11 @@ class AgentService
     public function forOAuthClient(User $user, string $choice, string $clientName): Agent
     {
         if ($choice === 'new') {
-            return $this->create($user, ['name' => self::oauthAgentName($user, $clientName), 'level' => AgentLevel::Write->value])[0];
+            [$agent] = $this->create($user, ['name' => self::oauthAgentName($user, $clientName), 'level' => AgentLevel::Write->value]);
+            // Its only credential is the client's OAuth token; "New token" on the Agents page can add one later.
+            $agent->token()->delete();
+
+            return $agent;
         }
 
         return $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
@@ -228,6 +232,7 @@ class AgentService
             'owner' => ['id' => $agent->owner->id, 'name' => $agent->owner->name, 'email' => $agent->owner->email],
             'mine' => $agent->owner_user_id === $viewer->id,
             'last_used_at' => $agent->last_used_at,
+            'has_token' => $agent->token !== null,
             'expires_at' => $agent->token?->expires_at,
             'created_at' => $agent->created_at,
             'connections' => $connections[$agent->id] ?? [],
@@ -291,7 +296,7 @@ class AgentService
         $deny = fn (int $status, string $error, string $message) => throw new HttpResponseException(response()->json(['error' => $error, 'message' => $message], $status));
         $workspace = $agent->workspace()->first();
         if ($workspace && ! $workspace->setting('agents_enabled')) {
-            $deny(403, 'agents_disabled', "Agents are turned off in {$workspace->name}. An Owner or Admin can turn them on in Settings → Security.");
+            $deny(403, 'agents_disabled', self::disabledMessage($workspace));
         }
         match ($agent->status) {
             AgentStatus::Paused => $deny(403, 'agent_paused', "{$agent->label()} is paused. Its owner or a workspace Admin can resume it in Settings → Agents."),
@@ -305,6 +310,11 @@ class AgentService
             Agent::whereKey($agent->id)->update(['last_used_at' => $agent->last_used_at]);
             $agent->syncOriginal();
         }
+    }
+
+    public static function disabledMessage(Workspace $workspace): string
+    {
+        return "Agents are turned off in {$workspace->name}. An Owner or Admin can turn them on in Settings → Security.";
     }
 
     private function setStatus(Agent $agent, User $actor, AgentStatus $status, string $action): void

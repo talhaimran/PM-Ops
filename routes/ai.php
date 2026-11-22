@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Web\OAuthController;
 use App\Http\Middleware\ResolveTokenWorkspace;
+use App\Mcp\OAuth\RegisterClientController;
 use App\Mcp\Servers\LocalPmServer;
 use App\Mcp\Servers\PmServer;
 use Illuminate\Support\Facades\Route;
@@ -17,10 +18,11 @@ Mcp::local('pm', LocalPmServer::class);
 // A-D3: OAuth for MCP clients. laravel/mcp's discovery and dynamic client registration, and only the Passport
 // endpoints the authorization-code flow needs (Passport's own routes are off, see AppServiceProvider).
 Route::middleware('throttle:60,1')->group(function () {
-    Mcp::oauthRoutes();
+    Mcp::oauthRoutes(registration: false);
+    Route::post('/oauth/register', RegisterClientController::class)->name('mcp.oauth.register');
     Route::post('/oauth/token', [AccessTokenController::class, 'issueToken'])->name('passport.token');
 });
-Route::prefix('oauth')->name('passport.authorizations.')->middleware('web')->group(function () {
+Route::prefix('oauth')->name('passport.authorizations.')->middleware(['web', 'throttle:30,1'])->group(function () {
     Route::get('/authorize', [OAuthController::class, 'authorize'])->name('authorize');
     Route::post('/authorize', [OAuthController::class, 'approve'])->middleware('auth')->name('approve');
     Route::delete('/authorize', [OAuthController::class, 'deny'])->middleware('auth')->name('deny');

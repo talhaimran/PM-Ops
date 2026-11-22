@@ -11,6 +11,7 @@ use App\Services\Entitlements;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Passport\RefreshToken;
 use Laravel\Passport\Token;
+use Laravel\Sanctum\PersonalAccessToken;
 
 // A1/A3 (decision A-D3): MCP clients connect with OAuth; the consent screen picks which of my agents the client acts as.
 
@@ -134,6 +135,11 @@ test('creating an agent on the consent screen makes a Write-level agent named fo
         ->and($agent->workspace_id)->toBe($this->ws->id)
         ->and(AuditLog::where('action', 'agent.created')->where('target_id', $agent->id)->exists())->toBeTrue()
         ->and(mcpJson($tokens['access_token'], 'whoami')['agent']['id'])->toBe($agent->id);
+
+    // Its only credential is the OAuth token: no unused Sanctum token, and no token expiry on the Agents page.
+    expect(PersonalAccessToken::where('agent_id', $agent->id)->exists())->toBeFalse()
+        ->and(collect(app(AgentService::class)->listFor($this->owner, $this->ws))->firstWhere('id', $agent->id))
+        ->toMatchArray(['has_token' => false, 'expires_at' => null, 'connections' => ['Claude Desktop']]);
 });
 
 test('creating an agent on the consent screen counts toward agents_per_user', function () {
@@ -152,7 +158,7 @@ test('denying sends the client back with access_denied and the state', function 
     $authToken = $this->actingAs($this->owner)->get(oauthAuthorizeUrl($clientId, pkce()[1]))->viewData('page')['props']['authToken'];
 
     $location = $this->delete('/oauth/authorize', ['auth_token' => $authToken])->assertRedirect()->headers->get('Location');
-    expect($location)->toStartWith('https://client.example/callback?')->toContain('error=access_denied')->toContain('state=state-123');
+    expect($location)->toStartWith(OAUTH_REDIRECT.'?')->toContain('error=access_denied')->toContain('state=state-123');
 });
 
 test('the Agents page shows which clients an agent is connected through', function () {

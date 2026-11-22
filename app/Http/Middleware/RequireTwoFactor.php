@@ -2,6 +2,8 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\User;
+use App\Models\Workspace;
 use App\Services\CurrentWorkspace;
 use Closure;
 use Illuminate\Http\Request;
@@ -17,11 +19,14 @@ class RequireTwoFactor
 
     public function handle(Request $request, Closure $next): Response
     {
-        $workspace = $this->current->get();
-        if ($workspace->setting('require_2fa') && ! $request->user()->hasEnabledTwoFactorAuthentication()) {
-            return redirect()->route('profile.edit')->with('status', "{$workspace->name} requires two-factor authentication. Turn it on below to continue.");
-        }
+        return self::refuse($this->current->get(), $request->user()) ?? $next($request);
+    }
 
-        return $next($request);
+    /** To the profile to set up two-factor; also used by the OAuth consent screen, which sits outside /{workspace}. */
+    public static function refuse(Workspace $workspace, User $user): ?Response
+    {
+        return $workspace->setting('require_2fa') && ! $user->hasEnabledTwoFactorAuthentication()
+            ? redirect()->route('profile.edit')->with('status', "{$workspace->name} requires two-factor authentication. Turn it on below to continue.")
+            : null;
     }
 }

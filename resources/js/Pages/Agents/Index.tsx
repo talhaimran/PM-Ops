@@ -26,6 +26,7 @@ interface AgentRow {
     projects: string[] | null;
     owner: { id: number; name: string; email: string };
     last_used_at: string | null;
+    has_token: boolean;
     expires_at: string | null;
     connections: string[];
 }
@@ -226,7 +227,7 @@ function AgentTable({
                                     <Pill tint={a.status === 'active' ? 'tint-good' : 'tint-warn'}>{a.status === 'active' ? 'Active' : 'Paused'}</Pill>
                                 </td>
                                 <td className="whitespace-nowrap px-3 py-2 text-muted">{a.last_used_at ? new Date(a.last_used_at).toLocaleString() : 'Never'}</td>
-                                <td className="whitespace-nowrap px-3 py-2 text-muted">{expired ? <span className="font-medium text-t-bad">Expired</span> : when(a.expires_at, 'Never')}</td>
+                                <td className="whitespace-nowrap px-3 py-2 text-muted">{!a.has_token ? 'No token' : expired ? <span className="font-medium text-t-bad">Expired</span> : when(a.expires_at, 'Never')}</td>
                                 <td className="px-3 py-2">
                                     <div className="flex flex-wrap justify-end gap-1">
                                         {mine && (

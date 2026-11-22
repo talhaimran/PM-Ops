@@ -15,19 +15,24 @@ const levelLabels: Record<Level, string> = { read: 'Read only', write: 'Read and
  */
 export default function Authorize({
     client,
+    clientNote,
+    redirectTo,
     workspace,
     agents,
     newAgent,
     authToken,
 }: {
     client: string;
+    clientNote: string;
+    redirectTo: string;
     workspace: string | null;
     agents: { id: number; name: string; level: Level }[];
     newAgent: string;
     authToken: string;
 }) {
     const canCreate = workspace !== null && !agents.some((a) => a.name === newAgent);
-    const form = useForm({ agent: agents[0] ? String(agents[0].id) : canCreate ? 'new' : '' });
+    // Nothing preselected: connecting is a deliberate choice of agent.
+    const form = useForm({ agent: '' });
     // A refused choice comes back to a fresh authorization request (new auth token), so read both from the page.
     const errors = usePage().props.errors as Record<string, string>;
     const approve = (e: FormEvent) => {
@@ -55,6 +60,9 @@ export default function Authorize({
                     <Bot className="h-5 w-5" aria-hidden="true" />
                 </span>
                 <h1 className="break-words text-heading-2xl text-text">Connect {client}</h1>
+                <p className="rounded-item tint-amber px-3 py-2 text-sm text-text">
+                    {clientNote} You&apos;ll be sent back to <strong className="break-all">{redirectTo}</strong>.
+                </p>
                 <p className="text-muted">
                     {workspace ? (
                         <>

@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\ValidationException;
+use Laravel\Passport\AuthCode;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -498,4 +499,15 @@ test('OAuth: the consent screen in A offers only A\'s agents, refuses B\'s, and 
         ->and(json_encode(mcpJson($tokens['access_token'], 'search_issues', ['q' => 'secret'])))->not->toContain(B_MARKER);
     asToken($tokens['access_token'])->getJson('/api/v1/projects')->assertUnauthorized();
     expect(workspaceSnapshot($this->b))->toBe($this->bBefore);
+});
+
+test('OAuth: a consent screen shown in A is never approved in B, even after switching to B', function () {
+    useWorkspace($this->a, $this->ann);
+    $url = oauthAuthorizeUrl(oauthClient(), pkce()[1]);
+    $authToken = $this->actingAs($this->ann)->get($url)->viewData('page')['props']['authToken'];
+    $this->ann->forceFill(['current_workspace_id' => $this->b->id])->save();
+
+    $this->from($url)->post('/oauth/authorize', ['auth_token' => $authToken, 'agent' => $this->annB[0]->id])
+        ->assertSessionHasErrors(['agent' => 'You switched to Bravo after this screen opened. Choose an agent again.']);
+    expect(AuthCode::count())->toBe(0)->and(workspaceSnapshot($this->b))->toBe($this->bBefore);
 });
