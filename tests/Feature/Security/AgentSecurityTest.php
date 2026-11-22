@@ -341,22 +341,15 @@ test('final review: a workspace scheduled for deletion stops agents on REST, MCP
     PmServer::tool(ListProjects::class)->assertHasErrors([$message]);
 });
 
-test('final review: with require_2fa on, an owner without two-factor has every agent refused: REST, MCP, stdio and OAuth', function () {
+test('final review: spec 7.0e, with require_2fa on, an existing agent of an owner without two-factor keeps working: REST, MCP, stdio and OAuth', function () {
     [$agent, $plain] = makeAgent($this->owner, AgentLevel::Write);
     $oauth = oauthConnect($this->owner, $agent->id);
     LocalPmServer::authenticate($plain);
-    PmServer::tool(ListProjects::class)->assertOk();
 
     $this->ws->forceFill(['settings' => [...$this->ws->settings ?? [], 'require_2fa' => true]])->save();
-    $refused = ['error' => 'two_factor_required', 'message' => 'Acme requires two-factor sign-in. Talha must turn it on before their agents can work.'];
 
-    asToken($plain)->getJson('/api/v1/projects')->assertForbidden()->assertExactJson($refused);
-    mcpToolsList($plain)->assertForbidden()->assertExactJson($refused);
-    mcpToolsList($oauth['access_token'])->assertForbidden()->assertExactJson($refused);
-    PmServer::tool(ListProjects::class)->assertHasErrors([$refused['message']]);
-
-    enableTwoFactor($this->owner);
     asToken($plain)->getJson('/api/v1/projects')->assertOk();
+    mcpToolsList($plain)->assertOk();
     mcpToolsList($oauth['access_token'])->assertOk();
     PmServer::tool(ListProjects::class)->assertOk();
 });

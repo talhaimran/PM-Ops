@@ -313,10 +313,7 @@ class AgentService
             AgentStatus::Revoked => $deny(401, 'agent_revoked', "{$agent->label()} was revoked. Its owner can create a new agent in Settings → Agents."),
             AgentStatus::Active => null,
         };
-        // Spec 8: the owner of an agent in a require_2fa workspace needs two-factor, like any member.
-        if ($workspace?->setting('require_2fa') && ! ($owner = $agent->owner()->first())?->hasEnabledTwoFactorAuthentication()) {
-            $deny(403, 'two_factor_required', "{$workspace->name} requires two-factor sign-in. ".Str::before(trim($owner?->name ?? 'The owner'), ' ').' must turn it on before their agents can work.');
-        }
+        // Spec 7.0e: require_2fa doesn't stop existing agents; only creating one needs two-factor (AgentService::create).
 
         if (! $agent->last_used_at?->gt(now()->subMinute())) {
             // A query, not save(): last use is not an edit, so updated_at stays.
