@@ -213,6 +213,16 @@ function asToken(string $token, array $headers = [])
     return test()->withToken($token)->withHeaders($headers);
 }
 
+/** Calls an MCP tool over HTTP as $token's agent; returns the JSON part of its text (after the summary line). */
+function mcpJson(string $token, string $tool, array $arguments = []): array
+{
+    $text = asToken($token, ['Accept' => 'application/json, text/event-stream'])
+        ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => $tool, 'arguments' => (object) $arguments]])
+        ->assertOk()->json('result.content.0.text');
+
+    return json_decode(substr($text, strpos($text, "\n\n") + 2), true, flags: JSON_THROW_ON_ERROR) ?? [];
+}
+
 /** The current code for $user's secret. Fortify refuses a code twice in its window, so tests clear its cache between uses. */
 function otp(User $user): string
 {

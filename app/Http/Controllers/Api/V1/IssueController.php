@@ -12,6 +12,7 @@ use App\Http\Resources\ActivityResource;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
 use App\Services\IssueService;
+use App\Services\Pagination;
 use App\Services\ProjectService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -68,10 +69,12 @@ class IssueController extends Controller
             ->response()->setStatusCode(202);
     }
 
-    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues and comments. */
+    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues and comments. `fields` (comma-separated keys) trims the answer; `key` always stays. */
     public function show(Request $request, string $key): IssueResource
     {
-        return new IssueResource($this->issues->loadFull($this->issues->resolve($request->user(), $key)));
+        $fields = $request->validate(['fields' => ['nullable', 'string', 'max:500']])['fields'] ?? null;
+
+        return (new IssueResource($this->issues->loadFull($this->issues->resolve($request->user(), $key))))->fields($fields);
     }
 
     /**
@@ -104,8 +107,8 @@ class IssueController extends Controller
     {
         $issue = $this->issues->resolve($request->user(), $key);
 
-        return ActivityResource::collection(
-            $issue->activities()->with('user')->latest('id')->paginate(min($request->integer('per_page', 50), 100))
-        );
+        [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'), 50);
+
+        return Pagination::collection(ActivityResource::class, $issue->activities()->with('user')->latest('id')->paginate($perPage, page: $page));
     }
 }

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['key', 'name', 'description'])]
 class Project extends Model
@@ -24,6 +25,11 @@ class Project extends Model
     public function workspace(): BelongsTo
     {
         return $this->belongsTo(Workspace::class);
+    }
+
+    public function agentSettings(): HasOne
+    {
+        return $this->hasOne(ProjectAgentSettings::class);
     }
 
     public function members(): BelongsToMany

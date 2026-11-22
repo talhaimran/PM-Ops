@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Http\Resources\Concerns\SelectsFields;
 use App\Models\Agent;
 use App\Models\Issue;
 use App\Models\User;
@@ -11,6 +12,8 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /** @mixin Issue */
 class IssueResource extends JsonResource
 {
+    use SelectsFields;
+
     public function toArray(Request $request): array
     {
         $projectKey = $this->project->key;
@@ -18,7 +21,7 @@ class IssueResource extends JsonResource
         $child = fn (Issue $i) => [...$link($i), 'type' => $i->type->value, 'status' => $i->column->name];
 
         // Nested collections are resolved to plain arrays: Inertia would wrap nested resources in {data: …}.
-        return [
+        return $this->selected([
             'id' => $this->id,
             'key' => "{$projectKey}-{$this->number}",
             'project' => $projectKey,
@@ -41,7 +44,7 @@ class IssueResource extends JsonResource
             'pending_approvals' => $this->whenLoaded('pendingApprovals', fn () => ApprovalRequestResource::collection($this->pendingApprovals)->resolve()),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
-        ];
+        ]);
     }
 
     /** @return array{id: int, name: string, email: string}|null */

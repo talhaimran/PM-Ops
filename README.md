@@ -162,6 +162,12 @@ Create an agent at **sidebar → Agents** (`/demo/settings/agents`, under your w
 
 Every REST and MCP call uses the token as `Authorization: Bearer <token>`.
 
+### Untrusted text
+
+Agent instructions, issue descriptions and comments are untrusted input to agents. The server enforces access whatever any text says, in this order: your role in the project, then the agent's level, then its project list. Project settings, members and columns are people-only, a move to Done needs a person's approval, and deletes need the Delete level. Every agent action is recorded with the agent's label and `via`.
+
+Residual risk: an agent with legitimate access to several projects can be talked into copying data between them. Scope each agent to the projects it needs.
+
 ## REST API
 
 The base URL is `/api/v1`, documented at `/docs/api`. Highlights:

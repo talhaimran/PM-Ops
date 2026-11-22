@@ -5,6 +5,7 @@ namespace App\Mcp\Tools;
 use App\Http\Resources\ActivityResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
 use App\Services\IssueService;
+use App\Services\Pagination;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -22,9 +23,10 @@ class GetIssueActivity extends Tool
 
     public function handle(Request $request, IssueService $issues): Response
     {
-        $data = $request->validate(['issue' => 'required|string', 'page' => 'integer|min:1', 'per_page' => 'integer|min:1|max:50']);
+        $data = $request->validate(['issue' => 'required|string', 'page' => 'integer|min:1|max:10000', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
         $issue = $issues->resolve($request->user(), $data['issue']);
-        $page = $issue->activities()->with('user')->latest('id')->paginate($data['per_page'] ?? 25, page: $data['page'] ?? 1);
+        [$perPage, $pageNumber] = Pagination::resolve($data['cursor'] ?? null, $data['per_page'] ?? null, $data['page'] ?? null, max: 50);
+        $page = $issue->activities()->with('user')->latest('id')->paginate($perPage, page: $pageNumber);
 
         return $this->paginated("activity entries for {$issue->key}", $page, ActivityResource::class);
     }
@@ -33,7 +35,7 @@ class GetIssueActivity extends Tool
     {
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
-            'page' => $schema->integer()->min(1),
+            'page' => $schema->integer()->min(1)->max(10000),
             'per_page' => $schema->integer()->min(1)->max(50),
         ];
     }

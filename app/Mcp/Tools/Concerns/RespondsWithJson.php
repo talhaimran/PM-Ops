@@ -5,6 +5,7 @@ namespace App\Mcp\Tools\Concerns;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
 use App\Models\Issue;
+use App\Services\Pagination;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Laravel\Mcp\Response;
@@ -31,15 +32,16 @@ trait RespondsWithJson
     }
 
     /** Paginated list with a summary that tells the agent how to fetch more. */
-    protected function paginated(string $noun, LengthAwarePaginator $page, string $resource): Response
+    protected function paginated(string $noun, LengthAwarePaginator $page, string $resource, ?string $fields = null): Response
     {
-        $more = $page->hasMorePages() ? ' Pass page='.($page->currentPage() + 1).' for more.' : '';
+        $next = Pagination::next($page);
+        $more = $next ? ' Pass page='.($page->currentPage() + 1)." (or cursor={$next}) for more." : '';
 
         return $this->result(
             "Showing {$page->count()} of {$page->total()} {$noun} (page {$page->currentPage()}).{$more}",
             [
-                'data' => $resource::collection($page->getCollection())->resolve(),
-                'meta' => ['page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'has_more' => $page->hasMorePages()],
+                'data' => ($fields === null ? $resource::collection($page->getCollection()) : $resource::collectionWith($page->getCollection(), $fields))->resolve(),
+                'meta' => ['page' => $page->currentPage(), 'per_page' => $page->perPage(), 'total' => $page->total(), 'has_more' => $page->hasMorePages(), 'next_cursor' => $next],
             ],
         );
     }

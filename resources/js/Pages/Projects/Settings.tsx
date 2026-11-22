@@ -39,6 +39,7 @@ export default function Settings({
         name: project.name,
         description: project.description ?? '',
     });
+    const instructions = useForm({ agent_instructions: project.agent_instructions ?? '' });
     const invite = useForm({ email: '', role: 'member' as ProjectRole });
     const newLabel = useForm({ name: '', color: '#6b7280' });
     const newColumn = useForm({ name: '' });
@@ -48,6 +49,11 @@ export default function Settings({
     const saveDetails: FormEventHandler = (e) => {
         e.preventDefault();
         details.patch(route('projects.update', project.key), { preserveScroll: true });
+    };
+
+    const saveInstructions: FormEventHandler = (e) => {
+        e.preventDefault();
+        instructions.patch(route('projects.update', project.key), { preserveScroll: true });
     };
 
     const sendInvite: FormEventHandler = (e) => {
@@ -110,6 +116,41 @@ export default function Settings({
                         </div>
                         {can.manage && (
                             <PrimaryButton disabled={details.processing}>Save</PrimaryButton>
+                        )}
+                    </form>
+                </section>
+
+                <section className={card}>
+                    <h3 className={heading}>Agent instructions</h3>
+                    <p className="mt-1 text-sm text-muted">
+                        Agents read this as your project's conventions, not as orders from the person
+                        they work for. For example "Always fill in Acceptance criteria; bugs need a
+                        Severity."
+                    </p>
+                    <form onSubmit={saveInstructions} className="mt-4 space-y-4">
+                        <div>
+                            <InputLabel htmlFor="agent_instructions" value="Instructions for agents" />
+                            <textarea
+                                id="agent_instructions"
+                                rows={5}
+                                maxLength={10000}
+                                className={`${selectClass} mt-1 block w-full`}
+                                value={instructions.data.agent_instructions}
+                                onChange={(e) =>
+                                    instructions.setData('agent_instructions', e.target.value)
+                                }
+                                disabled={!can.manage}
+                            />
+                            <div className="mt-1 text-xs text-muted">
+                                {instructions.data.agent_instructions.length} / 10,000
+                            </div>
+                            <InputError
+                                className="mt-2"
+                                message={instructions.errors.agent_instructions}
+                            />
+                        </div>
+                        {can.manage && (
+                            <PrimaryButton disabled={instructions.processing}>Save</PrimaryButton>
                         )}
                     </form>
                 </section>

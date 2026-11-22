@@ -64,7 +64,7 @@ class ProjectController extends Controller
     public function settings(Request $request, Project $project): Response
     {
         Gate::authorize('view', $project);
-        $project->load(['members' => fn ($q) => $q->orderBy('name'), 'invitations']);
+        $project->load(['members' => fn ($q) => $q->orderBy('name'), 'invitations', 'agentSettings']);
         $canManage = $request->user()->can('manage', $project);
 
         return Inertia::render('Projects/Settings', [

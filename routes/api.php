@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\CommentController;
 use App\Http\Controllers\Api\V1\IssueController;
 use App\Http\Controllers\Api\V1\IssueListController;
 use App\Http\Controllers\Api\V1\LabelController;
+use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\ProjectController;
 use App\Http\Controllers\Api\V1\ProjectMemberController;
 use App\Http\Controllers\Api\V1\SprintController;
@@ -49,6 +50,8 @@ Route::prefix('v1')->middleware(['auth:sanctum', ResolveTokenWorkspace::class, '
     Route::get('projects/{key}/issues', [IssueListController::class, 'index']);
     Route::get('projects/{key}/summary', [IssueListController::class, 'summary']);
     Route::get('issues', [IssueListController::class, 'search']);
+    Route::get('me', [MeController::class, 'show']);
+    Route::get('me/updates', [MeController::class, 'updates']);
     Route::get('me/issues', [IssueListController::class, 'mine']);
 
     Route::post('projects/{key}/issues', [IssueController::class, 'store']);

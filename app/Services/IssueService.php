@@ -282,7 +282,7 @@ class IssueService
 
     /**
      * Filtered, sorted, paginated issues in one project, or across all of the user's projects.
-     * $params: filters (see filter()), sort, per_page (max 100), page.
+     * $params: filters (see filter()), sort, per_page (max 100), page or cursor.
      */
     public function list(User $user, ?Project $project, array $params): LengthAwarePaginator
     {
@@ -290,9 +290,11 @@ class IssueService
             ? $project->issues()->getQuery()
             : Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'));
 
+        [$perPage, $page] = Pagination::resolve($params['cursor'] ?? null, $params['per_page'] ?? null, $params['page'] ?? null, max: $params['max_per_page'] ?? 100);
+
         return $this->sort($this->filter($query, $params), $params['sort'] ?? null)
             ->with(self::DISPLAY)
-            ->paginate(min((int) ($params['per_page'] ?? 25), 100), page: $params['page'] ?? null);
+            ->paginate($perPage, page: $page);
     }
 
     /** Order by one of SORTS ("-" prefix = descending); ties break by id in the same direction. */
