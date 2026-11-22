@@ -25,12 +25,12 @@ export default function Authorize({
     client: string;
     clientNote: string;
     redirectTo: string;
-    workspace: string | null;
+    workspace: string;
     agents: { id: number; name: string; level: Level }[];
     newAgent: string;
     authToken: string;
 }) {
-    const canCreate = workspace !== null && !agents.some((a) => a.name === newAgent);
+    const canCreate = !agents.some((a) => a.name === newAgent);
     // Nothing preselected: connecting is a deliberate choice of agent.
     const form = useForm({ agent: '' });
     // A refused choice comes back to a fresh authorization request (new auth token), so read both from the page.
@@ -64,36 +64,26 @@ export default function Authorize({
                     {clientNote} You&apos;ll be sent back to <strong className="break-all">{redirectTo}</strong>.
                 </p>
                 <p className="text-muted">
-                    {workspace ? (
-                        <>
-                            <strong className="text-text">{client}</strong> will act as the agent you pick in <strong className="text-text">{workspace}</strong>. It can do
-                            what that agent can, never more than you. Pause or revoke it any time in Settings → Agents.
-                        </>
-                    ) : (
-                        'You are not in any workspace yet, so there is no agent this client could act as.'
-                    )}
+                    <strong className="text-text">{client}</strong> will act as the agent you pick in <strong className="text-text">{workspace}</strong>. It can do what
+                    that agent can, never more than you. Pause or revoke it any time in Settings → Agents.
                 </p>
             </div>
 
             <form onSubmit={approve} className="mt-6">
-                {workspace && (
-                    <fieldset>
-                        <legend className="text-sm font-medium text-text">Act as</legend>
-                        <div className="mt-1 space-y-1">
-                            {agents.map((a) => choice(String(a.id), a.name, levelLabels[a.level]))}
-                            {canCreate && choice('new', `Create ${newAgent}`, `${levelLabels.write}. Counts toward your plan's agents.`)}
-                        </div>
-                        <InputError className="mt-1" message={errors.agent ?? errors.plan_limit ?? errors.name} />
-                    </fieldset>
-                )}
+                <fieldset>
+                    <legend className="text-sm font-medium text-text">Act as</legend>
+                    <div className="mt-1 space-y-1">
+                        {agents.map((a) => choice(String(a.id), a.name, levelLabels[a.level]))}
+                        {canCreate && choice('new', `Create ${newAgent}`, `${levelLabels.write}. Counts toward your plan's agents.`)}
+                    </div>
+                    <InputError className="mt-1" message={errors.agent ?? errors.plan_limit ?? errors.name} />
+                </fieldset>
 
                 <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
                     <SecondaryButton onClick={deny}>Cancel</SecondaryButton>
-                    {workspace && (
-                        <PrimaryButton type="submit" disabled={form.processing || form.data.agent === ''}>
-                            Connect
-                        </PrimaryButton>
-                    )}
+                    <PrimaryButton type="submit" disabled={form.processing || form.data.agent === ''}>
+                        Connect
+                    </PrimaryButton>
                 </div>
             </form>
         </GuestLayout>

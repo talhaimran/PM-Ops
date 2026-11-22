@@ -7,6 +7,7 @@ use App\Models\Agent;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\AgentService;
+use App\Services\CurrentWorkspace;
 use App\Services\Entitlements;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Passport\RefreshToken;
@@ -170,4 +171,34 @@ test('the Agents page shows which clients an agent is connected through', functi
     app(AgentService::class)->revoke($this->agent, $this->owner);
     [$other] = makeAgent($this->owner, AgentLevel::Read, [], 'Not connected');
     expect(collect(app(AgentService::class)->listFor($this->owner, $this->ws))->firstWhere('id', $other->id)['connections'])->toBe([]);
+});
+
+test('a normal signed-in session connects in the user\'s current workspace, end to end', function () {
+    makeWorkspace($this->owner, 'other');
+    makeAgent($this->owner, AgentLevel::Read, [], 'Other workspace agent');
+    // Only what a real session has: the user's current workspace, nothing set up by the test in this process.
+    $this->owner->forceFill(['current_workspace_id' => $this->ws->id])->save();
+    app()->forgetInstance(CurrentWorkspace::class);
+    $clientId = oauthClient();
+    [$verifier, $challenge] = pkce();
+
+    $page = $this->actingAs($this->owner)->get(oauthAuthorizeUrl($clientId, $challenge))->assertOk()->viewData('page')['props'];
+    expect($page['workspace'])->toBe('Acme')->and(collect($page['agents'])->pluck('name')->all())->toBe(['Claude Code']);
+
+    app()->forgetInstance(CurrentWorkspace::class);
+    $location = $this->post('/oauth/authorize', ['auth_token' => $page['authToken'], 'agent' => $this->agent->id])->assertRedirect()->headers->get('Location');
+    parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+    $token = oauthExchange($clientId, $query['code'], $verifier)->assertOk()->json('access_token');
+
+    expect(mcpJson($token, 'whoami'))->toMatchArray(['agent' => ['id' => $this->agent->id, 'name' => 'Claude Code', 'level' => 'write', 'status' => 'active']])
+        ->and(mcpJson($token, 'whoami')['workspace']['slug'])->toBe('acme');
+});
+
+test('someone in no workspace gets a clear refusal, not an empty consent screen', function () {
+    $loner = User::factory()->create();
+    app()->forgetInstance(CurrentWorkspace::class);
+
+    $this->actingAs($loner)->get(oauthAuthorizeUrl(oauthClient(), pkce()[1]))->assertForbidden()
+        ->assertInertia(fn (Assert $page) => $page->component('Workspaces/NoAccess')
+            ->where('message', 'You are not a member of any workspace yet. Ask an admin to invite you.'));
 });

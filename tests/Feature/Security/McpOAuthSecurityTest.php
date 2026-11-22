@@ -2,14 +2,17 @@
 
 use App\Enums\AgentLevel;
 use App\Enums\WorkspaceRole;
+use App\Mcp\OAuth\AgentAccessTokenRepository;
 use App\Mcp\OAuth\AgentAuthCodeRepository;
 use App\Models\Agent;
 use App\Models\User;
 use App\Services\AgentService;
+use Illuminate\Support\Facades\Log;
 use Inertia\Testing\AssertableInertia as Assert;
 use Laravel\Passport\AuthCode;
 use Laravel\Passport\Bridge\AuthCodeRepository;
 use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Laravel\Passport\Token;
 use League\OAuth2\Server\AuthorizationServer;
 use League\OAuth2\Server\Entities\AuthCodeEntityInterface;
@@ -287,10 +290,8 @@ test('workspace policies apply at consent and at approve, as on the workspace\'s
     ],
     'scheduled for deletion' => [
         fn () => $this->ws->forceFill(['deletion_scheduled_at' => now()->addDays(7)])->save(),
-        fn ($response) => $response->status() === 403
-            ? $response->assertInertia(fn (Assert $page) => $page->component('Workspaces/NoAccess')->where('message', fn ($m) => str_contains($m, 'scheduled for deletion')))
-            // Outside the workspace the screen has no workspace to offer agents from.
-            : $response->assertOk()->assertInertia(fn (Assert $page) => $page->where('workspace', null)->where('agents', [])),
+        fn ($response) => $response->assertForbidden()
+            ->assertInertia(fn (Assert $page) => $page->component('Workspaces/NoAccess')->where('message', fn ($m) => str_contains($m, 'scheduled for deletion'))),
     ],
 ]);
 
@@ -337,4 +338,71 @@ test('registration and the consent screen are rate limited', function () {
         $this->post('/oauth/authorize', ['auth_token' => 'x', 'agent' => 'new']);
     }
     $this->post('/oauth/authorize', ['auth_token' => 'x', 'agent' => 'new'])->assertTooManyRequests();
+});
+
+// Fix round 2: missing Passport keys fail closed; the agent hand-off never outlives one issuance.
+
+/** The token row id (the JWT's jti) of an OAuth access token. */
+function oauthTokenRow(string $jwt): ?Token
+{
+    return Token::find(json_decode(base64_decode(strtr(explode('.', $jwt)[1], '-_', '+/')), true)['jti']);
+}
+
+test('without Passport keys, /mcp still answers 401 to strangers and serves agent tokens', function () {
+    [, $plain] = makeAgent($this->ann, AgentLevel::Read, [], 'Script');
+    $keys = [storage_path('oauth-private.key'), storage_path('oauth-public.key')];
+    foreach ($keys as $key) {
+        rename($key, "{$key}.moved");
+    }
+    Log::spy();
+    $rpc = ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'];
+
+    try {
+        foreach (range(1, 2) as $i) {
+            asToken('', ['Authorization' => ''])->withHeaders(['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', $rpc)
+                ->assertUnauthorized()
+                ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", resource_metadata="'.url('/.well-known/oauth-protected-resource/mcp').'"');
+        }
+        asToken('not-a-token', ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', $rpc)->assertUnauthorized();
+        asToken($plain, ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', $rpc)->assertOk();
+        Log::shouldHaveReceived('warning')->once();
+    } finally {
+        foreach ($keys as $key) {
+            rename("{$key}.moved", $key);
+        }
+    }
+});
+
+test('consecutive exchanges and a refresh in one process each get their own agent, and nothing stays bound', function () {
+    [$second] = makeAgent($this->ann, AgentLevel::Read, [], 'Second agent');
+
+    $first = oauthConnect($this->ann, $this->agent->id);
+    expect(AgentAccessTokenRepository::agent())->toBeNull();
+    $other = oauthConnect($this->ann, $second->id);
+    expect(AgentAccessTokenRepository::agent())->toBeNull();
+    $refreshed = $this->postJson('/oauth/token', ['grant_type' => 'refresh_token', 'client_id' => $first['client_id'], 'refresh_token' => $first['refresh_token']])
+        ->assertOk()->json('access_token');
+
+    expect(oauthTokenRow($first['access_token'])->agent_id)->toBe($this->agent->id)
+        ->and(oauthTokenRow($other['access_token'])->agent_id)->toBe($second->id)
+        ->and(oauthTokenRow($refreshed)->agent_id)->toBe($this->agent->id)
+        ->and(AgentAccessTokenRepository::agent())->toBeNull();
+});
+
+test('a failed exchange leaves no agent behind for the next token issued in the same process', function () {
+    $clientId = oauthClient();
+    [, $challenge] = pkce();
+    $code = oauthCode($this->ann, $clientId, $this->agent->id, $challenge);
+
+    // The code is read (its agent picked up), then the verifier check fails.
+    oauthExchange($clientId, $code, pkce()[0])->assertStatus(400);
+    expect(AgentAccessTokenRepository::agent())->toBeNull();
+
+    // A grant that never names an agent must not inherit the previous one.
+    $machine = app(ClientRepository::class)->createClientCredentialsGrantClient('Machine');
+    $token = $this->postJson('/oauth/token', ['grant_type' => 'client_credentials', 'client_id' => $machine->id, 'client_secret' => $machine->plainSecret])
+        ->assertOk()->json('access_token');
+    expect(oauthTokenRow($token)->agent_id)->toBeNull();
+    asToken($token, ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list'])
+        ->assertUnauthorized();
 });

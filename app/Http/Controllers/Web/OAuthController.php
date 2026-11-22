@@ -10,6 +10,7 @@ use App\Models\Workspace;
 use App\Services\AgentService;
 use App\Services\CurrentWorkspace;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -50,18 +51,24 @@ class OAuthController extends AuthorizationController
         [$request, $user, $client] = [$params['request'], $params['user'], $params['client']];
         $current = app(CurrentWorkspace::class);
         $workspace = $current->id() ? $current->get() : null;
-        if ($workspace && ($refused = self::refusal($request, $workspace, $user))) {
+        if (! $workspace) {
+            // In no workspace: the same page the web app shows, not an empty consent screen.
+            $refused = app(WorkspaceController::class)->noAccess($request);
+
+            return $refused instanceof RedirectResponse ? $refused : $refused->toResponse($request)->setStatusCode(403);
+        }
+        if ($refused = self::refusal($request, $workspace, $user)) {
             return $refused;
         }
         // approve() acts in the workspace shown here, for this auth token only.
-        $request->session()->put(self::CONSENT, ['auth_token' => $params['authToken'], 'workspace_id' => $workspace?->id]);
+        $request->session()->put(self::CONSENT, ['auth_token' => $params['authToken'], 'workspace_id' => $workspace->id]);
         $back = parse_url($request->query('redirect_uri') ?: $client->redirect_uris[0]);
 
         return Inertia::render('OAuth/Authorize', [
             'client' => $client->name,
             'clientNote' => "Registered itself — PmOps hasn't verified this app.",
             'redirectTo' => $back['scheme'].'://'.$back['host'].(isset($back['port']) ? ':'.$back['port'] : ''),
-            'workspace' => $workspace?->name,
+            'workspace' => $workspace->name,
             'agents' => app(AgentService::class)->oauthChoices($user),
             'newAgent' => AgentService::oauthAgentName($user, $client->name),
             'authToken' => $params['authToken'],
@@ -91,10 +98,9 @@ class OAuthController extends AuthorizationController
         // A new agent and the code commit together: a failure leaves neither.
         return DB::transaction(function () use ($agents, $user, $request, $authRequest, $psrResponse) {
             $agent = $agents->forOAuthClient($user, (string) $request->input('agent'), $authRequest->getClient()->getName());
-            AgentAccessTokenRepository::useAgent($agent->id);
             $authRequest->setAuthorizationApproved(true);
 
-            return $this->complete($authRequest, $psrResponse);
+            return AgentAccessTokenRepository::issuing($agent->id, fn () => $this->complete($authRequest, $psrResponse));
         });
     }
 

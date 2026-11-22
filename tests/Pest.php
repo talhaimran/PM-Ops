@@ -18,7 +18,6 @@ use App\Services\TwoFactorService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Fortify;
@@ -247,10 +246,6 @@ const OAUTH_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
 /** Registers an MCP client through laravel/mcp's dynamic client registration, as Claude Desktop does; returns its id. */
 function oauthClient(string $name = 'Claude Desktop', string $redirect = OAUTH_REDIRECT): string
 {
-    if (! file_exists(storage_path('oauth-private.key'))) {
-        Artisan::call('passport:keys', ['--force' => true]);
-    }
-
     return test()->postJson('/oauth/register', ['client_name' => $name, 'redirect_uris' => [$redirect]])->assertCreated()->json('client_id');
 }
 
