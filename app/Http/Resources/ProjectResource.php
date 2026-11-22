@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Http\Resources\Concerns\SelectsFields;
 use App\Models\Project;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -9,9 +10,11 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /** @mixin Project */
 class ProjectResource extends JsonResource
 {
+    use SelectsFields;
+
     public function toArray(Request $request): array
     {
-        return [
+        return $this->selected([
             'id' => $this->id,
             'key' => $this->key,
             'name' => $this->name,
@@ -28,6 +31,6 @@ class ProjectResource extends JsonResource
             'agent_instructions' => $this->whenLoaded('agentSettings', fn () => $this->agentSettings->instructions),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
-        ];
+        ], ['members', 'agent_instructions']);
     }
 }

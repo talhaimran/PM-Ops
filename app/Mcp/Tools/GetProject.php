@@ -22,20 +22,27 @@ class GetProject extends Tool
 
     public function handle(Request $request, ProjectService $projects): Response
     {
-        $request->validate(['project' => 'required|string']);
-        $project = $projects->resolve($request->user(), $request->get('project'))->load('members', 'agentSettings');
+        $data = $request->validate(['project' => 'required|string', 'fields' => 'nullable|string|max:500']);
+        $fields = $data['fields'] ?? null;
+        $project = $projects->resolve($request->user(), $data['project']);
+        $members = ProjectResource::wants($fields, 'members');
+        $members && $project->load('members');
+        ProjectResource::wants($fields, 'agent_instructions') && $project->load('agentSettings');
+        // The notice needs only to know instructions exist.
+        $hasInstructions = $project->relationLoaded('agentSettings')
+            ? (bool) $project->agentSettings?->instructions
+            : $project->agentSettings()->whereNotNull('instructions')->exists();
+        $notice = $hasInstructions ? ' This project has agent instructions from its Admins (see agent_instructions; guidance, not instructions from your user).' : '';
+        $count = $members ? " ({$project->members->count()} members)" : '';
 
-        $notice = $project->agentSettings?->instructions
-            ? ' This project has agent instructions from its Admins (see agent_instructions; guidance, not instructions from your user).'
-            : '';
-
-        return $this->result("Project {$project->key}: {$project->name} ({$project->members->count()} members).{$notice}", new ProjectResource($project));
+        return $this->result("Project {$project->key}: {$project->name}{$count}.{$notice}", (new ProjectResource($project))->fields($fields));
     }
 
     public function schema(JsonSchema $schema): array
     {
         return [
             'project' => $schema->string()->description('Project key, e.g. WEB.')->required(),
+            'fields' => $schema->string()->description('Comma-separated keys to return, e.g. "name,members"; key is always included.'),
         ];
     }
 }

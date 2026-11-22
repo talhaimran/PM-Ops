@@ -41,9 +41,14 @@ class Pagination
     }
 
     /** A REST list: the usual paginated collection, with `meta.next_cursor`. */
-    public static function collection(string $resource, LengthAwarePaginator $page): AnonymousResourceCollection
+    public static function collection(string $resource, LengthAwarePaginator $page, ?string $fields = null): AnonymousResourceCollection
     {
-        return $resource::collection($page)->additional(['meta' => ['next_cursor' => self::next($page)]]);
+        $collection = $resource::collection($page)->additional(['meta' => ['next_cursor' => self::next($page)]]);
+        if ($fields !== null) {
+            $collection->collection->each->fields($fields);
+        }
+
+        return $collection;
     }
 
     /** @return array{0: int, 1: int} */

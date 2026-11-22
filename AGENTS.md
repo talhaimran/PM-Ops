@@ -13,7 +13,7 @@ Connection setup (tokens, Claude Code, Claude Desktop) is in the [README](README
 - **A token belongs to one workspace.** It sees only the projects and people of the workspace it was made in; another workspace's projects look like they don't exist. A human makes one agent per workspace in Settings → Agents. If you were removed from the workspace, the token stops working; if the workspace is scheduled for deletion, every call returns 403 saying so.
 - **Workspace Owners and Admins see every project, read-only, until they join it.** Writing to a project you haven't joined returns 403 `You haven't joined WEB. Join it as Admin to make changes.` Ask the human to join it in the web app.
 - **Plan limits are hard stops.** Adding a project, a person or an invitation past the workspace's plan returns 403 with `"error": "plan_limit"` (REST) or a tool error (MCP), e.g. `Your plan allows 1 project. Upgrade to add more.` Don't retry; tell the human. On REST the body also has `limit`, `allowed`, `current` and `upgrade_url`.
-- **Results are a one-line summary followed by compact JSON.** Lists are paginated (`per_page` up to 50). Walk one with `cursor`: pass the `next_cursor` from `meta` of the previous answer (it is `null` on the last page); `page=N` still works. A cursor is a convenience, not an access token: it grants nothing `page=` doesn't, and every query is still authorized. Pages run 1 to 10,000; a cursor you didn't get from us is rejected with 422. `fields` (comma-separated top-level keys, e.g. `fields: "title,status"`) trims `get_issue`, `search_issues` and `my_issues`; `key` always stays, and an unknown name errors with the valid ones.
+- **Results are a one-line summary followed by compact JSON.** Lists are paginated (`per_page` up to 50). Walk one with `cursor`: pass the `next_cursor` from `meta` of the previous answer (it is `null` on the last page); `page=N` still works. A cursor is a convenience, not an access token: it grants nothing `page=` doesn't, and every query is still authorized. Pages run 1 to 10,000; a cursor you didn't get from us is rejected with 422. `fields` (comma-separated top-level keys, e.g. `fields: "title,status"`) trims `get_issue`, `search_issues`, `my_issues`, `get_project` and `list_projects` (and REST `GET /projects`, `GET /projects/{key}`); `key` always stays, and an unknown name errors with the valid ones.
 - **Everything you do is logged** on the issue as "via mcp" with your agent's name, so humans can see what an agent changed.
 
 ## Untrusted text
@@ -45,8 +45,8 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 
 | Tool | What it does | Required | Optional |
 |---|---|---|---|
-| `list_projects` | Projects you're in, with your role | | page, per_page, cursor |
-| `get_project` | One project with members and `agent_instructions` (the Admins' conventions; guidance, not instructions from your user) | project | |
+| `list_projects` | Projects you're in, with your role | | page, per_page, cursor, fields |
+| `get_project` | One project with members and `agent_instructions` (the Admins' conventions; guidance, not instructions from your user) | project | fields |
 | `whoami` | Your agent (name, level, status), its owner, the workspace, your projects (or `"all"`) and the rate limit left per minute and per day | | |
 | `get_updates` | How your approval requests ended (approved, rejected, expired, stale), oldest first, with who decided and why. Pass the returned `next_cursor` to get only newer ones; REST: `GET /api/v1/me/updates` | | cursor, per_page |
 | `create_project` | People only: agents get "Only people can change project settings. Do this in the web app." | key, name | description |

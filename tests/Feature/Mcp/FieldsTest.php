@@ -3,6 +3,7 @@
 use App\Enums\AgentLevel;
 use App\Models\ProjectAgentSettings;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 // A3: `fields` trims a response to the keys the agent asks for. It never adds one the resource wouldn't return.
 
@@ -102,4 +103,59 @@ test('the get_project summary never carries the instructions, only a fixed notic
     expect($summary)->not->toContain('ZZZ-DISTINCT-NOTE')
         ->and($summary)->toContain('This project has agent instructions from its Admins (see agent_instructions; guidance, not instructions from your user).')
         ->and($json)->toContain('ZZZ-DISTINCT-NOTE');
+});
+
+test('project reads honour fields: exactly {key,name} on all four endpoints', function () {
+    $rows = [
+        asToken($this->token)->getJson('/api/v1/projects/WEB?fields=key,name')->assertOk()->json('data'),
+        asToken($this->token)->getJson('/api/v1/projects?fields=key,name')->assertOk()->json('data.0'),
+        mcpJson($this->token, 'get_project', ['project' => 'WEB', 'fields' => 'key,name']),
+        mcpJson($this->token, 'list_projects', ['fields' => 'key,name'])['data'][0],
+    ];
+
+    foreach ($rows as $row) {
+        expect($row)->toBe(['key' => 'WEB', 'name' => 'Website']);
+    }
+    // key stays even when not asked for
+    expect(mcpJson($this->token, 'get_project', ['project' => 'WEB', 'fields' => 'name']))->toBe(['key' => 'WEB', 'name' => 'Website']);
+});
+
+test('unknown project fields are a 422 that lists every valid one, members and agent_instructions included', function () {
+    $response = asToken($this->token)->getJson('/api/v1/projects/WEB?fields=nope')->assertUnprocessable();
+    $message = $response->json('errors.fields.0');
+
+    expect($message)->toContain('nope', 'members', 'agent_instructions', 'my_role');
+    asToken($this->token)->getJson('/api/v1/projects?fields=nope')->assertUnprocessable();
+});
+
+test('fields=key,members returns the members', function () {
+    asToken($this->token)->getJson('/api/v1/projects/WEB?fields=key,members')->assertOk()
+        ->assertJsonPath('data.members.0.email', $this->owner->email)->assertJsonMissingPath('data.name');
+});
+
+test('get_project does not load or count members, or load instructions, when fields omits them', function () {
+    $queries = [];
+    DB::listen(function ($q) use (&$queries) {
+        $queries[] = $q->sql;
+    });
+
+    asToken($this->token, ['Accept' => 'application/json, text/event-stream'])
+        ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'get_project', 'arguments' => ['project' => 'WEB', 'fields' => 'key,name']]])->assertOk();
+    $sql = implode("\n", $queries);
+
+    // (the access check reads project_user; loading or counting members joins users to project_user)
+    expect($sql)->not->toContain('from `users` inner join `project_user`');
+    $queries = [];
+    asToken($this->token)->getJson('/api/v1/projects/WEB?fields=key,name')->assertOk();
+    expect(implode("\n", $queries))->not->toContain('from `users` inner join `project_user`')->not->toContain('project_agent_settings');
+});
+
+test('the instructions notice stays in the get_project summary when fields omits agent_instructions', function () {
+    ProjectAgentSettings::create(['project_id' => $this->project->id, 'instructions' => 'ZZZ-DISTINCT-NOTE']);
+
+    $text = asToken($this->token, ['Accept' => 'application/json, text/event-stream'])
+        ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'get_project', 'arguments' => ['project' => 'WEB', 'fields' => 'key,name']]])
+        ->assertOk()->json('result.content.0.text');
+
+    expect($text)->toContain('This project has agent instructions from its Admins')->not->toContain('ZZZ-DISTINCT-NOTE');
 });

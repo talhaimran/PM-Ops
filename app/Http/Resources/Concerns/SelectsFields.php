@@ -31,13 +31,26 @@ trait SelectsFields
         return $collection;
     }
 
-    protected function selected(array $data): array
+    /** @return list<string> the names in a `fields` value */
+    public static function names(?string $csv): array
     {
-        $wanted = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $this->fields)), 'strlen')));
+        return array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $csv)), 'strlen')));
+    }
+
+    /** Whether a `fields` value asks for $field (no fields = everything); lets callers skip loading what is dropped. */
+    public static function wants(?string $csv, string $field): bool
+    {
+        return ! ($names = self::names($csv)) || in_array($field, $names, true);
+    }
+
+    /** @param  list<string>  $optional  keys this endpoint can return even if they weren't loaded for this call */
+    protected function selected(array $data, array $optional = []): array
+    {
+        $wanted = self::names($this->fields);
         if (! $wanted) {
             return $data;
         }
-        $valid = array_keys(array_filter($data, fn ($value) => ! $value instanceof MissingValue));
+        $valid = array_values(array_unique([...array_keys(array_filter($data, fn ($value) => ! $value instanceof MissingValue)), ...$optional]));
         if ($unknown = array_diff($wanted, $valid)) {
             throw ValidationException::withMessages(['fields' => 'Unknown field(s): '.implode(', ', $unknown).'. Valid fields: '.implode(', ', $valid).'.']);
         }

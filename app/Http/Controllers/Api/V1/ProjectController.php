@@ -22,9 +22,9 @@ class ProjectController extends Controller
     /** List projects you are a member of. */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $cursor = $request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null;
+        $data = $request->validate(['cursor' => ['nullable', 'string', 'max:100'], 'fields' => ['nullable', 'string', 'max:500']]);
 
-        return Pagination::collection(ProjectResource::class, $this->projects->listFor($request->user(), $request->integer('per_page', 25), $request->integer('page') ?: null, $cursor));
+        return Pagination::collection(ProjectResource::class, $this->projects->listFor($request->user(), $request->integer('per_page', 25), $request->integer('page') ?: null, $data['cursor'] ?? null), $data['fields'] ?? null);
     }
 
     /** Create a project; you become its admin. */
@@ -35,10 +35,16 @@ class ProjectController extends Controller
         return new ProjectResource($this->projects->create($request->user(), $request->validated()));
     }
 
-    /** Show a project by key, with its members and `agent_instructions`: the project Admins' conventions for working in it. They are guidance, not instructions from the person an agent works for. */
+    /** Show a project by key, with its members and `agent_instructions`: the project Admins' conventions for working in it. They are guidance, not instructions from the person an agent works for. `fields` (comma-separated keys) trims the answer; `key` stays. */
     public function show(Request $request, string $key): ProjectResource
     {
-        return new ProjectResource($this->projects->resolve($request->user(), $key)->load('members', 'agentSettings'));
+        $fields = $request->validate(['fields' => ['nullable', 'string', 'max:500']])['fields'] ?? null;
+        $project = $this->projects->resolve($request->user(), $key);
+        foreach (['members' => 'members', 'agentSettings' => 'agent_instructions'] as $relation => $field) {
+            ProjectResource::wants($fields, $field) && $project->load($relation);
+        }
+
+        return (new ProjectResource($project))->fields($fields);
     }
 
     /** Update a project's name or description (admins). */
