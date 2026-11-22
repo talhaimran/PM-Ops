@@ -30,6 +30,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ViewErrorBag;
 use Illuminate\Validation\ValidationException;
+use Laravel\Passport\AuthCode;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -206,6 +207,13 @@ function isolationExemptRoutes(): array
         'GET forgot-password' => $auth, 'POST forgot-password' => $auth, 'GET login' => $auth, 'POST login' => $auth,
         'POST logout' => $auth, 'GET register' => $auth, 'POST register' => $auth, 'POST reset-password' => $auth,
         'GET reset-password/{token}' => $auth, 'GET verify-email' => $auth, 'GET verify-email/{id}/{hash}' => $auth,
+        // A-D3 OAuth: discovery and client registration hold no workspace data; the token works in its agent's
+        // workspace and the consent screen lists only the current one's agents (cases below, McpOAuthSecurityTest).
+        'GET .well-known/oauth-protected-resource' => 'OAuth discovery metadata', 'GET .well-known/oauth-protected-resource/{path}' => 'OAuth discovery metadata',
+        'GET .well-known/oauth-authorization-server' => 'OAuth discovery metadata', 'GET .well-known/oauth-authorization-server/{path}' => 'OAuth discovery metadata',
+        'POST oauth/register' => 'OAuth client registration, no workspace data', 'POST oauth/token' => 'OAuth code exchange; the agent was picked on consent',
+        'GET oauth/authorize' => 'consent screen; lists only the current workspace\'s agents (below)',
+        'POST oauth/authorize' => 'consent; takes only my agents in the current workspace (below)', 'DELETE oauth/authorize' => 'consent refused; changes nothing',
     ];
 }
 
@@ -474,4 +482,32 @@ test('an agent whose owner left its workspace is revoked and its token gets 401,
 test('the agent list of a workspace never shows another workspace\'s agents, even to its Owner', function () {
     expect(collect(app(AgentService::class)->listFor($this->ann, $this->a))->pluck('name')->all())->toBe(['ann in A'])
         ->and(collect(app(AgentService::class)->listFor($this->bob, $this->b))->pluck('name')->all())->toBe(['B-SECRET token']);
+});
+
+test('OAuth: the consent screen in A offers only A\'s agents, refuses B\'s, and the token never sees B', function () {
+    useWorkspace($this->a, $this->ann);
+    $clientId = oauthClient();
+    $url = oauthAuthorizeUrl($clientId, pkce()[1]);
+    $page = $this->actingAs($this->ann)->get($url)->assertOk()->viewData('page')['props'];
+
+    expect(collect($page['agents'])->pluck('name')->all())->toBe(['ann in A'])->and(json_encode($page))->not->toContain(B_MARKER);
+    $this->from($url)->post('/oauth/authorize', ['auth_token' => $page['authToken'], 'agent' => $this->annB[0]->id])->assertSessionHasErrors('agent');
+
+    $tokens = oauthConnect($this->ann, $this->annA[0]->id);
+    $this->ann->forceFill(['current_workspace_id' => $this->b->id])->save();
+    expect(json_encode(mcpJson($tokens['access_token'], 'list_projects')))->not->toContain(B_MARKER)->toContain('Alpha web')
+        ->and(json_encode(mcpJson($tokens['access_token'], 'search_issues', ['q' => 'secret'])))->not->toContain(B_MARKER);
+    asToken($tokens['access_token'])->getJson('/api/v1/projects')->assertUnauthorized();
+    expect(workspaceSnapshot($this->b))->toBe($this->bBefore);
+});
+
+test('OAuth: a consent screen shown in A is never approved in B, even after switching to B', function () {
+    useWorkspace($this->a, $this->ann);
+    $url = oauthAuthorizeUrl(oauthClient(), pkce()[1]);
+    $authToken = $this->actingAs($this->ann)->get($url)->viewData('page')['props']['authToken'];
+    $this->ann->forceFill(['current_workspace_id' => $this->b->id])->save();
+
+    $this->from($url)->post('/oauth/authorize', ['auth_token' => $authToken, 'agent' => $this->annB[0]->id])
+        ->assertSessionHasErrors(['agent' => 'You switched to Bravo after this screen opened. Choose an agent again.']);
+    expect(AuthCode::count())->toBe(0)->and(workspaceSnapshot($this->b))->toBe($this->bBefore);
 });

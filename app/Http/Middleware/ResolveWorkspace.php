@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Http\Controllers\Web\WorkspaceController;
+use App\Models\User;
 use App\Models\Workspace;
 use App\Services\CurrentWorkspace;
 use App\Services\SocialSignInService;
@@ -41,18 +42,8 @@ class ResolveWorkspace
             return redirect($path.($request->getQueryString() ? '?'.$request->getQueryString() : ''), 301);
         }
 
-        if ($workspace->deletion_scheduled_at) {
-            return WorkspaceController::scheduled($workspace, $user)->toResponse($request)->setStatusCode(403);
-        }
-
-        // Spec 7.0f: only sessions made with a method this workspace allows. Sessions from before step 0 PR 7 were passwords.
-        $allowed = $workspace->setting('sign_in_methods');
-        if (! in_array($request->session()->get('auth.method', 'password'), $allowed, true)) {
-            return Inertia::render('Workspaces/NoAccess', [
-                'message' => "{$workspace->name} allows sign-in with ".SocialSignInService::describe($allowed).'. Sign out, then sign in that way.',
-                'canCreate' => false,
-                'restoreUrl' => null,
-            ])->toResponse($request)->setStatusCode(403);
+        if ($refused = self::refuse($request, $workspace, $user)) {
+            return $refused;
         }
 
         $this->current->set($workspace);
@@ -68,5 +59,28 @@ class ResolveWorkspace
         }
 
         return $next($request);
+    }
+
+    /**
+     * A member's session that this workspace won't serve: scheduled for deletion, or signed in with a method it doesn't
+     * allow. Also used by the OAuth consent screen, which sits outside /{workspace}.
+     */
+    public static function refuse(Request $request, Workspace $workspace, User $user): ?Response
+    {
+        if ($workspace->deletion_scheduled_at) {
+            return WorkspaceController::scheduled($workspace, $user)->toResponse($request)->setStatusCode(403);
+        }
+
+        // Spec 7.0f: only sessions made with a method this workspace allows. Sessions from before step 0 PR 7 were passwords.
+        $allowed = $workspace->setting('sign_in_methods');
+        if (! in_array($request->session()->get('auth.method', 'password'), $allowed, true)) {
+            return Inertia::render('Workspaces/NoAccess', [
+                'message' => "{$workspace->name} allows sign-in with ".SocialSignInService::describe($allowed).'. Sign out, then sign in that way.',
+                'canCreate' => false,
+                'restoreUrl' => null,
+            ])->toResponse($request)->setStatusCode(403);
+        }
+
+        return null;
     }
 }

@@ -20,8 +20,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Laravel\Passport\Passport;
 
 /**
  * Spec 8 (A1): agents and their one token each. The token stays a Sanctum token of the owner with agent_id
@@ -139,6 +141,11 @@ class AgentService
         DB::transaction(function () use ($agent, $actor, $reason) {
             $this->lockFresh($agent);
             $agent->token()->delete();
+            // A-D3: its MCP clients' OAuth tokens, their refresh tokens and unused codes stop too.
+            $oauth = Passport::token()->newQuery()->where('agent_id', $agent->id);
+            Passport::refreshToken()->newQuery()->whereIn('access_token_id', (clone $oauth)->select('id'))->update(['revoked' => true]);
+            $oauth->update(['revoked' => true]);
+            Passport::authCode()->newQuery()->where('agent_id', $agent->id)->update(['revoked' => true]);
             // A2: its waiting requests can never be approved now; take them off people's lists.
             ApprovalRequest::where('agent_id', $agent->id)->where('status', ApprovalStatus::Pending)
                 ->update(['status' => ApprovalStatus::Stale, 'note' => ApprovalService::revokedReason($agent), 'updated_at' => now()]);
@@ -164,6 +171,39 @@ class AgentService
         });
     }
 
+    /** A-D3 consent screen: the agents an MCP client may act as, my active ones in the current workspace. */
+    public function oauthChoices(User $user): array
+    {
+        return $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->orderBy('name')
+            ->get()->map(fn (Agent $agent) => ['id' => $agent->id, 'name' => $agent->name, 'level' => $agent->permission_level->value])->all();
+    }
+
+    /** "Talha's Claude Desktop agent". The client name comes from dynamic registration: untrusted, shown as text. */
+    public static function oauthAgentName(User $user, string $clientName): string
+    {
+        return Str::before(trim($user->name), ' ')."'s ".Str::limit(trim($clientName), 60, '').' agent';
+    }
+
+    /**
+     * The agent an MCP client will act as, chosen by $user on the consent screen: one of oauthChoices() by id, or
+     * 'new' for a new Write-level agent named for the client (plan limits and audit as for any new agent).
+     */
+    public function forOAuthClient(User $user, string $choice, string $clientName): Agent
+    {
+        if ($choice === 'new') {
+            [$agent] = $this->create($user, ['name' => self::oauthAgentName($user, $clientName), 'level' => AgentLevel::Write->value]);
+            // Its only credential is the client's OAuth token; "New token" on the Agents page can add one later.
+            $agent->token()->delete();
+
+            return $agent;
+        }
+
+        return $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
+            ?? throw ValidationException::withMessages([
+                'agent' => 'Choose one of your active agents in this workspace ('.(collect($this->oauthChoices($user))->pluck('name')->implode(', ') ?: 'none yet').') or create a new one.',
+            ]);
+    }
+
     /** Spec 8: an owner leaving the workspace takes their agents with them (history kept). */
     public function revokeAllOf(User $owner, Workspace $workspace): void
     {
@@ -175,24 +215,45 @@ class AgentService
     {
         $seesAll = in_array($viewer->workspaceRole($workspace), [WorkspaceRole::Owner, WorkspaceRole::Admin], true);
 
-        return Agent::with(['owner:id,name,email', 'projects:projects.id,key', 'token'])
+        $agents = Agent::with(['owner:id,name,email', 'projects:projects.id,key', 'token'])
             ->where('workspace_id', $workspace->id)
             ->where('status', '!=', AgentStatus::Revoked)
             ->unless($seesAll, fn ($q) => $q->where('owner_user_id', $viewer->id))
-            ->orderBy('name')->orderBy('id')->get()
-            ->map(fn (Agent $agent) => [
-                'id' => $agent->id,
-                'name' => $agent->name,
-                'description' => $agent->description,
-                'level' => $agent->permission_level->value,
-                'status' => $agent->status->value,
-                'projects' => $agent->projects->isEmpty() ? null : $agent->projects->pluck('key')->sort()->values()->all(),
-                'owner' => ['id' => $agent->owner->id, 'name' => $agent->owner->name, 'email' => $agent->owner->email],
-                'mine' => $agent->owner_user_id === $viewer->id,
-                'last_used_at' => $agent->last_used_at,
-                'expires_at' => $agent->token?->expires_at,
-                'created_at' => $agent->created_at,
-            ])->all();
+            ->orderBy('name')->orderBy('id')->get();
+        $connections = $this->oauthConnections($agents->modelKeys());
+
+        return $agents->map(fn (Agent $agent) => [
+            'id' => $agent->id,
+            'name' => $agent->name,
+            'description' => $agent->description,
+            'level' => $agent->permission_level->value,
+            'status' => $agent->status->value,
+            'projects' => $agent->projects->isEmpty() ? null : $agent->projects->pluck('key')->sort()->values()->all(),
+            'owner' => ['id' => $agent->owner->id, 'name' => $agent->owner->name, 'email' => $agent->owner->email],
+            'mine' => $agent->owner_user_id === $viewer->id,
+            'last_used_at' => $agent->last_used_at,
+            'has_token' => $agent->token !== null,
+            'expires_at' => $agent->token?->expires_at,
+            'created_at' => $agent->created_at,
+            'connections' => $connections[$agent->id] ?? [],
+        ])->all();
+    }
+
+    /**
+     * A-D3: names of the MCP clients each agent is connected through: an OAuth token not revoked, still valid or
+     * still refreshable.
+     *
+     * @param  list<int>  $agentIds
+     * @return array<int, list<string>>
+     */
+    private function oauthConnections(array $agentIds): array
+    {
+        return DB::table('oauth_access_tokens as t')->join('oauth_clients as c', 'c.id', '=', 't.client_id')
+            ->whereIn('t.agent_id', $agentIds)->where('t.revoked', false)
+            ->where(fn ($q) => $q->where('t.expires_at', '>', now())->orWhereExists(fn ($r) => $r->from('oauth_refresh_tokens as r')
+                ->whereColumn('r.access_token_id', 't.id')->where('r.revoked', false)->where('r.expires_at', '>', now())))
+            ->distinct()->orderBy('c.name')->get(['t.agent_id', 'c.name'])
+            ->groupBy('agent_id')->map(fn ($rows) => $rows->pluck('name')->all())->all();
     }
 
     /**
@@ -235,7 +296,7 @@ class AgentService
         $deny = fn (int $status, string $error, string $message) => throw new HttpResponseException(response()->json(['error' => $error, 'message' => $message], $status));
         $workspace = $agent->workspace()->first();
         if ($workspace && ! $workspace->setting('agents_enabled')) {
-            $deny(403, 'agents_disabled', "Agents are turned off in {$workspace->name}. An Owner or Admin can turn them on in Settings → Security.");
+            $deny(403, 'agents_disabled', self::disabledMessage($workspace));
         }
         match ($agent->status) {
             AgentStatus::Paused => $deny(403, 'agent_paused', "{$agent->label()} is paused. Its owner or a workspace Admin can resume it in Settings → Agents."),
@@ -249,6 +310,11 @@ class AgentService
             Agent::whereKey($agent->id)->update(['last_used_at' => $agent->last_used_at]);
             $agent->syncOriginal();
         }
+    }
+
+    public static function disabledMessage(Workspace $workspace): string
+    {
+        return "Agents are turned off in {$workspace->name}. An Owner or Admin can turn them on in Settings → Security.";
     }
 
     private function setStatus(Agent $agent, User $actor, AgentStatus $status, string $action): void

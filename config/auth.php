@@ -42,6 +42,12 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // A-D3: OAuth access tokens of MCP clients, accepted on /mcp only (routes/ai.php).
+        'oauth' => [
+            'driver' => 'passport',
+            'provider' => 'users',
+        ],
     ],
 
     /*

@@ -20,8 +20,9 @@ function rpc(?string $token, string $method, array $params = [], int $id = 1)
         ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => $id, 'method' => $method, 'params' => (object) $params]);
 }
 
-test('requests without a token get 401 with a bearer challenge', function () {
-    rpc(null, 'tools/list')->assertUnauthorized()->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", error="invalid_token"');
+test('requests without a token get 401 with a bearer challenge pointing at OAuth discovery (A-D3)', function () {
+    rpc(null, 'tools/list')->assertUnauthorized()
+        ->assertHeader('WWW-Authenticate', 'Bearer realm="mcp", resource_metadata="'.url('/.well-known/oauth-protected-resource/mcp').'"');
 });
 
 test('initialize and tools/list describe the server and every tool in one page', function () {

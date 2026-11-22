@@ -19,6 +19,7 @@ use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Laravel\Fortify\Fortify;
 use PragmaRX\Google2FA\Google2FA;
 use Tests\TestCase;
@@ -237,4 +238,66 @@ function enableTwoFactor(User $user): array
     Cache::flush();
 
     return $codes;
+}
+
+/** A redirect URI the default PM_MCP_REDIRECT_DOMAINS allows (claude.ai's connector callback). */
+const OAUTH_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+
+/** Registers an MCP client through laravel/mcp's dynamic client registration, as Claude Desktop does; returns its id. */
+function oauthClient(string $name = 'Claude Desktop', string $redirect = OAUTH_REDIRECT): string
+{
+    return test()->postJson('/oauth/register', ['client_name' => $name, 'redirect_uris' => [$redirect]])->assertCreated()->json('client_id');
+}
+
+/** @return array{0: string, 1: string} a PKCE verifier and its S256 challenge */
+function pkce(): array
+{
+    $verifier = Str::random(64);
+
+    return [$verifier, rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=')];
+}
+
+/** The authorization request a client sends, with S256 PKCE unless $query overrides it. */
+function oauthAuthorizeUrl(string $clientId, string $challenge, array $query = []): string
+{
+    return '/oauth/authorize?'.http_build_query([
+        'client_id' => $clientId, 'redirect_uri' => OAUTH_REDIRECT, 'response_type' => 'code',
+        'scope' => 'mcp:use', 'state' => 'state-123', 'code_challenge' => $challenge, 'code_challenge_method' => 'S256', ...$query,
+    ]);
+}
+
+/** $user opens the consent screen for $clientId and approves it as $agent (an agent id or 'new'); returns the code. */
+function oauthCode(User $user, string $clientId, int|string $agent, string $challenge): string
+{
+    $authToken = test()->actingAs($user)->get(oauthAuthorizeUrl($clientId, $challenge))->assertOk()->viewData('page')['props']['authToken'];
+    $location = test()->post('/oauth/authorize', ['auth_token' => $authToken, 'agent' => $agent])->assertRedirect()->headers->get('Location');
+    parse_str((string) parse_url($location, PHP_URL_QUERY), $query);
+
+    return $query['code'];
+}
+
+/** The token endpoint's answer to exchanging $code. */
+function oauthExchange(string $clientId, string $code, string $verifier)
+{
+    test()->flushHeaders();
+    app('auth')->forgetGuards();
+
+    return test()->postJson('/oauth/token', [
+        'grant_type' => 'authorization_code', 'client_id' => $clientId, 'redirect_uri' => OAUTH_REDIRECT,
+        'code_verifier' => $verifier, 'code' => $code,
+    ]);
+}
+
+/**
+ * The whole flow: register a client, consent as $user choosing $agent, exchange the code.
+ *
+ * @return array{access_token: string, refresh_token: string, client_id: string}
+ */
+function oauthConnect(User $user, int|string $agent, string $clientName = 'Claude Desktop'): array
+{
+    $clientId = oauthClient($clientName);
+    [$verifier, $challenge] = pkce();
+    $tokens = oauthExchange($clientId, oauthCode($user, $clientId, $agent, $challenge), $verifier)->assertOk()->json();
+
+    return [...$tokens, 'client_id' => $clientId];
 }

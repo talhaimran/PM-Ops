@@ -17,6 +17,8 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Laravel\Fortify\TwoFactorAuthenticatable;
+use Laravel\Passport\AccessToken as OAuthToken;
+use Laravel\Passport\TransientToken as OAuthTransientToken;
 use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -94,14 +96,23 @@ class User extends Authenticatable
     public function agent(): ?Agent
     {
         $token = $this->currentAccessToken();
-        if (! $token instanceof PersonalAccessToken || ! $token->agent_id) {
+        $agentId = $token instanceof PersonalAccessToken || $token instanceof OAuthToken ? $token->agent_id : null;
+        if (! $agentId) {
             return null;
         }
-        if ($this->requestAgent?->id !== $token->agent_id) {
-            $this->requestAgent = Agent::find($token->agent_id);
+        if ($this->requestAgent?->id !== $agentId) {
+            $this->requestAgent = Agent::find($agentId);
         }
 
         return $this->requestAgent;
+    }
+
+    /** The request came with a bearer token (an agent's Sanctum token, or an MCP client's OAuth token), not a session. */
+    public function viaToken(): bool
+    {
+        $token = $this->currentAccessToken();
+
+        return $token instanceof PersonalAccessToken || $token instanceof OAuthToken || $token instanceof OAuthTransientToken;
     }
 
     /** @return list<int>|null project ids the current agent is limited to; null when unrestricted */
@@ -115,12 +126,12 @@ class User extends Authenticatable
     /** People may write; an agent needs Write or Delete. A token with no agent never writes (it is refused anyway). */
     public function canWrite(): bool
     {
-        return ! $this->currentAccessToken() instanceof PersonalAccessToken || (bool) $this->agent()?->permission_level->canWrite();
+        return ! $this->viaToken() || (bool) $this->agent()?->permission_level->canWrite();
     }
 
     /** People may delete; an agent only at the Delete level. */
     public function canDelete(): bool
     {
-        return ! $this->currentAccessToken() instanceof PersonalAccessToken || (bool) $this->agent()?->permission_level->canDelete();
+        return ! $this->viaToken() || (bool) $this->agent()?->permission_level->canDelete();
     }
 }

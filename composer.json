@@ -12,6 +12,7 @@
         "laravel/fortify": "^1.42",
         "laravel/framework": "^13.17",
         "laravel/mcp": "^1.1",
+        "laravel/passport": "^13.12",
         "laravel/sanctum": "^4.0",
         "laravel/socialite": "^5.32",
         "laravel/tinker": "^3.0",
@@ -45,6 +46,7 @@
             "composer install",
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\"",
             "@php artisan key:generate",
+            "@php -r \"file_exists('storage/oauth-private.key') || passthru(PHP_BINARY.' artisan passport:keys');\"",
             "@php artisan migrate --force",
             "npm install --ignore-scripts",
             "npm run build"
