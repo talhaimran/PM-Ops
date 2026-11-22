@@ -46,7 +46,8 @@ class UpdateAiSettingsRequest extends FormRequest
     /** Save-time only; the request-time SSRF guard (DNS resolve, pinned IP, redirects) is required before any provider call — see CLAUDE.md. */
     private function endpointRule(string $attribute, mixed $value, Closure $fail): void
     {
-        if (filled($value) && $message = AiEndpoint::problem($value)) {
+        // Not a string: the 'string' rule already reports it; don't hand an array to the checker.
+        if (is_string($value) && filled($value) && $message = AiEndpoint::problem($value)) {
             $fail($message);
         }
     }

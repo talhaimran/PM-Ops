@@ -111,9 +111,16 @@ test('a save-time check refuses private, loopback, link-local, reserved, CGNAT, 
     'orchid v2' => 'https://[2001:20::1]', 'documentation 3fff' => 'https://[3fff::1]', '6to4' => 'https://[2002:c000:0201::1]', 'discard' => 'https://[100::1]',
     'NAT64 local-use' => 'https://[64:ff9b:1::1]', 'IETF block top' => 'https://[2001:1ff::1]', 'not global unicast' => 'https://[4000::1]',
     'documentation 1' => 'https://192.0.2.1', 'benchmarking' => 'https://198.18.0.1', 'documentation 2' => 'https://198.51.100.7', 'documentation 3' => 'https://203.0.113.9',
-    'IETF assignments' => 'https://192.0.0.8', '6to4 relay' => 'https://192.88.99.1',
+    'IETF assignments' => 'https://192.0.0.8', '6to4 relay' => 'https://192.88.99.1', 'Azure platform' => 'https://168.63.129.16', 'Azure platform mapped' => 'https://[::ffff:168.63.129.16]',
     'dot internal' => 'https://foo.internal', 'case and dot' => 'https://Metadata.Google.Internal.', 'with port' => 'https://10.0.0.5:8443/v1',
 ]);
+
+test('an endpoint that is not a string is a validation error, not a server error', function (mixed $endpoint) {
+    $this->actingAs($this->owner)->patchJson(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint])
+        ->assertUnprocessable()->assertJsonValidationErrors('endpoint');
+
+    expect(AiProvider::count())->toBe(0);
+})->with(['list' => [['https://api.example.com']], 'object' => [['url' => 'https://api.example.com']], 'number' => 12345]);
 
 test('public addresses pass the save-time check', function (string $endpoint) {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint])

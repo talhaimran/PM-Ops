@@ -13,10 +13,11 @@ class AiEndpoint
 
     /**
      * IPv4 ranges never a provider: IANA special-purpose blocks (this network, private, shared/CGNAT, loopback, link-local
-     * incl. cloud metadata, IETF assignments, documentation, 6to4 relay, benchmarking), multicast and reserved (incl. broadcast).
+     * incl. cloud metadata, IETF assignments, documentation, 6to4 relay, benchmarking), multicast and reserved (incl. broadcast),
+     * plus 168.63.129.16, Azure's platform address (VM agent, DNS, health probes) reachable from Azure VMs.
      */
     private const BLOCKED_V4 = [
-        '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24',
+        '168.63.129.16/32', '0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8', '169.254.0.0/16', '172.16.0.0/12', '192.0.0.0/24', '192.0.2.0/24',
         '192.88.99.0/24', '192.168.0.0/16', '198.18.0.0/15', '198.51.100.0/24', '203.0.113.0/24', '224.0.0.0/4', '240.0.0.0/4',
     ];
 
