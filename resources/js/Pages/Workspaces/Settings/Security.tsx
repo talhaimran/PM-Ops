@@ -67,7 +67,7 @@ export default function Security({
                                 {membersWithout2fa} {membersWithout2fa === 1 ? 'member' : 'members'} will have to set it up on their next visit.
                             </p>
                         )}
-                        <p className="text-sm text-muted">Agents that already exist keep working. Creating a new agent will need two-factor on.</p>
+                        <p className="text-sm text-muted">Agents whose owner hasn't turned on two-factor stop working until they do, and creating a new agent needs it on.</p>
                         <InputError message={form.errors.require_2fa} />
                         <div className="flex justify-end">
                             <PrimaryButton disabled={form.processing || !form.isDirty}>Save changes</PrimaryButton>

@@ -54,6 +54,7 @@ const sentences: Record<string, string> = {
     'agent.resumed': 'Resumed agent',
     'agent.revoked': 'Revoked agent',
     'agent.token_regenerated': 'Regenerated the token of agent',
+    'agent.oauth_connected': 'Connected an MCP client to agent',
     'agent_policy.changed': 'Changed the agent policy',
     'issue.purged': 'Purged deleted issue',
     'audit_log.exported': 'Exported the audit log',

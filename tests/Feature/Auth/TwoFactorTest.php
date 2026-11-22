@@ -141,7 +141,7 @@ describe('a workspace that requires it', function () {
         $this->actingAs($this->member)->post('/logout')->assertRedirect('/');
     });
 
-    test('creating a token needs it on; existing tokens keep working', function () {
+    test('creating a token needs it on; existing tokens are refused until it is', function () {
         $this->ws->forceFill(['settings' => []])->save();
         useWorkspace($this->ws);
         $old = app(AgentService::class)->create($this->member, ['name' => 'old', 'level' => 'read'])[1];
@@ -149,9 +149,10 @@ describe('a workspace that requires it', function () {
 
         expect(fn () => app(AgentService::class)->create($this->member, ['name' => 'new', 'level' => 'read']))
             ->toThrow(ValidationException::class, 'Acme requires two-factor authentication. Turn it on in your profile before creating an agent.');
-        $this->withToken($old)->getJson('/api/v1/projects')->assertOk();
+        $this->withToken($old)->getJson('/api/v1/projects')->assertForbidden()->assertJsonPath('error', 'two_factor_required');
 
         enableTwoFactor($this->member);
+        $this->withToken($old)->getJson('/api/v1/projects')->assertOk();
         expect(app(AgentService::class)->create($this->member->fresh(), ['name' => 'new', 'level' => 'read'])[1])->toBeString();
     });
 });

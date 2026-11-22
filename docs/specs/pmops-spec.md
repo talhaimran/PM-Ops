@@ -335,7 +335,7 @@ Section numbers below match the build order table. Each section lists decisions 
 - Profile → Security: QR code and secret, confirm with a code, 10 one-time recovery codes shown once; regenerate codes or turn 2FA off with the password.
 - Challenge after password or social sign-in; 5 code attempts per minute per user.
 - A workspace with `require_2fa` sends members without 2FA to setup before they can use it (they can still sign out or switch workspace). Turning it on shows how many members lack 2FA.
-- Creating a token in such a workspace needs 2FA on. Existing tokens keep working; the Security page says so.
+- Creating a token in such a workspace needs 2FA on. An agent whose owner lacks 2FA is refused (403 `two_factor_required`) until they turn it on; the Security page says so.
 
 #### 7.0f Google and GitHub sign-in
 

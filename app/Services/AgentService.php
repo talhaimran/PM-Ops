@@ -197,20 +197,22 @@ class AgentService
             [$agent] = $this->create($user, ['name' => self::oauthAgentName($user, $clientName), 'level' => AgentLevel::Write->value]);
             // Its only credential is the client's OAuth token; "New token" on the Agents page can add one later.
             $agent->token()->delete();
-
-            return $agent;
+        } else {
+            $agent = $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
+                ?? throw ValidationException::withMessages([
+                    'agent' => 'Choose one of your active agents in this workspace ('.(collect($this->oauthChoices($user))->pluck('name')->implode(', ') ?: 'none yet').') or create a new one.',
+                ]);
         }
+        // The client name is untrusted text from dynamic registration; no code or token goes in the row.
+        $this->log('agent.oauth_connected', $agent, $user, ['client' => Str::limit(trim($clientName), 60, '')]);
 
-        return $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
-            ?? throw ValidationException::withMessages([
-                'agent' => 'Choose one of your active agents in this workspace ('.(collect($this->oauthChoices($user))->pluck('name')->implode(', ') ?: 'none yet').') or create a new one.',
-            ]);
+        return $agent;
     }
 
-    /** Spec 8: an owner leaving the workspace takes their agents with them (history kept). */
-    public function revokeAllOf(User $owner, Workspace $workspace): void
+    /** Spec 8: an owner leaving the workspace (or deleting their account) takes their agents with them (history kept). */
+    public function revokeAllOf(User $owner, Workspace $workspace, string $reason = 'owner_left'): void
     {
-        $this->agentsOf($workspace->id, $owner->id)->get()->each(fn (Agent $agent) => $this->revoke($agent, null, 'owner_left'));
+        $this->agentsOf($workspace->id, $owner->id)->get()->each(fn (Agent $agent) => $this->revoke($agent, null, $reason));
     }
 
     /** Revoked agents are left out. Owners and Admins see every agent in the workspace, `mine` flags their own. */

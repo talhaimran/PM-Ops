@@ -4,6 +4,7 @@ use App\Enums\AgentLevel;
 use App\Enums\AgentStatus;
 use App\Enums\Entitlement;
 use App\Enums\ProjectRole;
+use App\Enums\WorkspaceRole;
 use App\Mcp\Servers\LocalPmServer;
 use App\Mcp\Servers\PmServer;
 use App\Mcp\Tools\DeleteLabel;
@@ -358,4 +359,23 @@ test('final review: with require_2fa on, an owner without two-factor has every a
     asToken($plain)->getJson('/api/v1/projects')->assertOk();
     mcpToolsList($oauth['access_token'])->assertOk();
     PmServer::tool(ListProjects::class)->assertOk();
+});
+
+test('final review: deleting an account revokes its agents in every workspace first, leaving agent.revoked rows', function () {
+    $sam = addMember($this->web, User::factory()->create(['password' => 'password']), ProjectRole::Member);
+    [$one] = makeAgent($sam, AgentLevel::Write, name: 'sam-one');
+    $beta = makeWorkspace($this->owner, 'beta');
+    $beta->addMember($sam, WorkspaceRole::Member);
+    [$two] = makeAgent($sam, AgentLevel::Write, name: 'sam-two');
+    AuditLog::query()->toBase()->delete();
+
+    $this->flushHeaders();
+    app('auth')->forgetGuards();
+    $this->actingAs($sam)->delete('/profile', ['password' => 'password'])->assertSessionHasNoErrors();
+
+    $rows = AuditLog::where('action', 'agent.revoked')->orderBy('target_id')->get();
+    expect($rows->pluck('target_id')->all())->toBe([$one->id, $two->id])
+        ->and($rows->pluck('workspace_id')->all())->toBe([$this->ws->id, $beta->id])
+        ->and($rows->pluck('metadata')->all())->each->toEqual(['by' => 'system', 'reason' => 'owner_deleted'])
+        ->and(User::whereKey($sam->id)->exists())->toBeFalse();
 });

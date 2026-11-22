@@ -7,7 +7,7 @@ A lightweight, self-hosted, Jira-like project tracker that people use through a 
 - **Issues:** Task, Bug, Story and Epic types, priorities, assignee, labels, story points, due dates, epics and one level of sub-tasks. Descriptions and comments are Markdown, and an activity log records who changed what and whether it came via web, API or MCP (with the token name).
 - **Kanban board** with drag and drop and per-project columns. **Backlog** with drag-to-rank. **Sprints:** create, start and complete, with unfinished issues moved to the backlog or the next sprint.
 - **List view**, cross-project **search**, and a **dashboard** with my issues, status counts and sprint progress.
-- **For agents:** 38 MCP tools over HTTP or stdio, a REST API with OpenAPI docs, agents with read, write or delete levels and project-scoped tokens, Idempotency-Key, per-token rate limits, bulk create/update, and errors that list the valid options.
+- **For agents:** 38 MCP tools over HTTP or stdio, a REST API with OpenAPI docs, agents with read, write or delete levels and project-scoped tokens, Idempotency-Key, per-agent rate limits, bulk create/update, and errors that list the valid options.
 
 See [AGENTS.md](AGENTS.md) for how agents should use it. [SPEC.md](SPEC.md) is the product spec, and [PROGRESS.md](PROGRESS.md) logs the decisions made while building it.
 
@@ -81,7 +81,7 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `APP_URL` | `http://localhost` | Base URL used in links and printed endpoints. Set it to where you serve the app. |
 | `MAIL_MAILER` | `log` | Invitations are written to `storage/logs/laravel.log`. Set SMTP to really send them. |
 | `PM_EDITION` | `self_hosted` | `self_hosted` (one workspace, sign-up by invitation after the first person) or `cloud` (anyone signs up, many workspaces, free plan limits). See [Editions](#editions). |
-| `PM_API_RATE_LIMIT` | `120` | Requests per minute per API token (REST and MCP over HTTP), when the workspace has no `api_per_minute` limit. |
+| `PM_API_RATE_LIMIT` | `120` | Requests per minute per agent (REST and MCP over HTTP), when the workspace has no `api_per_minute` limit. |
 | `PM_IDEMPOTENCY_TTL_HOURS` | `24` | How long a response is kept for `Idempotency-Key` replay. |
 | `PM_INVITE_RATE_LIMIT` | `30` | Invitation emails per hour per user (web and API). |
 | `PM_MCP_TOKEN` | — | Token the stdio MCP server acts as. Usually set in the MCP client's config, not `.env`. |
@@ -205,14 +205,14 @@ curl -s -X POST http://localhost:8000/api/v1/projects/WEB/issues \
 
 ## MCP server
 
-The same server (`App\Mcp\Servers\PmServer`, 38 tools plus `issue://{key}` and `project://{key}` resources) is available over two transports. Both act as the owner of an API token, so that token's read-only and project scope apply.
+The same server (`App\Mcp\Servers\PmServer`, 38 tools plus `issue://{key}` and `project://{key}` resources) is available over two transports. Both act as one of your agents, so that agent's level and project scope apply.
 
 | Transport | How it runs | Auth |
 |---|---|---|
 | HTTP | `POST http://localhost:8000/mcp` (the app must be running) | `Authorization: Bearer <token>` header |
 | stdio | `php artisan mcp:start pm` (the client starts it) | `PM_MCP_TOKEN=<token>` environment variable |
 
-**OAuth (HTTP only).** Run `php artisan passport:keys` once per install (see Setup) before the first client connects; without keys OAuth refuses to start. A client that speaks MCP OAuth (Claude Desktop's and claude.ai's custom connectors, Cursor, VS Code, the MCP Inspector) needs no token: add `http://localhost:8000/mcp` as the server URL (in Cursor or VS Code, as a remote HTTP server with no headers). It registers itself, opens a consent screen in the browser, and you pick which of your agents (in your current workspace) it acts as, or create "{First name}'s {client} agent" at Read and write. The consent screen says where the client will send you back and that it registered itself (PmOps doesn't verify apps), and applies the workspace's rules (sign-in methods, required two-factor, agents turned on). Each connection shows under that agent in Settings → Agents; pausing or revoking the agent stops it. A **new token** for the agent does not disconnect its OAuth clients: revoke the agent to cut them off (disconnecting one client is planned).
+**OAuth (HTTP only).** Run `php artisan passport:keys` once per install (see Setup) before the first client connects; without keys OAuth refuses to start. A client that speaks MCP OAuth (Claude Desktop's and claude.ai's custom connectors, Cursor, VS Code, the MCP Inspector) needs no token: add `http://localhost:8000/mcp` as the server URL (in Cursor or VS Code, as a remote HTTP server with no headers). It registers itself, opens a consent screen in the browser, and you pick which of your agents (in your current workspace) it acts as, or create "{First name}'s {client} agent" at Read and write. The consent screen says where the client will send you back and that it registered itself (PmOps doesn't verify apps), and applies the workspace's rules (sign-in methods, required two-factor, agents turned on). When a workspace requires two-factor, its agents stop working (403 `two_factor_required`, on REST, MCP and OAuth alike) until their owner turns it on. Each connection shows under that agent in Settings → Agents; pausing or revoking the agent stops it. A **new token** for the agent does not disconnect its OAuth clients: revoke the agent to cut them off (disconnecting one client is planned).
 
 The redirect allowlist is a trust boundary: any app can register itself, and the allowlist decides where a consent code may be sent. The defaults (`claude.ai`, `claude.com`, `localhost`, and the `cursor`/`vscode` schemes) rely on those clients' own state checks to reject a code they didn't ask for. On a self-hosted install, set `PM_MCP_REDIRECT_DOMAINS` and `PM_MCP_REDIRECT_SCHEMES` to only the callbacks your people actually use, for example `PM_MCP_REDIRECT_DOMAINS=claude.ai` and `PM_MCP_REDIRECT_SCHEMES=` (empty) if everyone connects from claude.ai. OAuth tokens work on `/mcp` only, not the REST API. In production, set `PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY` instead of the key files if storage isn't persistent.
 

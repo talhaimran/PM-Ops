@@ -135,6 +135,21 @@ test('A-L6: an agent cannot create an issue in the last column', function () {
     asToken($this->plain)->postJson('/api/v1/projects/WEB/issues', ['title' => 'x', 'status' => 'In Review'])->assertCreated();
 });
 
+test('A-L6: in a one-column project the default column is Done, so an agent cannot create an issue there either', function () {
+    $solo = makeProject($this->owner, 'SOLO');
+    $solo->columns()->where('name', '!=', 'Done')->delete();
+    $message = "Agents can't create issues in Done. Create it in another column, then move it; a person approves the move.";
+
+    asToken($this->plain)->postJson('/api/v1/projects/SOLO/issues', ['title' => 'x'])->assertUnprocessable()->assertJsonPath('errors.status.0', $message);
+    agentTool($this, CreateIssue::class, ['project' => 'SOLO', 'title' => 'x'])->assertHasErrors([$message]);
+    expect($solo->issues()->count())->toBe(0);
+
+    $this->flushHeaders();
+    app('auth')->forgetGuards();
+    $this->actingAs($this->owner)->post(w('/projects/SOLO/issues'), ['title' => 'by a person'])->assertSessionHasNoErrors();
+    expect($solo->issues()->count())->toBe(1);
+});
+
 test('A-L7: a mixed update applies the other fields and holds the status', function () {
     asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['title' => 'Renamed', 'priority' => 'high', 'status' => 'Done'])
         ->assertStatus(202)

@@ -67,7 +67,8 @@ class AppServiceProvider extends ServiceProvider
 
         // Per-agent API budget (spec 7.0c, 8 A3): api_per_minute and api_per_day of the token's workspace, else
         // PM_API_RATE_LIMIT per minute and no daily limit. Keyed by agent, so a regenerated token keeps the count and
-        // another agent of the same owner isn't slowed. Runs before ResolveTokenWorkspace, so it reads the token's agent.
+        // another agent of the same owner isn't slowed. Runs before ResolveTokenWorkspace (the middleware priority list puts ThrottleRequests ahead of it), so it
+        // reads the token's agent itself and the workspace from the agent row.
         RateLimiter::for('api', function (Request $request) {
             $user = $request->user();
             $agent = $user?->agent();
