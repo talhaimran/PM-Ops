@@ -20,16 +20,15 @@ class AiSettingsService
 {
     public function __construct(private AuditLogger $audit) {}
 
-    /** @return array{provider: AiProviderType, model: string, endpoint: ?string, source: 'env'|'workspace'}|null  No key. */
+    /** The usable connection, or null. A connection is usable when it has what its provider needs (see problems()). No key in the result. @return array{provider: AiProviderType, model: string, endpoint: ?string, source: 'env'|'workspace'}|null */
     public function for(Workspace $workspace): ?array
     {
         if ($env = $this->env()) {
             return $env;
         }
-        $row = $this->row($workspace);
+        $stored = $this->stored($workspace);
 
-        // A row with no provider only holds the cap and usage.
-        return $row?->provider ? ['provider' => $row->provider, 'model' => $row->model, 'endpoint' => $row->endpoint, 'source' => 'workspace'] : null;
+        return $stored && ! $this->problems($stored, $this->hasKey($workspace)) ? $stored : null;
     }
 
     /** The only way to read the key (for the provider calls of Mode C, search and release notes). */
@@ -56,7 +55,7 @@ class AiSettingsService
     /** The key belongs to one provider and endpoint: moving either means the old key must not go along. */
     public function keyMoves(Workspace $workspace, AiProviderType $provider, ?string $endpoint): bool
     {
-        $current = $this->for($workspace);
+        $current = $this->env() ?? $this->stored($workspace);
 
         return $current !== null && $this->hasKey($workspace) && ($current['provider'] !== $provider || $current['endpoint'] !== (filled($endpoint) ? $endpoint : null));
     }
@@ -147,10 +146,22 @@ class AiSettingsService
         return strtolower($url['scheme']).'://'.$url['host'].(isset($url['port']) ? ":{$url['port']}" : '');
     }
 
-    /** PM_AI_PROVIDER is set but unusable (unknown provider or no PM_AI_MODEL): the page says so. */
-    public function envIgnored(): bool
+    /** Why PM_AI_PROVIDER is being ignored, naming variables only and never their values; null when it is unset or in use. */
+    public function envWarning(): ?string
     {
-        return filled(config('pm.ai.provider')) && $this->env() === null;
+        if (blank(config('pm.ai.provider'))) {
+            return null;
+        }
+        $connection = $this->envConnection();
+        if (! $connection) {
+            return 'PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.';
+        }
+        $problems = $this->problems($connection, filled(config('pm.ai.key')));
+        $names = ['key_missing' => 'PM_AI_KEY is missing', 'endpoint_missing' => 'PM_AI_ENDPOINT is missing',
+            'endpoint_not_allowed' => 'PM_AI_ENDPOINT is not allowed (it must be a public https:// address with no login or query)'];
+
+        return $problems ? 'PM_AI_PROVIDER is set on your server but the connection '.(array_intersect($problems, ['key_missing', 'endpoint_missing']) ? 'is incomplete' : 'can’t be used').': '
+            .implode('; ', array_map(fn ($p) => $names[$p], $problems)).'.' : null;
     }
 
     /** The plaintext key lives only in this marked frame on its way to ciphertext (stack traces print arguments). */
@@ -159,14 +170,41 @@ class AiSettingsService
         return Crypt::encryptString($key);
     }
 
-    /** PM_AI_PROVIDER with a known provider and a model: the install's own connection, which no workspace overrides. */
+    /** The server's own connection (PM_AI_*), when it is usable: no workspace overrides it. Otherwise ignored (see envWarning()). */
     private function env(): ?array
+    {
+        $connection = $this->envConnection();
+
+        return $connection && ! $this->problems($connection, filled(config('pm.ai.key'))) ? $connection : null;
+    }
+
+    private function envConnection(): ?array
     {
         $provider = AiProviderType::tryFrom((string) config('pm.ai.provider'));
 
         return $provider && filled(config('pm.ai.model'))
             ? ['provider' => $provider, 'model' => config('pm.ai.model'), 'endpoint' => config('pm.ai.endpoint') ?: null, 'source' => 'env']
             : null;
+    }
+
+    private function stored(Workspace $workspace): ?array
+    {
+        $row = $this->row($workspace);
+
+        // A row with no provider only holds the cap and usage.
+        return $row?->provider ? ['provider' => $row->provider, 'model' => $row->model, 'endpoint' => $row->endpoint, 'source' => 'workspace'] : null;
+    }
+
+    /** What stops a connection being used: the key its provider needs, the endpoint openai_compatible needs, and an endpoint that fails AiEndpoint. @return list<string> */
+    private function problems(array $connection, bool $hasKey): array
+    {
+        $endpoint = $connection['endpoint'];
+
+        return array_values(array_filter([
+            $connection['provider']->needsKey() && ! $hasKey ? 'key_missing' : null,
+            $connection['provider'] === AiProviderType::OpenAiCompatible && blank($endpoint) ? 'endpoint_missing' : null,
+            filled($endpoint) && AiEndpoint::problem($endpoint) !== null ? 'endpoint_not_allowed' : null,
+        ]));
     }
 
     private function row(Workspace $workspace): ?AiProvider

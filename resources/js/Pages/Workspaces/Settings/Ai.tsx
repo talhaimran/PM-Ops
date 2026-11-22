@@ -17,13 +17,12 @@ interface Connection {
     provider: string;
     model: string;
     endpoint: string | null;
-    endpoint_hidden: boolean;
     has_key: boolean;
     cap: number | null;
     used: number;
 }
 
-export default function Ai({ connection, providers, env_ignored, mode_c }: { connection: Connection | null; providers: { value: string; label: string }[]; env_ignored: boolean; mode_c: boolean }) {
+export default function Ai({ connection, providers, env_warning, mode_c }: { connection: Connection | null; providers: { value: string; label: string }[]; env_warning: string | null; mode_c: boolean }) {
     const fromServer = connection?.source === 'env';
     const form = useForm({
         provider: connection?.provider ?? providers[0].value,
@@ -50,9 +49,9 @@ export default function Ai({ connection, providers, env_ignored, mode_c }: { con
                         One connection serves Mode C, plain-English search and AI release notes. Without it those stay hidden; agents using the API or MCP still work.
                     </p>
 
-                    {env_ignored && (
+                    {env_warning && (
                         <p role="status" className="mt-4 rounded-card tint-warn p-3 text-sm">
-                            PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.
+                            {env_warning}
                         </p>
                     )}
 
@@ -67,7 +66,7 @@ export default function Ai({ connection, providers, env_ignored, mode_c }: { con
                                 <dt className="text-muted">Model</dt>
                                 <dd className="break-all text-text">{connection.model}</dd>
                                 <dt className="text-muted">Endpoint</dt>
-                                <dd className="break-all text-text">{connection.endpoint_hidden ? 'Set on your server' : (connection.endpoint ?? 'Provider default')}</dd>
+                                <dd className="break-all text-text">{connection.endpoint ?? 'Provider default'}</dd>
                                 <dt className="text-muted">API key</dt>
                                 <dd className="text-text">{connection.has_key ? 'Set on your server' : 'Not set'}</dd>
                             </dl>

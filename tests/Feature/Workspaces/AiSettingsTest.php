@@ -107,13 +107,18 @@ test('a save-time check refuses private, loopback, link-local, reserved, CGNAT, 
     'unspecified v6' => 'https://[::]', 'NAT64 private' => 'https://[64:ff9b::a00:1]', 'bad v6' => 'https://[fe80::1%25eth0]',
     'decimal ip' => 'https://2130706433', 'short ip' => 'https://127.1', 'hex ip' => 'https://0x7f.0.0.1',
     'metadata name' => 'https://metadata.google.internal', 'metadata short' => 'https://metadata', 'instance-data' => 'https://instance-data',
+    'documentation v6' => 'https://[2001:db8::1]', 'benchmarking v6' => 'https://[2001:2::1]', 'teredo' => 'https://[2001::1]', 'orchid' => 'https://[2001:10::1]',
+    'orchid v2' => 'https://[2001:20::1]', 'documentation 3fff' => 'https://[3fff::1]', '6to4' => 'https://[2002:c000:0201::1]', 'discard' => 'https://[100::1]',
+    'NAT64 local-use' => 'https://[64:ff9b:1::1]', 'IETF block top' => 'https://[2001:1ff::1]', 'not global unicast' => 'https://[4000::1]',
+    'documentation 1' => 'https://192.0.2.1', 'benchmarking' => 'https://198.18.0.1', 'documentation 2' => 'https://198.51.100.7', 'documentation 3' => 'https://203.0.113.9',
+    'IETF assignments' => 'https://192.0.0.8', '6to4 relay' => 'https://192.88.99.1',
     'dot internal' => 'https://foo.internal', 'case and dot' => 'https://Metadata.Google.Internal.', 'with port' => 'https://10.0.0.5:8443/v1',
 ]);
 
 test('public addresses pass the save-time check', function (string $endpoint) {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint])
         ->assertSessionHasNoErrors();
-})->with(['name' => 'https://api.example.com', 'name and path' => 'https://api.example.com:8443/v1', 'public v4' => 'https://8.8.8.8', 'public v6' => 'https://[2606:4700:4700::1111]', 'internal in a name' => 'https://internal.example.com']);
+})->with(['name' => 'https://api.example.com', 'name and path' => 'https://api.example.com:8443/v1', 'public v4' => 'https://8.8.8.8', 'public v6' => 'https://[2606:4700:4700::1111]', 'internal in a name' => 'https://internal.example.com', 'v6 just outside 2001::/23' => 'https://[2001:200::1]', 'v6 just outside 2001:db8' => 'https://[2001:db9::1]']);
 
 test('local model addresses are allowed on a self-hosted install and refused on Cloud with their own message', function (string $endpoint) {
     $payload = [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint];
@@ -217,23 +222,17 @@ test('with PM_AI_PROVIDER set the page is read-only, says so, and every write is
     expect(AiProvider::count())->toBe(0)->and(AuditLog::where('action', 'like', 'ai_provider.%')->count())->toBe(0);
 });
 
-test('an endpoint set on the server is shown without login, query or fragment, and hidden when it cannot be read', function () {
-    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'HTTPS://user:tok-SECRET@gw.example.com:8443/v1?api-key=sk-env-QUERY#zzfrag']);
+test('an endpoint set on the server is shown as scheme, host and port only', function () {
+    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'HTTPS://gw.example.com:8443/v1/keys/sk-path-SECRET']);
 
     $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertOk();
-    $response->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443')->where('connection.endpoint_hidden', false));
-    foreach (['tok-SECRET', 'sk-env-QUERY', 'zzfrag', 'user:'] as $leak) {
-        expect($response->getContent())->not->toContain($leak);
-    }
+    $response->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443')->where('connection.source', 'env'));
+    expect($response->getContent())->not->toContain('sk-path-SECRET');
     // The raw value stays available to the provider calls.
-    expect($this->ai->for($this->ws)['endpoint'])->toContain('tok-SECRET');
+    expect($this->ai->for($this->ws)['endpoint'])->toContain('sk-path-SECRET');
 
-    envAi(['endpoint' => 'not a url?token=sk-env-QUERY']);
-    $response = $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', null)->where('connection.endpoint_hidden', true));
-    expect($response->getContent())->not->toContain('sk-env-QUERY');
-
-    envAi(['endpoint' => null]);
-    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', null)->where('connection.endpoint_hidden', false));
+    envAi(['endpoint' => null, 'provider' => 'anthropic']);
+    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', null));
 });
 
 test('with PM_AI_PROVIDER set the monthly cap is still editable, in a row that holds only the cap', function () {
@@ -270,18 +269,60 @@ test('the scheme is case-insensitive and stored in lowercase', function () {
     $this->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => 'HTTP://example.com'])->assertSessionHasErrors('endpoint');
 });
 
-test('a PM_AI_PROVIDER that is set but not used gets a hint that echoes no values', function (array $env, bool $hint) {
-    envAi($env);
+test('a PM_AI_PROVIDER that is set but not used is ignored, with a warning that echoes no values', function (array $env, ?string $warning) {
+    envAi(['endpoint' => null, 'key' => null, ...$env]);
 
-    $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('env_ignored', $hint)->where('connection', null));
-    expect($response->getContent())->not->toContain('bogus-value');
-    expect(file_get_contents(resource_path('js/Pages/Workspaces/Settings/Ai.tsx')))
-        ->toContain('PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.');
+    $response = $this->actingAs($this->owner)->get(w('/settings/ai'))
+        ->assertInertia(fn (Assert $page) => $page->where('env_warning', $warning)->where('connection', null)->where('ai', ['enabled' => false]));
+    foreach (['bogus-value', 'sk-env-SECRET', '169.254'] as $value) {
+        expect($response->getContent())->not->toContain($value);
+    }
+    expect($this->ai->modeCEnabled($this->project))->toBeFalse();
 })->with([
-    'unknown provider' => [['provider' => 'bogus-value', 'model' => 'm'], true],
-    'no model' => [['provider' => 'openai', 'model' => null], true],
-    'unset' => [['provider' => null, 'model' => null], false],
+    'unknown provider' => [['provider' => 'bogus-value', 'model' => 'm', 'key' => 'sk-env-SECRET'], 'PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.'],
+    'no model' => [['provider' => 'openai', 'model' => null, 'key' => 'sk-env-SECRET'], 'PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.'],
+    'no key' => [['provider' => 'anthropic', 'model' => 'm'], 'PM_AI_PROVIDER is set on your server but the connection is incomplete: PM_AI_KEY is missing.'],
+    'compatible without endpoint' => [['provider' => 'openai_compatible', 'model' => 'm'], 'PM_AI_PROVIDER is set on your server but the connection is incomplete: PM_AI_ENDPOINT is missing.'],
+    'metadata endpoint' => [['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'sk-env-SECRET', 'endpoint' => 'https://169.254.169.254/latest'], 'PM_AI_PROVIDER is set on your server but the connection can’t be used: PM_AI_ENDPOINT is not allowed (it must be a public https:// address with no login or query).'],
+    'login in endpoint' => [['provider' => 'anthropic', 'model' => 'm', 'key' => 'sk-env-SECRET', 'endpoint' => 'https://user:pw@gw.example.com/v1'], 'PM_AI_PROVIDER is set on your server but the connection can’t be used: PM_AI_ENDPOINT is not allowed (it must be a public https:// address with no login or query).'],
+    'missing key and endpoint' => [['provider' => 'openai_compatible', 'model' => 'm', 'key' => null], 'PM_AI_PROVIDER is set on your server but the connection is incomplete: PM_AI_ENDPOINT is missing.'],
+    'unset' => [['provider' => null, 'model' => null], null],
 ]);
+
+test('an unusable server config is ignored, so Admins can still set their own provider', function () {
+    envAi(['provider' => 'anthropic', 'model' => 'm', 'key' => null]);
+
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), $this->payload)->assertSessionHasNoErrors();
+
+    expect($this->ai->for($this->ws)['source'])->toBe('workspace')->and($this->ai->key($this->ws))->toBe('sk-test-SECRET');
+});
+
+test('a complete server config is read-only and enabled, with no warning', function () {
+    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'https://gw.example.com/v1']);
+
+    $this->actingAs($this->owner)->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page
+        ->where('env_warning', null)->where('connection.source', 'env')->where('ai', ['enabled' => true]));
+    expect($this->ai->modeCEnabled($this->project))->toBeTrue();
+});
+
+test('a local server endpoint is usable on a self-hosted install and ignored on Cloud', function () {
+    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => null, 'endpoint' => 'http://localhost:11434/v1']);
+    expect($this->ai->for($this->ws)['source'])->toBe('env');
+
+    config(['pm.edition' => 'cloud']);
+    expect($this->ai->for($this->ws))->toBeNull();
+});
+
+test('a stored provider that stopped being usable is not a provider, and its key still does not follow a new endpoint', function () {
+    $local = ['provider' => 'openai_compatible', 'model' => 'm', 'endpoint' => 'http://localhost:11434/v1'];
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$local, 'api_key' => 'sk-local']);
+
+    config(['pm.edition' => 'cloud']);
+    expect($this->ai->for($this->ws))->toBeNull()->and($this->ai->modeCEnabled($this->project))->toBeFalse();
+
+    $this->patch(w('/settings/ai'), [...$local, 'endpoint' => 'https://gw.example.com/v1', 'api_key' => '']);
+    expect($this->ai->key($this->ws))->toBeNull();
+});
 
 test('the environment wins over a stored provider, and an unknown PM_AI_PROVIDER is ignored', function () {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), $this->payload);

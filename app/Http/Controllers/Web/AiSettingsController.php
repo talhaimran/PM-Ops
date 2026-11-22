@@ -34,12 +34,11 @@ class AiSettingsController extends Controller
                 'provider' => $connection['provider']->value,
                 'model' => $connection['model'],
                 'endpoint' => $shown,
-                'endpoint_hidden' => $endpoint !== null && $shown === null,
                 'has_key' => $this->ai->hasKey($workspace),
                 ...$this->ai->usage($workspace),
             ] : null,
             'providers' => array_map(fn (AiProviderType $p) => ['value' => $p->value, 'label' => $p->label()], AiProviderType::cases()),
-            'env_ignored' => $this->ai->envIgnored(),
+            'env_warning' => $this->ai->envWarning(),
             'mode_c' => (bool) $workspace->setting('mode_c_enabled'),
         ]);
     }
