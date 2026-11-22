@@ -284,8 +284,8 @@ class AgentService
     }
 
     /**
-     * Refuses a paused or revoked agent, one in a workspace scheduled for deletion, or one whose owner lacks the
-     * workspace's required two-factor (REST, MCP over HTTP, OAuth and every stdio tool call). Re-reads the agent, so a
+     * Refuses a paused or revoked agent, or one in a workspace scheduled for deletion or with agents turned off (REST,
+     * MCP over HTTP, OAuth and every stdio tool call). Re-reads the agent, so a
      * long-lived process sees a pause, revoke or level change at its next call. Bumps last_used_at at most once a minute.
      */
     public function ensureUsable(?Agent $agent): void
