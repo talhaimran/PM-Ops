@@ -53,14 +53,17 @@ class ProjectService
         });
     }
 
-    /** @param array{name?: string, description?: ?string, agent_instructions?: ?string} $data */
+    /** @param array{name?: string, description?: ?string, agent_instructions?: ?string, mode_c_enabled?: bool} $data */
     public function update(Project $project, array $data): Project
     {
         return DB::transaction(function () use ($project, $data) {
             if (array_key_exists('agent_instructions', $data)) {
                 $this->setInstructions($project, $data['agent_instructions']);
             }
-            $project->update(Arr::except($data, 'agent_instructions'));
+            if (array_key_exists('mode_c_enabled', $data)) {
+                $this->setModeC($project, (bool) $data['mode_c_enabled']);
+            }
+            $project->update(Arr::except($data, ['agent_instructions', 'mode_c_enabled']));
 
             return $project;
         });
@@ -77,6 +80,18 @@ class ProjectService
         $settings->instructions = $text;
         $settings->save();
         $this->audit->log('project.agent_settings_changed', $project, ['instructions_changed' => true], $this->current->get());
+    }
+
+    /** A5: the project's Mode C switch; no row means on. */
+    private function setModeC(Project $project, bool $on): void
+    {
+        $settings = ProjectAgentSettings::firstOrNew(['project_id' => $project->id]);
+        if (($settings->mode_c_enabled ?? true) === $on) {
+            return;
+        }
+        $settings->mode_c_enabled = $on;
+        $settings->save();
+        $this->audit->log('project.agent_settings_changed', $project, ['mode_c_enabled' => $on], $this->current->get());
     }
 
     public function delete(Project $project): void

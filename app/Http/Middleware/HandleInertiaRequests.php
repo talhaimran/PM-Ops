@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AiSettingsService;
 use App\Services\CurrentWorkspace;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -46,6 +47,8 @@ class HandleInertiaRequests extends Middleware
             },
             'workspaces' => fn () => $request->user()?->workspaces()->orderBy('name')->get(['name', 'slug'])
                 ->map(fn ($w) => ['name' => $w->name, 'slug' => $w->slug])->all() ?? [],
+            // Spec 8 (A5): only whether a provider is set; plain-English search and Mode C hide their controls without one.
+            'ai' => fn () => ['enabled' => app(CurrentWorkspace::class)->id() && app(AiSettingsService::class)->for(app(CurrentWorkspace::class)->get()) !== null],
             'edition' => config('pm.edition'),
             'flash' => [
                 'token' => fn () => $request->session()->get('token'),

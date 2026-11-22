@@ -7,6 +7,7 @@ use App\Mcp\Servers\LocalPmServer;
 use App\Mcp\Servers\PmServer;
 use App\Mcp\Tools;
 use App\Models\Agent;
+use App\Models\AiProvider;
 use App\Models\Column;
 use App\Models\Comment;
 use App\Models\Issue;
@@ -148,6 +149,11 @@ function isolationRouteCases(): array
         'POST {workspace}/settings/agents/{agent}/regenerate' => ['alpha/settings/agents/{T}/regenerate', []],
         'DELETE {workspace}/settings/agents/{agent}' => ['alpha/settings/agents/{T}', []],
         'PATCH {workspace}/settings/agent-policy' => ['alpha/settings/agent-policy', ['agents_enabled' => true]],
+        'GET {workspace}/settings/ai' => ['alpha/settings/ai', []],
+        'PATCH {workspace}/settings/ai' => ['alpha/settings/ai', ['provider' => 'anthropic', 'model' => 'claude-x', 'api_key' => 'sk-alpha']],
+        'DELETE {workspace}/settings/ai' => ['alpha/settings/ai', []],
+        'PATCH {workspace}/settings/ai/cap' => ['alpha/settings/ai/cap', ['monthly_token_cap' => 5]],
+        'PATCH {workspace}/settings/ai/mode-c' => ['alpha/settings/ai/mode-c', ['mode_c_enabled' => false]],
         'GET {workspace}/settings/general' => ['alpha/settings/general', []],
         'PATCH {workspace}/settings/general' => ['alpha/settings/general', ['name' => 'Alpha', 'slug' => 'alpha', 'members_can_create_projects' => true]],
         // A wrong confirmation: deleting A for real would end the remaining cases.
@@ -310,6 +316,7 @@ function workspaceSnapshot(Workspace $w): string
         DB::table('personal_access_tokens')->where('workspace_id', $w->id)->orderBy('id')->get(['id', 'name', 'abilities']),
         DB::table('agents')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('approval_requests')->where('workspace_id', $w->id)->orderBy('id')->get(),
+        DB::table('ai_providers')->where('workspace_id', $w->id)->orderBy('id')->get(),
     ]));
 }
 
@@ -331,6 +338,7 @@ beforeEach(function () {
     $this->bSprint = app(SprintService::class)->create($ops, ['name' => 'B-SECRET sprint']);
     $this->bInvitation = app(InvitationService::class)->invite($this->b, $this->bob, 'carol@example.com', WorkspaceRole::Member, $ops, ProjectRole::Member);
     $this->annB = app(AgentService::class)->create($this->ann, ['name' => 'B-SECRET token', 'level' => 'delete']);
+    AiProvider::create(['workspace_id' => $this->b->id, 'provider' => 'anthropic', 'model' => 'B-SECRET model', 'key' => 'B-SECRET-key', 'monthly_token_cap' => 7]);
     $this->bApproval = app(ApprovalService::class)->requestDone($opsIssue->setRelation('project', $ops), $this->ann, $this->annB[0], $ops->columns()->where('name', 'Done')->sole(), 'B-SECRET reason');
 
     // Workspace A: ann's current workspace.

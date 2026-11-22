@@ -13,6 +13,7 @@ use App\Http\Resources\ProjectInvitationResource;
 use App\Http\Resources\ProjectResource;
 use App\Models\Project;
 use App\Models\WorkspaceInvitation;
+use App\Services\AiSettingsService;
 use App\Services\CurrentWorkspace;
 use App\Services\IssueService;
 use App\Services\ProjectService;
@@ -66,11 +67,18 @@ class ProjectController extends Controller
         Gate::authorize('view', $project);
         $project->load(['members' => fn ($q) => $q->orderBy('name'), 'invitations', 'agentSettings']);
         $canManage = $request->user()->can('manage', $project);
+        $workspace = app(CurrentWorkspace::class)->get();
 
         return Inertia::render('Projects/Settings', [
             'project' => (new ProjectResource($project))->resolve(),
             'invitations' => $canManage ? ProjectInvitationResource::collection($project->invitations)->resolve() : [],
             'roles' => ProjectRole::values(),
+            // A5: Mode C runs only when all three are on; the page says which one is off.
+            'modeC' => [
+                'project' => (bool) ($project->agentSettings?->mode_c_enabled ?? true),
+                'workspace' => (bool) $workspace->setting('mode_c_enabled'),
+                'provider' => app(AiSettingsService::class)->for($workspace) !== null,
+            ],
             'labels' => LabelResource::collection($project->labels()->get())->resolve(),
             'columns' => ColumnResource::collection($project->columns()->withCount('issues')->get())->resolve(),
             // Admin-only (spec 5.1): restore from here until issues:purge removes them after 30 days.
