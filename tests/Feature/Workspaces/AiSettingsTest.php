@@ -73,6 +73,58 @@ test('endpoint is required for openai_compatible and must be https or localhost 
     'http 127.0.0.1' => ['http://127.0.0.1:11434/v1', true],
 ]);
 
+test('the audit row keeps only scheme, host and port of the endpoint and says whether it changed', function () {
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => 'https://gw.example.com:8443/v1/keys/sk-path-SECRET'])->assertSessionHasNoErrors();
+
+    $row = AuditLog::where('action', 'ai_provider.updated')->sole();
+    expect($row->metadata)->toEqual(['provider' => 'openai_compatible', 'model' => 'claude-sonnet-4-5', 'endpoint' => 'https://gw.example.com:8443', 'endpoint_changed' => true])
+        ->and(json_encode(AuditLog::all()->map->getAttributes()))->not->toContain('sk-path-SECRET');
+    // The Admin's own form still shows the full address.
+    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443/v1/keys/sk-path-SECRET'));
+
+    $this->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => 'https://gw.example.com:8443/v1/keys/sk-path-SECRET', 'model' => 'm2', 'api_key' => '']);
+    expect(AuditLog::where('action', 'ai_provider.updated')->latest('id')->first()->metadata['endpoint_changed'])->toBeFalse();
+});
+
+test('an endpoint set on the server shows no path either', function () {
+    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'https://gw.example.com/v1/keys/sk-path-SECRET']);
+
+    $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com'));
+    expect($response->getContent())->not->toContain('sk-path-SECRET');
+});
+
+test('a save-time check refuses private, loopback, link-local, reserved, CGNAT, multicast and metadata addresses', function (string $endpoint) {
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint])
+        ->assertSessionHasErrors('endpoint');
+
+    expect(AiProvider::count())->toBe(0);
+})->with([
+    '10/8' => 'https://10.0.0.5', '172.16/12' => 'https://172.16.1.1', '192.168/16' => 'https://192.168.1.10',
+    'metadata ip' => 'https://169.254.169.254', 'link-local' => 'https://169.254.1.1', 'CGNAT' => 'https://100.64.0.1', 'CGNAT top' => 'https://100.127.255.254',
+    'loopback range' => 'https://127.0.0.2', 'this network' => 'https://0.0.0.0', 'multicast' => 'https://224.0.0.1', 'reserved' => 'https://240.0.0.1', 'broadcast' => 'https://255.255.255.255',
+    'mapped loopback' => 'https://[::ffff:127.0.0.1]', 'mapped loopback hex' => 'https://[::ffff:7f00:1]', 'mapped private' => 'https://[::ffff:10.0.0.1]',
+    'link-local v6' => 'https://[fe80::1]', 'unique local' => 'https://[fd00::1]', 'unique local fc' => 'https://[fc00::1]', 'multicast v6' => 'https://[ff02::1]',
+    'unspecified v6' => 'https://[::]', 'NAT64 private' => 'https://[64:ff9b::a00:1]', 'bad v6' => 'https://[fe80::1%25eth0]',
+    'decimal ip' => 'https://2130706433', 'short ip' => 'https://127.1', 'hex ip' => 'https://0x7f.0.0.1',
+    'metadata name' => 'https://metadata.google.internal', 'metadata short' => 'https://metadata', 'instance-data' => 'https://instance-data',
+    'dot internal' => 'https://foo.internal', 'case and dot' => 'https://Metadata.Google.Internal.', 'with port' => 'https://10.0.0.5:8443/v1',
+]);
+
+test('public addresses pass the save-time check', function (string $endpoint) {
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint])
+        ->assertSessionHasNoErrors();
+})->with(['name' => 'https://api.example.com', 'name and path' => 'https://api.example.com:8443/v1', 'public v4' => 'https://8.8.8.8', 'public v6' => 'https://[2606:4700:4700::1111]', 'internal in a name' => 'https://internal.example.com']);
+
+test('local model addresses are allowed on a self-hosted install and refused on Cloud with their own message', function (string $endpoint) {
+    $payload = [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => $endpoint];
+
+    config(['pm.edition' => 'self_hosted']);
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), $payload)->assertSessionHasNoErrors();
+
+    config(['pm.edition' => 'cloud']);
+    $this->patch(w('/settings/ai'), $payload)->assertSessionHasErrors(['endpoint' => 'A local model address is only allowed on a self-hosted install.']);
+})->with(['localhost' => 'http://localhost:11434/v1', 'loopback' => 'http://127.0.0.1:11434/v1', 'loopback v6' => 'http://[::1]:11434/v1']);
+
 test('the other providers may leave the endpoint empty; the key is required the first time; the provider must be known', function () {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'api_key' => ''])->assertSessionHasErrors('api_key');
     $this->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'nope'])->assertSessionHasErrors('provider');
@@ -107,7 +159,7 @@ test('leaving the key blank keeps it; the key follows its provider and endpoint,
 test('audit: updated carries provider, model and endpoint; key_changed carries no key; unchanged saves log nothing', function () {
     $this->actingAs($this->admin)->patch(w('/settings/ai'), $this->payload);
 
-    expect(AuditLog::where('action', 'ai_provider.updated')->sole()->metadata)->toEqual(['provider' => 'anthropic', 'model' => 'claude-sonnet-4-5', 'endpoint' => null]);
+    expect(AuditLog::where('action', 'ai_provider.updated')->sole()->metadata)->toEqual(['provider' => 'anthropic', 'model' => 'claude-sonnet-4-5', 'endpoint' => null, 'endpoint_changed' => false]);
     $key = AuditLog::where('action', 'ai_provider.key_changed')->sole();
     expect($key->metadata)->toBeNull()->and($key->actor_user_id)->toBe($this->admin->id)->and($key->target_label)->toBe('Acme');
 
@@ -169,7 +221,7 @@ test('an endpoint set on the server is shown without login, query or fragment, a
     envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'HTTPS://user:tok-SECRET@gw.example.com:8443/v1?api-key=sk-env-QUERY#zzfrag']);
 
     $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertOk();
-    $response->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443/v1')->where('connection.endpoint_hidden', false));
+    $response->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443')->where('connection.endpoint_hidden', false));
     foreach (['tok-SECRET', 'sk-env-QUERY', 'zzfrag', 'user:'] as $leak) {
         expect($response->getContent())->not->toContain($leak);
     }

@@ -80,6 +80,7 @@ class AiSettingsService
 
             $row->fill(['provider' => $provider, 'model' => $data['model'], 'endpoint' => $endpoint]);
             $changed = $row->isDirty(['provider', 'model', 'endpoint']);
+            $endpointChanged = $row->getRawOriginal('endpoint') !== $endpoint;
             if ($cipher) {
                 // Already encrypted: setting the attribute would put the plaintext through the model's unmarked frames.
                 $row->setRawAttributes([...$row->getAttributes(), 'key' => $cipher]);
@@ -89,7 +90,10 @@ class AiSettingsService
             $row->save();
 
             if ($changed) {
-                $this->audit->log('ai_provider.updated', $workspace, ['provider' => $provider->value, 'model' => $data['model'], 'endpoint' => $endpoint], $workspace, $actor);
+                $this->audit->log('ai_provider.updated', $workspace, [
+                    'provider' => $provider->value, 'model' => $data['model'],
+                    'endpoint' => $endpoint ? $this->displayEndpoint($endpoint) : null, 'endpoint_changed' => $endpointChanged,
+                ], $workspace, $actor);
             }
             if ($newKey || $dropKey) {
                 $this->audit->log('ai_provider.key_changed', $workspace, [], $workspace, $actor);
@@ -132,7 +136,7 @@ class AiSettingsService
             && (bool) (ProjectAgentSettings::where('project_id', $project->id)->value('mode_c_enabled') ?? true);
     }
 
-    /** For display: the endpoint without any login, query or fragment; null when it can't be read. */
+    /** For display and the audit log: only scheme://host[:port], since the path or query may hold a token; null when it can't be read. */
     public function displayEndpoint(string $endpoint): ?string
     {
         $url = parse_url($endpoint);
@@ -140,7 +144,7 @@ class AiSettingsService
             return null;
         }
 
-        return strtolower($url['scheme']).'://'.$url['host'].(isset($url['port']) ? ":{$url['port']}" : '').($url['path'] ?? '');
+        return strtolower($url['scheme']).'://'.$url['host'].(isset($url['port']) ? ":{$url['port']}" : '');
     }
 
     /** PM_AI_PROVIDER is set but unusable (unknown provider or no PM_AI_MODEL): the page says so. */

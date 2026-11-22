@@ -24,7 +24,7 @@ class AiSettingsController extends Controller
         $workspace = $this->current->get();
         Gate::authorize('manageAi', $workspace);
         $connection = $this->ai->for($workspace);
-        // A server-set endpoint may carry a login or token: show only where it points.
+        // A server-set endpoint may carry a login, token or key in its path: show only scheme://host[:port].
         $endpoint = $connection['endpoint'] ?? null;
         $shown = $connection && $connection['source'] === 'env' && $endpoint !== null ? $this->ai->displayEndpoint($endpoint) : $endpoint;
 
