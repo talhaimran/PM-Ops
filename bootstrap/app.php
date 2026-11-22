@@ -34,6 +34,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: ResolveTokenWorkspace::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // The AI key must never come back as old() input after a rejected save (spec 8, A5).
+        $exceptions->dontFlash(['api_key']);
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

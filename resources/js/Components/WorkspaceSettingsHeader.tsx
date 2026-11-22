@@ -5,6 +5,7 @@ const tabs = [
     ['settings.general', 'General', true],
     ['settings.members', 'Members', true],
     ['settings.security', 'Security', true],
+    ['settings.ai', 'AI', true],
     ['settings.audit-log', 'Audit log', true],
     ['settings.usage', 'Usage', false],
 ] as const;

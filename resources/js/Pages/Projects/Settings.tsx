@@ -1,4 +1,5 @@
 import { Trash2, X } from 'lucide-react';
+import Checkbox from '@/Components/Checkbox';
 import DangerButton from '@/Components/DangerButton';
 import InputError from '@/Components/InputError';
 import InputLabel from '@/Components/InputLabel';
@@ -21,6 +22,7 @@ export default function Settings({
     labels,
     columns,
     deletedIssues,
+    modeC,
     can,
 }: {
     project: Project;
@@ -29,6 +31,7 @@ export default function Settings({
     labels: Label[];
     columns: { id: number; name: string; position: number; issue_count: number }[];
     deletedIssues: { key: string; title: string; deleted_at: string; deleted_by: string | null }[];
+    modeC: { project: boolean; workspace: boolean; provider: boolean };
     can: { manage: boolean; contribute: boolean };
 }) {
     const { errors: pageErrors } = usePage().props as { errors: Record<string, string> };
@@ -40,6 +43,7 @@ export default function Settings({
         description: project.description ?? '',
     });
     const instructions = useForm({ agent_instructions: project.agent_instructions ?? '' });
+    const modeCForm = useForm({ mode_c_enabled: modeC.project });
     const invite = useForm({ email: '', role: 'member' as ProjectRole });
     const newLabel = useForm({ name: '', color: '#6b7280' });
     const newColumn = useForm({ name: '' });
@@ -54,6 +58,11 @@ export default function Settings({
     const saveInstructions: FormEventHandler = (e) => {
         e.preventDefault();
         instructions.patch(route('projects.update', project.key), { preserveScroll: true });
+    };
+
+    const saveModeC: FormEventHandler = (e) => {
+        e.preventDefault();
+        modeCForm.patch(route('projects.update', project.key), { preserveScroll: true });
     };
 
     const sendInvite: FormEventHandler = (e) => {
@@ -152,6 +161,25 @@ export default function Settings({
                         {can.manage && (
                             <PrimaryButton disabled={instructions.processing}>Save</PrimaryButton>
                         )}
+                    </form>
+                </section>
+
+                <section className={card}>
+                    <h3 className={heading}>Mode C</h3>
+                    <p className="mt-1 text-sm text-muted">Mode C sends issue content to the AI provider chosen in workspace settings.</p>
+                    <form onSubmit={saveModeC} className="mt-4 space-y-4">
+                        <label className="flex min-h-control-h items-center gap-3">
+                            <Checkbox
+                                checked={modeCForm.data.mode_c_enabled}
+                                onChange={(e) => modeCForm.setData('mode_c_enabled', e.target.checked)}
+                                disabled={!can.manage}
+                            />
+                            <span className="text-md text-text">Allow Mode C in this project</span>
+                        </label>
+                        {!modeC.workspace && <p className="text-sm text-muted">Mode C is turned off for the whole workspace.</p>}
+                        {!modeC.provider && <p className="text-sm text-muted">No AI provider is set up, so Mode C can’t run yet.</p>}
+                        <InputError message={modeCForm.errors.mode_c_enabled} />
+                        {can.manage && <PrimaryButton disabled={modeCForm.processing || !modeCForm.isDirty}>Save</PrimaryButton>}
                     </form>
                 </section>
 

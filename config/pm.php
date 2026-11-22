@@ -18,4 +18,13 @@ return [
 
     // How long a replayable Idempotency-Key response is kept.
     'idempotency_ttl_hours' => (int) env('PM_IDEMPOTENCY_TTL_HOURS', 24),
+
+    // Self-hosted AI connection (spec 8, A5). With a provider here, Settings → AI is read-only ("Configured by your server")
+    // and the key never leaves the server. Providers: anthropic, openai, google, openai_compatible.
+    'ai' => [
+        'provider' => env('PM_AI_PROVIDER'),
+        'model' => env('PM_AI_MODEL'),
+        'endpoint' => env('PM_AI_ENDPOINT'),
+        'key' => env('PM_AI_KEY'),
+    ],
 ];

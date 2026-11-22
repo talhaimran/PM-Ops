@@ -23,6 +23,7 @@ export type PageProps<
     workspace: CurrentWorkspace | null;
     workspaces: { name: string; slug: string }[];
     edition: 'self_hosted' | 'cloud';
+    ai: { enabled: boolean };
 };
 
 export type ProjectRole = 'admin' | 'member' | 'viewer';

@@ -84,6 +84,8 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `PM_IDEMPOTENCY_TTL_HOURS` | `24` | How long a response is kept for `Idempotency-Key` replay. |
 | `PM_INVITE_RATE_LIMIT` | `30` | Invitation emails per hour per user (web and API). |
 | `PM_MCP_TOKEN` | — | Token the stdio MCP server acts as. Usually set in the MCP client's config, not `.env`. |
+| `PM_AI_PROVIDER` | — | `anthropic`, `openai`, `google` or `openai_compatible` (Ollama, company gateways). Set, it makes **Settings → AI** read-only; empty, Owners and Admins set the provider there and the key is stored encrypted. |
+| `PM_AI_MODEL`, `PM_AI_ENDPOINT`, `PM_AI_KEY` | — | Model, endpoint (required for `openai_compatible`; `https://`, or `http://localhost…`) and key for `PM_AI_PROVIDER`. The key is never shown in the app or returned by any API. |
 | `PM_BILLING_URL` | — | Upgrade link in the plan-limit dialog. Leave empty on self-hosted. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Google sign-in. Leave empty to hide the button. See below. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | GitHub sign-in. Leave empty to hide the button. See below. |

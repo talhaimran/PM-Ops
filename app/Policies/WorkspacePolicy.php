@@ -40,6 +40,12 @@ class WorkspacePolicy
         return $this->admin($user, $workspace);
     }
 
+    /** Settings → AI (spec 8, A5): web only, never an agent or token. */
+    public function manageAi(User $user, Workspace $workspace): Response
+    {
+        return $this->admin($user, $workspace);
+    }
+
     public function viewAuditLog(User $user, Workspace $workspace): Response
     {
         return $this->admin($user, $workspace);
