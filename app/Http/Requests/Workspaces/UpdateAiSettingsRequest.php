@@ -14,6 +14,14 @@ class UpdateAiSettingsRequest extends FormRequest
 {
     private const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
+    /** The scheme is case-insensitive; store it in lowercase. */
+    protected function prepareForValidation(): void
+    {
+        if (is_string($endpoint = $this->input('endpoint'))) {
+            $this->merge(['endpoint' => preg_replace_callback('/^[a-z][a-z0-9+.-]*(?=:)/i', fn ($m) => strtolower($m[0]), $endpoint)]);
+        }
+    }
+
     public function rules(): array
     {
         $provider = AiProviderType::tryFrom((string) $this->input('provider'));

@@ -161,10 +161,75 @@ test('with PM_AI_PROVIDER set the page is read-only, says so, and every write is
         ->where('connection.source', 'env')->where('connection.model', 'claude-haiku-4-5')->where('connection.has_key', true));
 
     $this->patch(w('/settings/ai'), $this->payload)->assertSessionHasErrors('provider');
-    $this->patch(w('/settings/ai/cap'), ['monthly_token_cap' => 5])->assertSessionHasErrors('monthly_token_cap');
     $this->delete(w('/settings/ai'))->assertSessionHasErrors('provider');
     expect(AiProvider::count())->toBe(0)->and(AuditLog::where('action', 'like', 'ai_provider.%')->count())->toBe(0);
 });
+
+test('an endpoint set on the server is shown without login, query or fragment, and hidden when it cannot be read', function () {
+    envAi(['provider' => 'openai_compatible', 'model' => 'm', 'key' => 'k', 'endpoint' => 'HTTPS://user:tok-SECRET@gw.example.com:8443/v1?api-key=sk-env-QUERY#zzfrag']);
+
+    $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertOk();
+    $response->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', 'https://gw.example.com:8443/v1')->where('connection.endpoint_hidden', false));
+    foreach (['tok-SECRET', 'sk-env-QUERY', 'zzfrag', 'user:'] as $leak) {
+        expect($response->getContent())->not->toContain($leak);
+    }
+    // The raw value stays available to the provider calls.
+    expect($this->ai->for($this->ws)['endpoint'])->toContain('tok-SECRET');
+
+    envAi(['endpoint' => 'not a url?token=sk-env-QUERY']);
+    $response = $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', null)->where('connection.endpoint_hidden', true));
+    expect($response->getContent())->not->toContain('sk-env-QUERY');
+
+    envAi(['endpoint' => null]);
+    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.endpoint', null)->where('connection.endpoint_hidden', false));
+});
+
+test('with PM_AI_PROVIDER set the monthly cap is still editable, in a row that holds only the cap', function () {
+    envAi(['provider' => 'anthropic', 'model' => 'claude-haiku-4-5', 'key' => 'sk-env-SECRET']);
+
+    $this->actingAs($this->owner)->patch(w('/settings/ai/cap'), ['monthly_token_cap' => 500])->assertSessionHasNoErrors();
+    $this->patch(w('/settings/ai/cap'), ['monthly_token_cap' => 900]);
+
+    $row = AiProvider::sole();
+    expect($row->provider)->toBeNull()->and($row->model)->toBeNull()->and($row->monthly_token_cap)->toBe(900)
+        ->and($this->ai->for($this->ws)['source'])->toBe('env')->and($this->ai->key($this->ws))->toBe('sk-env-SECRET')
+        ->and(AuditLog::where('action', 'ai_provider.cap_changed')->oldest('id')->get()->map->metadata->all())->toEqual([['before' => null, 'after' => 500], ['before' => 500, 'after' => 900]]);
+    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection.source', 'env')->where('connection.cap', 900)->where('connection.used', 0));
+    // The provider itself stays the server's.
+    $this->patch(w('/settings/ai'), $this->payload)->assertSessionHasErrors('provider');
+});
+
+test('a cap-only row is not a provider: ai.enabled stays false, the form says none yet, and saving one keeps the cap', function () {
+    AiProvider::create(['workspace_id' => $this->ws->id, 'monthly_token_cap' => 5]);
+
+    expect($this->ai->for($this->ws))->toBeNull()->and($this->ai->hasKey($this->ws))->toBeFalse();
+    $this->actingAs($this->owner)->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection', null)->where('ai', ['enabled' => false]));
+    $this->delete(w('/settings/ai'))->assertRedirect();
+    expect(AuditLog::where('action', 'ai_provider.removed')->count())->toBe(0);
+
+    $this->patch(w('/settings/ai'), $this->payload)->assertSessionHasNoErrors();
+    expect(AiProvider::sole()->monthly_token_cap)->toBe(5)->and($this->ai->for($this->ws)['provider'])->toBe(AiProviderType::Anthropic);
+});
+
+test('the scheme is case-insensitive and stored in lowercase', function () {
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => 'HTTPS://Gateway.example.com/v1'])->assertSessionHasNoErrors();
+
+    expect($this->ai->for($this->ws)['endpoint'])->toBe('https://Gateway.example.com/v1');
+    $this->patch(w('/settings/ai'), [...$this->payload, 'provider' => 'openai_compatible', 'endpoint' => 'HTTP://example.com'])->assertSessionHasErrors('endpoint');
+});
+
+test('a PM_AI_PROVIDER that is set but not used gets a hint that echoes no values', function (array $env, bool $hint) {
+    envAi($env);
+
+    $response = $this->actingAs($this->owner)->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('env_ignored', $hint)->where('connection', null));
+    expect($response->getContent())->not->toContain('bogus-value');
+    expect(file_get_contents(resource_path('js/Pages/Workspaces/Settings/Ai.tsx')))
+        ->toContain('PM_AI_PROVIDER is set on your server but isn’t used: it must be one of anthropic, openai, google, openai_compatible, with PM_AI_MODEL set.');
+})->with([
+    'unknown provider' => [['provider' => 'bogus-value', 'model' => 'm'], true],
+    'no model' => [['provider' => 'openai', 'model' => null], true],
+    'unset' => [['provider' => null, 'model' => null], false],
+]);
 
 test('the environment wins over a stored provider, and an unknown PM_AI_PROVIDER is ignored', function () {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), $this->payload);

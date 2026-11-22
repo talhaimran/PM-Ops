@@ -24,17 +24,22 @@ class AiSettingsController extends Controller
         $workspace = $this->current->get();
         Gate::authorize('manageAi', $workspace);
         $connection = $this->ai->for($workspace);
+        // A server-set endpoint may carry a login or token: show only where it points.
+        $endpoint = $connection['endpoint'] ?? null;
+        $shown = $connection && $connection['source'] === 'env' && $endpoint !== null ? $this->ai->displayEndpoint($endpoint) : $endpoint;
 
         return Inertia::render('Workspaces/Settings/Ai', [
             'connection' => $connection ? [
                 'source' => $connection['source'],
                 'provider' => $connection['provider']->value,
                 'model' => $connection['model'],
-                'endpoint' => $connection['endpoint'],
+                'endpoint' => $shown,
+                'endpoint_hidden' => $endpoint !== null && $shown === null,
                 'has_key' => $this->ai->hasKey($workspace),
                 ...$this->ai->usage($workspace),
             ] : null,
             'providers' => array_map(fn (AiProviderType $p) => ['value' => $p->value, 'label' => $p->label()], AiProviderType::cases()),
+            'env_ignored' => $this->ai->envIgnored(),
             'mode_c' => (bool) $workspace->setting('mode_c_enabled'),
         ]);
     }

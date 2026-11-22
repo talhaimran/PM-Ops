@@ -86,7 +86,7 @@ test('an unexpected failure while saving reports without the key', function () {
 });
 
 test('the key parameters are marked sensitive so a stack trace cannot print them', function () {
-    foreach ([[AiSettingsService::class, 'update', 'data']] as [$class, $method, $param]) {
+    foreach ([[AiSettingsService::class, 'update', 'data'], [AiSettingsService::class, 'encrypted', 'key']] as [$class, $method, $param]) {
         $parameter = collect((new ReflectionMethod($class, $method))->getParameters())->firstWhere(fn ($p) => $p->getName() === $param);
         expect($parameter->getAttributes(SensitiveParameter::class))->toHaveCount(1);
     }
