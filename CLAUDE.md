@@ -48,6 +48,15 @@ Spec section 5 lists the conventions for all new code; these are how step 0 buil
 - Admin and security events go to `AuditLogger` (append-only `audit_logs`, workspace audit log); issue changes go to `ActivityLogger`. Neither stores secrets, tokens or codes.
 - Test helpers in `tests/Pest.php`: `makeWorkspace`, `useWorkspace`, `asWorkspaceMember`, `joinWorkspace`, `makeProject`, `apiAs`, `w()`, `otp()`, `enableTwoFactor()`. Every new route, endpoint or MCP tool gets a case in `tests/Feature/Security/WorkspaceIsolationTest.php`.
 
+## Agents (step A)
+- `User::agent()` returns the agent behind the current token (Sanctum or OAuth); `User::canDelete()` is true for people and for agents at the Delete level. A-D1: the Sanctum token stays on the owner and carries `agent_id`; OAuth tokens and auth codes carry `agent_id` too.
+- `AgentService::ensureUsable` is the per-call check (status, expiry, workspace switch, owner membership) for REST, HTTP MCP, stdio and OAuth. A new entry point must call it.
+- Done is one rule: `ApprovalService::needsApproval` with `Project::doneColumnId()` (the last column). Every agent move path calls it and opens a request via `requestDone`; don't compare column positions elsewhere.
+- Deletes go through `ProjectPolicy::remove` / `removeColumn` and `canDelete()`. Project settings, columns, members and invitations are people-only for agents (A-D2).
+- `AiSettingsService::key()` is the only reader of the AI key; `AiEndpoint` holds the endpoint rules and ranges. `PM_AI_*` env is used only when complete (`envWarning()` says why not).
+- MCP OAuth: `config/mcp.php` allowlists redirects (`PM_MCP_REDIRECT_DOMAINS` / `_SCHEMES`); consent applies the workspace's rules. Keep the allowlist narrow.
+- Demo seed: the "Demo token" agent and one pending approval (WEB-5 to Done) are made through the services, so keep it that way.
+
 ## UI rules (step U)
 - Tokens: `tailwind.config.js` reads `docs/design-system/tokens.json`; use the token classes (`bg-card`, `text-muted`, `tint-amber`, `rounded-ctl`, `h-control-h`…). No hex colours, no default Tailwind colours, no `/40`-style opacity on token colours (they are CSS variables). `tests/Feature/Ui/DesignTokensTest.php` enforces this.
 - Motion: timings only from `resources/js/motion.ts` (`transition('drawerIn')`), never number literals in components. Reduced motion is handled there and in `app.css`.
