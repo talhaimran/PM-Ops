@@ -51,7 +51,8 @@ class SprintService
         }
 
         DB::transaction(function () use ($sprint) {
-            $sprint->issues()->update(['sprint_id' => null]);
+            // A sprint change bumps the version (1-D4).
+            $sprint->issues()->update(['sprint_id' => null, 'version' => DB::raw('version + 1')]);
             $sprint->delete();
         });
     }
@@ -104,7 +105,9 @@ class SprintService
             $open = $sprint->issues()->open()->get();
 
             foreach ($open as $issue) {
-                $issue->update(['sprint_id' => $target?->id]);
+                // A sprint change bumps the version (1-D4); atomic, as the row isn't locked here.
+                // shortcut: the activity's issue_version comes from this copy, so an edit committing meanwhile can make it one low; lock the open issues if "changes since" must be exact here.
+                $issue->increment('version', 1, ['sprint_id' => $target?->id]);
                 $this->history->sprintChanged($issue, $sprint, $target, $actor, $issue->story_points);
                 $this->activity->log($issue, $actor, 'updated', ['sprint' => ['from' => $sprint->name, 'to' => $target?->name]]);
             }

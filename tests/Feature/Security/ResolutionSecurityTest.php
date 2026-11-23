@@ -25,7 +25,7 @@ test('duplicate_of gives one error for unknown, inaccessible and other-workspace
 
     useWorkspace($web->workspace, $ann);
     apiAsPerson($ann);
-    $messages = collect(['WEB-99', 'OPS-1', 'ZED-1', 'nonsense'])->map(fn ($key) => str_replace($key, 'KEY', $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => $key])
+    $messages = collect(['WEB-99', 'OPS-1', 'ZED-1', 'nonsense'])->map(fn ($key) => str_replace($key, 'KEY', $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => $key])
         ->assertUnprocessable()->json('errors.duplicate_of.0')));
 
     expect($messages->unique())->toHaveCount(1)

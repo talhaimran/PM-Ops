@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Activity;
+use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\User;
@@ -28,10 +29,62 @@ class ActivityLogger
         return $issue->activities()->create([
             'action' => $action,
             'changes' => $changes,
+            // The issue's version after this change (spec 7.11), so changesSince() is one query.
+            'issue_version' => $issue->version,
             // An OAuth token has no name of its own: it is the agent's.
             'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
             ...self::attribution($user),
         ]);
+    }
+
+    /**
+     * Spec 7.11: what changed on $issue after $version, one entry per field: the value it had first, the value it has
+     * now, and who made that last change ("{Owner}'s agent" when an agent did). Only $issue's own rows are read.
+     *
+     * @return list<array{field: string, from: mixed, to: mixed, by: ?string, agent: ?string, via: string, at: string}>
+     */
+    public function changesSince(Issue $issue, int $version): array
+    {
+        $changes = [];
+        // shortcut: reads every row after $version (only callers who may edit the issue get here); cap it if issues collect thousands of changes.
+        $rows = $issue->activities()->with(['user', 'agent.owner'])->where('issue_version', '>', $version)->whereNotNull('changes')->orderBy('id')->get();
+        foreach ($rows as $row) {
+            // approval_request is the link to an agent's request (A2), not a field; a person decided it, so no agent acted.
+            $approval = isset($row->changes['approval_request']);
+            foreach (collect($row->changes)->except('approval_request') as $field => $change) {
+                $changes[$field] = [
+                    'field' => $field,
+                    'from' => isset($changes[$field]) ? $changes[$field]['from'] : $change['from'],
+                    'to' => $change['to'],
+                    'by' => $row->user?->name,
+                    'agent' => $row->agent && ! $approval ? self::agentLabel($row->agent) : null,
+                    'via' => $row->via,
+                    'at' => $row->created_at->toIso8601String(),
+                ];
+            }
+        }
+
+        return array_values($changes);
+    }
+
+    /** "Alex's agent": the owner's first name, as the UI's AgentLabel shows it (spec 5.1). */
+    public static function agentLabel(Agent $agent): string
+    {
+        return $agent->owner ? strtok($agent->owner->name, ' ')."'s agent" : $agent->name;
+    }
+
+    /** "Sam moved WEB-1 to Done" or "Sam's agent changed title, priority on WEB-1": changesSince() in one line. */
+    public static function describe(array $changes, string $key): string
+    {
+        $last = end($changes);
+        $who = $last ? ($last['agent'] ?? $last['by'] ?? 'Someone') : 'Someone';
+        $status = collect($changes)->firstWhere('field', 'status');
+
+        return match (true) {
+            ! $changes => "{$key} changed",
+            $status !== null => "{$who} moved {$key} to {$status['to']}",
+            default => "{$who} changed ".collect($changes)->pluck('field')->implode(', ')." on {$key}",
+        };
     }
 
     /** Who, which agent and how: the one source for activity and history rows. */

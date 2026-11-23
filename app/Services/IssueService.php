@@ -6,6 +6,7 @@ use App\Enums\IssuePriority;
 use App\Enums\IssueType;
 use App\Enums\Resolution;
 use App\Enums\SprintState;
+use App\Exceptions\EditConflict;
 use App\Models\Activity;
 use App\Models\Column;
 use App\Models\Issue;
@@ -78,7 +79,10 @@ class IssueService
     }
 
     /**
-     * $action is 'updated', 'undid' when the web UI's Undo sends a change back, or 'approved' for an approved request.
+     * $action is 'updated', 'undid' when the web UI's Undo sends a change back, 'overwrote' when the web conflict
+     * dialog saves over someone else's change, or 'approved' for an approved request.
+     * $data['version'] (spec 7.11), when given, must be the issue's current version or nothing is saved (EditConflict);
+     * moves leave it out (1-D3). Any change bumps the version (1-D4).
      * An agent's move to Done is held instead (A2): the other fields still change (A-L7) and $issue->heldApproval
      * holds the request; $data['reason'] (A-L5) goes on it.
      */
@@ -88,8 +92,13 @@ class IssueService
             if (isset($data['status']) || isset($data['resolution'])) {
                 // The project row first (as moves and column changes do), so the status read can't race a column delete.
                 Project::whereKey($issue->project_id)->lockForUpdate()->first();
-                // Then the issue as it is now: a copy loaded earlier may have been reopened or moved since.
-                $issue->refresh();
+            }
+            // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
+            // and the bump below can't interleave with another save (Review Focus 3).
+            Issue::whereKey($issue->id)->lockForUpdate()->first();
+            $issue->refresh();
+            if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
+                throw EditConflict::issue($issue, (int) $data['version'], $this->activity->changesSince($issue, (int) $data['version']));
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
@@ -99,11 +108,11 @@ class IssueService
             [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
 
             $issue->heldApproval = null;
-            if ($status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent())) {
+            $held = $status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent());
+            if ($held) {
                 unset($attributes['status_id']);
                 // The issue stays where it is, so its resolution does too; the request carries the new one.
                 $resolution = [];
-                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null, isset($data['resolution']) ? Resolution::from($data['resolution']) : null, $data['duplicate_of'] ?? null);
             }
 
             $issue->update([...$attributes, ...$resolution]);
@@ -121,6 +130,13 @@ class IssueService
             if ($original && $resolution) {
                 $changes['duplicate_of'] = ['from' => null, 'to' => $original];
             }
+            if ($changes) {
+                $issue->increment('version');
+            }
+            if ($held) {
+                // After the bump, so the request remembers the version this change left the issue at.
+                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null, isset($data['resolution']) ? Resolution::from($data['resolution']) : null, $data['duplicate_of'] ?? null);
+            }
             if (isset($changes['status'])) {
                 $this->history->statusChanged($issue, $fromStatus, $issue->status, $actor);
             }
@@ -131,7 +147,7 @@ class IssueService
                 $this->history->estimateChanged($issue, $changes['story_points']['from'], $changes['story_points']['to'], $actor);
             }
             if ($changes) {
-                // Leaving Done is a reopen (spec 7.4); an undo or an approval keeps its own action.
+                // Leaving Done is a reopen (spec 7.4); an undo, an overwrite or an approval keeps its own action.
                 $reopened = $wasDone && ! $issue->status->isDone();
                 if ($reopened && $action !== 'updated') {
                     // An Undo keeps its own entry (and its changes) but still leaves the reopen marker before it.
@@ -174,9 +190,16 @@ class IssueService
             });
             // Every project row first, in id order, before any issue row: the order move and approve use, so no deadlock.
             Project::whereIn('id', $issues->pluck('project_id')->unique())->orderBy('id')->lockForUpdate()->get();
+            // Then every issue row, in id order, so all stale items are found before anything changes (1-R11).
+            $versions = Issue::whereIn('id', $issues->pluck('id'))->orderBy('id')->lockForUpdate()->pluck('version', 'id');
+            $stale = $issues->filter(fn ($issue, $i) => isset($items[$i]['version']) && (int) $items[$i]['version'] !== $versions[$issue->id]);
+            if ($stale->isNotEmpty()) {
+                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version'], $this->activity->changesSince($issue, (int) $items[$i]['version'])))->values()->all());
+            }
 
-            // A fresh copy: an earlier item may have changed the same issue.
-            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue->refresh(), $actor, collect($items[$i])->except('key')->all())));
+            // Checked once above, against the versions the call was sent with: two items for one issue both carry the
+            // version read before the call. update() reads each issue afresh, as an earlier item may have changed it.
+            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all())));
         });
     }
 

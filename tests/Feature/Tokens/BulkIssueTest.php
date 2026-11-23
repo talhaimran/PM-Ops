@@ -48,8 +48,8 @@ test('bulk update changes several issues by key and logs each', function () {
     makeIssue($this->project, $this->me);
 
     $this->patchJson('/api/v1/issues/bulk', ['updates' => [
-        ['key' => 'WEB-1', 'status' => 'In Review'],
-        ['key' => 'web-2', 'priority' => 'high', 'assignee' => 'me@example.com'],
+        ['key' => 'WEB-1', 'version' => 1, 'status' => 'In Review'],
+        ['key' => 'web-2', 'version' => 1, 'priority' => 'high', 'assignee' => 'me@example.com'],
     ]])
         ->assertOk()
         ->assertJsonPath('data.0.status', 'In Review')
@@ -61,7 +61,7 @@ test('bulk update changes several issues by key and logs each', function () {
 test('a bulk update naming one issue twice applies both items in order', function () {
     makeIssue($this->project, $this->me, ['title' => 'A']);
 
-    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'title' => 'B'], ['key' => 'WEB-1', 'title' => 'A']]])->assertOk();
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'version' => 1, 'title' => 'B'], ['key' => 'WEB-1', 'version' => 1, 'title' => 'A']]])->assertOk();
 
     expect(Issue::sole()->title)->toBe('A')
         ->and(Activity::where('action', 'updated')->orderBy('id')->pluck('changes')->all())
@@ -72,8 +72,8 @@ test('bulk update rolls back on any bad item', function () {
     makeIssue($this->project, $this->me);
 
     $this->patchJson('/api/v1/issues/bulk', ['updates' => [
-        ['key' => 'WEB-1', 'title' => 'Changed'],
-        ['key' => 'WEB-99', 'title' => 'Missing'],
+        ['key' => 'WEB-1', 'version' => 1, 'title' => 'Changed'],
+        ['key' => 'WEB-99', 'version' => 1, 'title' => 'Missing'],
     ]])
         ->assertUnprocessable()
         ->assertJsonPath('errors', fn ($e) => isset($e['updates.1.key']));
@@ -86,14 +86,14 @@ test('bulk update checks permission per issue', function () {
     makeIssue($this->project, $this->me);
 
     apiAs($viewer);
-    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'title' => 'x']]])->assertForbidden();
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'version' => 1, 'title' => 'x']]])->assertForbidden();
 });
 
 test('bulk tools over mcp', function () {
     PmServer::tool(BulkCreateIssues::class, ['project' => 'WEB', 'issues' => [['title' => 'A'], ['title' => 'B']]])
         ->assertOk()->assertSee('Created 2 issues: WEB-1, WEB-2');
-    PmServer::tool(BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'status' => 'Done'], ['key' => 'WEB-2', 'status' => 'Nope']]])
+    PmServer::tool(BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'version' => 1, 'status' => 'Done'], ['key' => 'WEB-2', 'version' => 1, 'status' => 'Nope']]])
         ->assertHasErrors(['[updates.1] Unknown status']);
-    PmServer::tool(BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'status' => 'Done']]])
+    PmServer::tool(BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'version' => 1, 'status' => 'Done']]])
         ->assertOk()->assertSee('Updated 1 issue: WEB-1');
 });

@@ -7,6 +7,7 @@ use App\Enums\SprintState;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -52,7 +53,8 @@ class BacklogService
 
     /**
      * Rank an issue in the backlog or a sprint. $input: sprint? (name, or "backlog"), position?, after?
-     * Moving between sections is logged through IssueService::update; reordering alone isn't.
+     * Moving between sections is logged through IssueService::update; reordering alone isn't. Only an Undo sends
+     * `version` (UndoService::token), so only it is checked (spec 7.11, 1-D3).
      */
     public function rank(Issue $issue, User $actor, array $input, string $action = 'updated'): Issue
     {
@@ -61,7 +63,7 @@ class BacklogService
 
             if (array_key_exists('sprint', $input)) {
                 $target = $input['sprint'] === null || strcasecmp($input['sprint'], 'backlog') === 0 ? null : $input['sprint'];
-                $issue = $this->issues->update($issue, $actor, ['sprint' => $target], $action);
+                $issue = $this->issues->update($issue, $actor, ['sprint' => $target, ...Arr::only($input, ['version'])], $action);
             }
             $issue->loadMissing(IssueService::DISPLAY);
 

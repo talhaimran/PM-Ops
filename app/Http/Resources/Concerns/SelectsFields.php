@@ -7,7 +7,7 @@ use Illuminate\Http\Resources\MissingValue;
 use Illuminate\Validation\ValidationException;
 
 /**
- * A3 `fields`: keep only the named top-level keys (`key` always stays). Works on the array the resource already built,
+ * A3 `fields`: keep only the named top-level keys (`key` always stays, and `version` where there is one, spec 7.11). Works on the array the resource already built,
  * so it can only drop keys, never add one. Names are checked against what this resource returns.
  * shortcut: the names are checked against the first row, so an empty list never reports an unknown field.
  */
@@ -55,6 +55,6 @@ trait SelectsFields
             throw ValidationException::withMessages(['fields' => 'Unknown field(s): '.implode(', ', $unknown).'. Valid fields: '.implode(', ', $valid).'.']);
         }
 
-        return array_intersect_key($data, array_flip([...$wanted, 'key']));
+        return array_intersect_key($data, array_flip([...$wanted, 'key', 'version']));
     }
 }

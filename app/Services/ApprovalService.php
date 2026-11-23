@@ -54,7 +54,8 @@ class ApprovalService
     public function requestDone(Issue $issue, User $owner, Agent $agent, Status $to, ?string $reason, ?Resolution $resolution = null, ?string $duplicateOf = null): ApprovalRequest
     {
         return DB::transaction(function () use ($issue, $owner, $agent, $to, $reason, $resolution, $duplicateOf) {
-            $resolved = array_filter(['resolution' => $resolution?->value, 'duplicate_of' => $duplicateOf]);
+            // issue_version (spec 7.11): the version the agent's change left the issue at; approve() compares it.
+            $resolved = [...array_filter(['resolution' => $resolution?->value, 'duplicate_of' => $duplicateOf]), 'issue_version' => $issue->version];
             Issue::whereKey($issue->id)->lockForUpdate()->first();
             // A locking read sees requests committed after this transaction's snapshot; SKIP LOCKED never waits on a
             // request a person is deciding (they hold it and then wait for the project row this move may hold).
@@ -62,10 +63,11 @@ class ApprovalService
                 ->lock('for update skip locked')->first();
 
             // Asking again is the agent changing its mind: the person decides on the latest ask, so what it sent now
-            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole. Only the agent
-            // that opened the request can do that; another agent's repeat just gets the existing request back (spec 8, A2).
+            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole, and the version
+            // it asked at. Only the agent that opened the request can do that; another agent's repeat just gets the
+            // existing request back (spec 8, A2).
             if ($open?->agent_id === $agent->id) {
-                $action = [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved];
+                $action = [...Arr::except($open->action, ['resolution', 'duplicate_of', 'issue_version']), ...$resolved];
                 if ($action != $open->action) {
                     $open->update(['action' => $action]);
                 }
@@ -116,11 +118,12 @@ class ApprovalService
                 return $approval;
             }
 
-            // shortcut: "moved since" compares statuses; issue versions replace it (step 1, Task 4).
-            if ($issue->status_id !== $approval->action['from_status_id'] && ! $confirmChanged) {
-                $from = Status::whereKey($approval->action['from_status_id'])->value('name') ?? 'a deleted status';
+            // Spec 7.11: any change since the request (not only a move) needs a second confirm, saying what changed.
+            $asked = $approval->action['issue_version'] ?? 1;
+            if ($issue->version !== $asked && ! $confirmChanged) {
+                $changed = ActivityLogger::describe($this->activity->changesSince($issue, $asked), $issue->key);
                 throw ValidationException::withMessages([
-                    'approval' => "{$issue->key} moved from {$from} to {$issue->status->name} since this request. Approve again to move it to {$status->name}.",
+                    'approval' => "{$changed} since this request. Approve again to move it to {$status->name}.",
                 ])->status(409);
             }
 

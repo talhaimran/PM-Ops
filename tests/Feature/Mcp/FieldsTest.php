@@ -18,18 +18,18 @@ beforeEach(function () {
 
 test('REST: fields=key,title,status keeps only those keys on one issue and on lists', function () {
     asToken($this->token)->getJson('/api/v1/issues/WEB-1?fields=title,status')->assertOk()
-        ->assertExactJson(['data' => ['key' => 'WEB-1', 'title' => 'First', 'status' => 'To Do']]);
+        ->assertExactJson(['data' => ['key' => 'WEB-1', 'version' => 1, 'title' => 'First', 'status' => 'To Do']]);
 
     foreach (['/api/v1/projects/WEB/issues', '/api/v1/issues', '/api/v1/me/issues'] as $url) {
         $rows = asToken($this->token)->getJson($url.'?fields=key,title,status')->assertOk()->json('data');
-        expect($rows)->not->toBeEmpty()->and(collect($rows)->map(fn ($r) => array_keys($r))->unique()->all())->toBe([['key', 'title', 'status']], $url);
+        expect($rows)->not->toBeEmpty()->and(collect($rows)->map(fn ($r) => array_keys($r))->unique()->all())->toBe([['key', 'version', 'title', 'status']], $url);
     }
 });
 
 test('REST: unknown names are a 422 that lists the valid ones, and nothing is returned', function () {
     asToken($this->token)->getJson('/api/v1/issues/WEB-1?fields=title,nope')->assertUnprocessable()
         ->assertJsonValidationErrors('fields')
-        ->assertJsonPath('errors.fields.0', fn ($m) => str_contains($m, 'nope') && str_contains($m, 'Valid fields: id, key, project, title'));
+        ->assertJsonPath('errors.fields.0', fn ($m) => str_contains($m, 'nope') && str_contains($m, 'Valid fields: id, key, version, project, title'));
     asToken($this->token)->getJson('/api/v1/projects/WEB/issues?fields=nope')->assertUnprocessable()->assertJsonValidationErrors('fields');
 });
 
@@ -45,17 +45,17 @@ test('fields cannot reach a key the resource does not return: nested-only keys a
 
 test('fields names are trimmed, repeated names collapse, and key always comes back', function () {
     asToken($this->token)->getJson('/api/v1/issues/WEB-1?fields=%20title%20,title')->assertOk()
-        ->assertExactJson(['data' => ['key' => 'WEB-1', 'title' => 'First']]);
+        ->assertExactJson(['data' => ['key' => 'WEB-1', 'version' => 1, 'title' => 'First']]);
 });
 
 test('MCP: get_issue, search_issues and my_issues honour fields', function () {
-    expect(mcpJson($this->token, 'get_issue', ['issue' => 'WEB-1', 'fields' => 'key,title,status']))->toBe(['key' => 'WEB-1', 'title' => 'First', 'status' => 'To Do']);
+    expect(mcpJson($this->token, 'get_issue', ['issue' => 'WEB-1', 'fields' => 'key,title,status']))->toBe(['key' => 'WEB-1', 'version' => 1, 'title' => 'First', 'status' => 'To Do']);
 
     $search = mcpJson($this->token, 'search_issues', ['project' => 'WEB', 'fields' => 'title,priority']);
-    expect(collect($search['data'])->map(fn ($r) => array_keys($r))->unique()->all())->toBe([['key', 'title', 'priority']]);
+    expect(collect($search['data'])->map(fn ($r) => array_keys($r))->unique()->all())->toBe([['key', 'title', 'priority', 'version']]);
 
     $mine = mcpJson($this->token, 'my_issues', ['fields' => 'title']);
-    expect($mine)->toBe([['key' => 'WEB-1', 'title' => 'First']]);
+    expect($mine)->toBe([['key' => 'WEB-1', 'title' => 'First', 'version' => 1]]);
 });
 
 test('MCP: unknown fields error and list the card fields for lists', function () {

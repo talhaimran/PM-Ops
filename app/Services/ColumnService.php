@@ -100,10 +100,14 @@ class ColumnService
                     $this->history->statusesMoved($rows, $to, $actor);
                     $doneIds = $to->isDone() ? [] : $rows->where('category', StatusCategory::Done->value)->pluck('id')->all();
                     foreach ($doneIds ? Issue::withTrashed()->with('status')->whereIn('id', $doneIds)->get() : [] as $issue) {
+                        // The version the bulk update below gives it (spec 7.11).
+                        // shortcut: read without the issue row locked, so an edit committing meanwhile can make this tag one low; lock the chunk if "changes since" must be exact here.
+                        $issue->version++;
                         $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
                     }
                 }, 'issues.id', 'id');
-            $moving->update(['status_id' => $to->id] + ($to->isDone()
+            // A status change bumps the version (1-D4), so an edit sent with the old one conflicts.
+            $moving->update(['status_id' => $to->id, 'version' => DB::raw('version + 1')] + ($to->isDone()
                 ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
                 : ['resolution' => null, 'resolved_at' => null]));
             $column->delete();

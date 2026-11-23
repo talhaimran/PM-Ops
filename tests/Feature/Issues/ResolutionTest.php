@@ -22,7 +22,7 @@ test('moving into a Done status resolves it as Done now; with a resolution it st
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertOk()
         ->assertJsonPath('data.resolution', 'done')
         ->assertJsonPath('data.resolved_at', fn ($at) => is_string($at));
-    $this->patchJson('/api/v1/issues/WEB-2', ['status' => 'Done', 'resolution' => 'wont_do'])->assertOk()
+    $this->patchJson('/api/v1/issues/WEB-2', ['version' => 1, 'status' => 'Done', 'resolution' => 'wont_do'])->assertOk()
         ->assertJsonPath('data.resolution', 'wont_do')
         ->assertJsonPath('data.category', 'done');
 
@@ -46,25 +46,25 @@ test('moving out clears resolution and resolved_at and logs one reopened entry',
 });
 
 test('a resolution needs a Done status', function () {
-    $this->patchJson('/api/v1/issues/WEB-1', ['resolution' => 'wont_do'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'resolution' => 'wont_do'])->assertUnprocessable()
         ->assertJsonPath('errors.resolution.0', 'Resolution applies to Done statuses. Move the issue to one of: Done.');
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'In Progress', 'resolution' => 'wont_do'])->assertUnprocessable();
-    $this->patchJson('/api/v1/issues/WEB-1', ['resolution' => 'finished'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'In Progress', 'resolution' => 'wont_do'])->assertUnprocessable();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'resolution' => 'finished'])->assertUnprocessable()
         ->assertJsonPath('errors.resolution.0', 'The resolution must be one of: done, wont_do, duplicate, cannot_reproduce.');
 
     expect(Issue::where('number', 1)->sole()->status->name)->toBe('To Do');
 });
 
 test('Duplicate needs the original: unknown, itself and other workspaces are refused, a real one goes in the activity', function () {
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'duplicate'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate'])->assertUnprocessable()
         ->assertJsonPath('errors.duplicate_of.0', "Send duplicate_of with the original issue's key, e.g. WEB-3.");
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-99'])->assertUnprocessable()->assertJsonValidationErrors('duplicate_of');
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-1'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-99'])->assertUnprocessable()->assertJsonValidationErrors('duplicate_of');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-1'])->assertUnprocessable()
         ->assertJsonPath('errors.duplicate_of.0', "An issue can't be a duplicate of itself.");
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'wont_do', 'duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('duplicate_of');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'wont_do', 'duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('duplicate_of');
     expect(Issue::where('number', 1)->sole()->status->name)->toBe('To Do');
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'web-2'])->assertOk()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'web-2'])->assertOk()
         ->assertJsonPath('data.resolution', 'duplicate');
 
     expect(Activity::where('action', 'updated')->latest('id')->first()->changes)->toMatchArray(['duplicate_of' => ['from' => null, 'to' => 'WEB-2']]);
@@ -75,7 +75,7 @@ test('changing the resolution of a Done issue keeps resolved_at', function () {
     $at = Issue::where('number', 1)->sole()->resolved_at;
     $this->travel(2)->hours();
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['resolution' => 'cannot_reproduce'])->assertOk()->assertJsonPath('data.resolution', 'cannot_reproduce');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'resolution' => 'cannot_reproduce'])->assertOk()->assertJsonPath('data.resolution', 'cannot_reproduce');
 
     expect(Issue::where('number', 1)->sole()->resolved_at->equalTo($at))->toBeTrue();
 });
@@ -85,7 +85,7 @@ test('1-R8: a project without a Done status says an Admin must add one', functio
     DB::table('column_statuses')->where('column_id', $done->id)->delete();
     $done->delete();
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['resolution' => 'wont_do'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'resolution' => 'wont_do'])->assertUnprocessable()
         ->assertJsonPath('errors.resolution.0', 'WEB has no Done status. A project Admin must add a column with a Done status before issues can be closed.');
 });
 
@@ -97,10 +97,10 @@ test('a created issue in a Done status is resolved too', function () {
 
 test('bulk updates resolve each item', function () {
     $this->patchJson('/api/v1/issues/bulk', ['updates' => [
-        ['key' => 'WEB-1', 'status' => 'Done'],
-        ['key' => 'WEB-2', 'status' => 'Done', 'resolution' => 'wont_do'],
+        ['key' => 'WEB-1', 'version' => 1, 'status' => 'Done'],
+        ['key' => 'WEB-2', 'version' => 1, 'status' => 'Done', 'resolution' => 'wont_do'],
     ]])->assertOk()->assertJsonPath('data.0.resolution', 'done')->assertJsonPath('data.1.resolution', 'wont_do');
-    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'status' => 'To Do'], ['key' => 'WEB-2', 'status' => 'To Do', 'resolution' => 'done']]])
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'version' => 2, 'status' => 'To Do'], ['key' => 'WEB-2', 'version' => 2, 'status' => 'To Do', 'resolution' => 'done']]])
         ->assertUnprocessable()->assertJsonValidationErrors('updates.1.resolution');
 });
 
@@ -168,7 +168,7 @@ test('web: undo of a resolution change puts the old resolution back', function (
     $this->actingAs($this->admin);
     $this->post(w('/issues/WEB-1/move'), ['status' => 'Done'])->assertRedirect();
 
-    $this->patch(w('/issues/WEB-1'), ['resolution' => 'wont_do'])->assertSessionHasNoErrors();
+    $this->patch(w('/issues/WEB-1'), ['version' => 2, 'resolution' => 'wont_do'])->assertSessionHasNoErrors();
     $undo = session('undo');
     expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('wont_do');
 
@@ -220,7 +220,7 @@ test('deleting a Done column logs a reopened entry for each issue it moves out o
 
 test('duplicate_of alone on a move is the same 422 as on an update', function () {
     $this->postJson('/api/v1/issues/WEB-1/move', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
-    $this->patchJson('/api/v1/issues/WEB-1', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
 });
 
 test('the web dashboard lists my issues not done by default and takes category and resolution', function () {

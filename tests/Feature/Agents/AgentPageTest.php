@@ -135,7 +135,7 @@ test('activity and comments written by an agent carry the agent label and the ow
     $issue = makeIssue($this->web, $this->owner, ['title' => 'Thing']);
     $plain = makeAgent($this->owner, AgentLevel::Write, name: 'deploy-bot')[1];
     asToken($plain)->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'from the bot'])->assertCreated();
-    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['priority' => 'high'])->assertOk();
+    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'priority' => 'high'])->assertOk();
     app(CommentService::class)->add($issue, $this->owner, 'from a person');
 
     app('auth')->forgetGuards();

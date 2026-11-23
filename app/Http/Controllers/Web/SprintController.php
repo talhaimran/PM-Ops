@@ -91,8 +91,8 @@ class SprintController extends Controller
         $undoOf = $request->validate(['undo_of' => ['nullable', 'integer']])['undo_of'] ?? null;
 
         if ($undoOf) {
-            $this->undo->guard($issue, (int) $undoOf);
-            $this->backlog->rank($issue, $request->user(), $request->validated(), 'undid');
+            // undo_of is the version right after the change; if the issue changed since, IssueService refuses it.
+            $this->backlog->rank($issue, $request->user(), [...$request->validated(), 'version' => (int) $undoOf], 'undid');
 
             return back();
         }

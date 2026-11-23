@@ -24,6 +24,8 @@ class IssueResource extends JsonResource
         return $this->selected([
             'id' => $this->id,
             'key' => "{$projectKey}-{$this->number}",
+            // Spec 7.11: what every edit sends back; `fields` never drops it.
+            'version' => $this->version,
             'project' => $projectKey,
             'title' => $this->title,
             'description' => $this->description,

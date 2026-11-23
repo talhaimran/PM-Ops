@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('update_issue')]
-#[Description('Update an issue by key; send only the fields to change (null clears assignee, epic, parent, points, due date).')]
+#[Description('Update an issue by key; send the version you read plus only the fields to change (null clears assignee, epic, parent, points, due date).')]
 #[IsIdempotent]
 class UpdateIssue extends Tool
 {
@@ -41,6 +41,7 @@ class UpdateIssue extends Tool
     {
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
+            'version' => $schema->integer()->min(1)->description('The version you read (get_issue). If the issue changed since, nothing is saved and the error says what changed; read it again and resend.')->required(),
             'title' => $schema->string()->max(255),
             ...$this->issueFields($schema),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to a Done-category status.'),

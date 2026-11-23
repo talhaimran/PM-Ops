@@ -2,7 +2,7 @@
 
 namespace App\Mcp\Tools;
 
-use App\Http\Requests\Issues\CommentRequest;
+use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Resources\CommentResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
 use App\Services\CommentService;
@@ -27,7 +27,9 @@ class UpdateComment extends Tool
         $request->validate(['comment_id' => 'required|integer']);
         $comment = $comments->resolve($request->user(), $request->get('comment_id'));
         Gate::authorize('update', $comment);
-        $comment = $comments->update($comment, $request->validate((new CommentRequest)->rules())['body']);
+        $rules = new UpdateCommentRequest;
+        $data = $request->validate($rules->rules(), $rules->messages());
+        $comment = $comments->update($comment, $data['body'], (int) $data['version']);
 
         return $this->result("Updated comment {$comment->id}.", new CommentResource($comment));
     }
@@ -37,6 +39,7 @@ class UpdateComment extends Tool
         return [
             'comment_id' => $schema->integer()->description('Comment id from get_issue.')->required(),
             'body' => $schema->string()->description('New Markdown text.')->required(),
+            'version' => $schema->integer()->min(1)->description("The comment's version from get_issue. If it changed since, nothing is saved; read it again and resend.")->required(),
         ];
     }
 }

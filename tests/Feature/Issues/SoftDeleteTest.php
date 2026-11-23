@@ -62,7 +62,7 @@ test('a deleted issue is absent from the API and MCP', function () {
     apiAs($this->admin);
 
     $this->getJson('/api/v1/issues/WEB-2')->assertNotFound();
-    $this->patchJson('/api/v1/issues/WEB-2', ['title' => 'Back?'])->assertNotFound();
+    $this->patchJson('/api/v1/issues/WEB-2', ['version' => 1, 'title' => 'Back?'])->assertNotFound();
     foreach (['/api/v1/projects/WEB/issues', '/api/v1/projects/WEB/board', '/api/v1/projects/WEB/backlog', '/api/v1/issues?q=Vanish'] as $url) {
         $this->getJson($url)->assertOk()->assertDontSee('Vanishes');
     }
@@ -196,7 +196,7 @@ test('deleted_at cannot be set through issue input', function () {
     makeIssue($this->project, $this->admin);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Still here', 'deleted_at' => now()->toDateTimeString()])->assertOk();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Still here', 'deleted_at' => now()->toDateTimeString()])->assertOk();
 
     expect(Issue::sole()->deleted_at)->toBeNull();
 });

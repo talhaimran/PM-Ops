@@ -7,6 +7,7 @@ use App\Http\Controllers\Web\Concerns\PresentsIssue;
 use App\Http\Requests\Issues\CommentRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
+use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
 use App\Http\Resources\ActivityResource;
 use App\Models\Project;
@@ -55,10 +56,11 @@ class IssueController extends Controller
         $issue = $this->issues->resolve($request->user(), $key);
         Gate::authorize('update', $issue);
         $data = $request->validated();
-        $undoOf = $request->validate(['undo_of' => ['nullable', 'integer']])['undo_of'] ?? null;
+        // overwrite (web only, spec 7.11): the conflict dialog's "Save mine over theirs", sent with the current version.
+        $flags = $request->validate(['undo_of' => ['nullable', 'integer'], 'overwrite' => ['sometimes', 'boolean']]);
 
-        if ($undoOf) {
-            $this->undo->guard($issue, (int) $undoOf);
+        if ($flags['undo_of'] ?? null) {
+            // The undo sends the version right after the change; if the issue changed since, IssueService refuses it.
             $this->issues->update($issue, $request->user(), $data, 'undid');
 
             return back();
@@ -66,7 +68,7 @@ class IssueController extends Controller
 
         $before = $this->undo->forUpdate($issue, array_keys($data));
         $marker = $this->undo->token($issue);
-        $issue = $this->issues->update($issue, $request->user(), $data);
+        $issue = $this->issues->update($issue, $request->user(), $data, ($flags['overwrite'] ?? false) ? 'overwrote' : 'updated');
         $token = $this->undo->token($issue);
 
         if ($token !== $marker) {
@@ -76,7 +78,7 @@ class IssueController extends Controller
                 'message' => $status !== null && $status !== $issue->status->name ? "{$issue->key} moved to {$issue->status->name}" : "{$issue->key} updated",
                 'method' => 'patch',
                 'url' => route('issues.update', $issue->key),
-                'data' => [...$before, 'undo_of' => $token],
+                'data' => [...$before, 'version' => $token, 'undo_of' => $token],
             ]);
         }
 
@@ -124,11 +126,11 @@ class IssueController extends Controller
         return back();
     }
 
-    public function updateComment(CommentRequest $request, int $comment): RedirectResponse
+    public function updateComment(UpdateCommentRequest $request, int $comment): RedirectResponse
     {
         $comment = $this->comments->resolve($request->user(), $comment);
         Gate::authorize('update', $comment);
-        $this->comments->update($comment, $request->validated('body'));
+        $this->comments->update($comment, $request->validated('body'), (int) $request->validated('version'));
 
         return back();
     }

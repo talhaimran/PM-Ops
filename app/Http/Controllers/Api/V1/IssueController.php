@@ -55,7 +55,8 @@ class IssueController extends Controller
     /**
      * Update up to 50 issues across your projects, all or nothing.
      *
-     * Body: `{"updates": [{"key": "WEB-1", ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
+     * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
+     * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
      * An agent's moves to the last column wait for a person: 202 with `status: pending_approval` and `approval_requests`.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse
@@ -79,6 +80,10 @@ class IssueController extends Controller
 
     /**
      * Update an issue. Send only the fields to change; send null to clear assignee, epic, parent, points or due date.
+     *
+     * Send the `version` you read (required). If the issue changed since, nothing is saved: 409 `{"error": "conflict",
+     * "current_version": …, "changes": [{"field", "from", "to", "by", "agent", "via", "at"}], "issue": {…}}`. Read it
+     * again and resend. Moves (`/move`, `/rank`) need no version.
      *
      * An agent moving the issue to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...},
      * "issue": {...}}`: a person must approve the move; the other fields are applied. `reason` (optional) says why.

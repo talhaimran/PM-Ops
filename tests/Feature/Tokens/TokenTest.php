@@ -97,5 +97,5 @@ test('scoped tokens cannot reach comments in other projects by id', function () 
     $comment = app(CommentService::class)->add(Issue::where('number', 1)->where('project_id', $this->api->id)->first(), $this->me, 'hidden');
     $plain = makeAgent($this->me, AgentLevel::Write, ['WEB'], name: 'scoped')[1];
 
-    $this->withToken($plain)->patchJson("/api/v1/comments/{$comment->id}", ['body' => 'x'])->assertNotFound();
+    $this->withToken($plain)->patchJson("/api/v1/comments/{$comment->id}", ['version' => 1, 'body' => 'x'])->assertNotFound();
 });

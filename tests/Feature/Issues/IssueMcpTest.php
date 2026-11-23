@@ -44,7 +44,7 @@ test('get_issue and update_issue work by key', function () {
     makeIssue($this->project, $this->admin, ['title' => 'Old']);
 
     PmServer::tool(GetIssue::class, ['issue' => 'web-1'])->assertOk()->assertSee('"title":"Old"');
-    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'status' => 'in progress', 'priority' => 'high'])
+    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'version' => 1, 'status' => 'in progress', 'priority' => 'high'])
         ->assertOk()
         ->assertSee(['Updated WEB-1', '"status":"In Progress"']);
 });
@@ -53,7 +53,7 @@ test('update_issue can clear fields with null', function () {
     addMember($this->project, User::factory()->create(['email' => 'dev@example.com']), ProjectRole::Member);
     makeIssue($this->project, $this->admin, ['assignee' => 'dev@example.com']);
 
-    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'assignee' => null])->assertOk();
+    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'version' => 1, 'assignee' => null])->assertOk();
 
     expect(Issue::first()->assignee_id)->toBeNull();
 });
@@ -71,7 +71,7 @@ test('comment tools', function () {
 
     PmServer::tool(AddComment::class, ['issue' => 'WEB-1', 'body' => 'hi'])->assertOk()->assertSee('Commented on WEB-1');
     $id = Comment::sole()->id;
-    PmServer::tool(UpdateComment::class, ['comment_id' => $id, 'body' => 'edited'])->assertOk()->assertSee('edited');
+    PmServer::tool(UpdateComment::class, ['comment_id' => $id, 'version' => 1, 'body' => 'edited'])->assertOk()->assertSee('edited');
     PmServer::tool(DeleteComment::class, ['comment_id' => $id])->assertOk();
 
     expect(Comment::count())->toBe(0);
@@ -87,7 +87,7 @@ test('label tools', function () {
 
 test('get_issue_activity shows the history', function () {
     makeIssue($this->project, $this->admin);
-    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'title' => 'Renamed']);
+    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'version' => 1, 'title' => 'Renamed']);
 
     PmServer::tool(GetIssueActivity::class, ['issue' => 'WEB-1'])
         ->assertOk()

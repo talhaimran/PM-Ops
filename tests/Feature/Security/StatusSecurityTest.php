@@ -28,7 +28,7 @@ beforeEach(function () {
 test("B's status name gets the same Unknown status error as a missing one, listing A's statuses only", function (string $name) {
     $valid = 'Valid statuses for WEB: To Do, In Progress, In Review, Done.';
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => $name])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => $name])->assertUnprocessable()
         ->assertJsonPath('errors.status.0', "Unknown status \"{$name}\". {$valid}");
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => $name])->assertUnprocessable()
         ->assertJsonPath('errors.status.0', "Unknown status \"{$name}\". {$valid}");
@@ -48,7 +48,7 @@ test("B's status name can't be mapped to an A column, and the error lists A's li
 });
 
 test('status_id in a request body is ignored', function () {
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Renamed', 'status_id' => $this->secret->id])->assertOk()->assertJsonPath('data.status', 'To Do');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Renamed', 'status_id' => $this->secret->id])->assertOk()->assertJsonPath('data.status', 'To Do');
     $this->postJson('/api/v1/projects/WEB/issues', ['title' => 'x', 'status_id' => $this->secret->id])->assertCreated()->assertJsonPath('data.status', 'To Do');
     $this->postJson('/api/v1/issues/WEB-1/move', ['status_id' => $this->secret->id])->assertOk()->assertJsonPath('data.status', 'To Do');
 

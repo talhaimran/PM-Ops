@@ -148,10 +148,10 @@ test('rows made over REST carry via api and the agent; over MCP via mcp; on the 
     [$agent, $token] = makeAgent($this->owner, AgentLevel::Write);
     IssueStatusHistory::query()->delete();
 
-    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['status' => 'In Progress', 'story_points' => 2])->assertOk();
+    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'In Progress', 'story_points' => 2])->assertOk();
     $this->actingAs($this->owner)->post(w('/issues/WEB-3/move'), ['status' => 'In Progress'])->assertSessionHasNoErrors();
     // Last: the MCP call leaves its via binding in the container for the rest of the test.
-    mcpJson($token, 'update_issue', ['issue' => 'WEB-2', 'status' => 'In Progress', 'story_points' => 3]);
+    mcpJson($token, 'update_issue', ['issue' => 'WEB-2', 'version' => 1, 'status' => 'In Progress', 'story_points' => 3]);
 
     $byIssue = fn (string $model, int $n) => $model::where('issue_id', Issue::where('number', $n)->value('id'))->get();
     expect($byIssue(IssueStatusHistory::class, 1)->sole()->only('via', 'agent_id', 'user_id'))->toBe(['via' => 'api', 'agent_id' => $agent->id, 'user_id' => $this->owner->id])
@@ -165,7 +165,7 @@ test('a held agent move writes no row; the approved move has the decider as user
     [$agent, $token] = makeAgent($this->owner, AgentLevel::Write);
     IssueStatusHistory::query()->delete();
 
-    $id = asToken($token)->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done'])->assertStatus(202)->json('approval_request.id');
+    $id = asToken($token)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done'])->assertStatus(202)->json('approval_request.id');
     expect(IssueStatusHistory::count())->toBe(0);
 
     $decider = User::factory()->create();

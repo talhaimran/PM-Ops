@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('get_issue')]
-#[Description('Get an issue by key with its sub-tasks, epic issues and comments (with comment ids).')]
+#[Description('Get an issue by key with its sub-tasks, epic issues and comments (with comment ids). Its version (and each comment\'s) is what update_issue and update_comment need.')]
 #[IsReadOnly]
 class GetIssue extends Tool
 {
@@ -35,7 +35,7 @@ class GetIssue extends Tool
     {
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
-            'fields' => $schema->string()->description('Comma-separated keys to return, e.g. "title,status,comments"; key is always included.'),
+            'fields' => $schema->string()->description('Comma-separated keys to return, e.g. "title,status,comments"; key and version are always included.'),
         ];
     }
 }

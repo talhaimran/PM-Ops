@@ -65,9 +65,9 @@ function askForDone($t, string $path, array $extra = []): int
 
     return match ($path) {
         'move_issue' => $mcpId(agentTool($t, MoveIssue::class, ['issue' => 'WEB-1', 'status' => 'Done', ...$extra])),
-        'update_issue' => $mcpId(agentTool($t, UpdateIssue::class, ['issue' => 'WEB-1', 'status' => 'Done', ...$extra])),
-        'bulk_update_issues' => $mcpId(agentTool($t, BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'status' => 'Done', ...$extra]]])),
-        'PATCH /issues/{key}' => asToken($t->plain)->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', ...$extra])->assertStatus(202)->json('approval_request.id'),
+        'update_issue' => $mcpId(agentTool($t, UpdateIssue::class, ['issue' => 'WEB-1', 'version' => 1, 'status' => 'Done', ...$extra])),
+        'bulk_update_issues' => $mcpId(agentTool($t, BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'version' => 1, 'status' => 'Done', ...$extra]]])),
+        'PATCH /issues/{key}' => asToken($t->plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', ...$extra])->assertStatus(202)->json('approval_request.id'),
         'POST /issues/{key}/move' => asToken($t->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', ...$extra])->assertStatus(202)->json('approval_request.id'),
     };
 }
@@ -94,6 +94,7 @@ test('Review Focus 2: every path to Done by an agent opens one approval request 
             'to_status' => 'Done',
             'from_status_id' => Status::where('name', 'In Review')->value('id'),
             'reason' => 'PR merged',
+            'issue_version' => 1,
         ])
         ->and($request->expires_at->toDateString())->toBe(now()->addDays(7)->toDateString())
         ->and(Activity::where('action', '!=', 'created')->count())->toBe(0);
@@ -119,7 +120,7 @@ test('MCP says who has to act and returns the same JSON', function () {
 });
 
 test('A-L5: the reason is optional and at most 200 characters', function () {
-    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'reason' => str_repeat('x', 201)])->assertUnprocessable()->assertJsonValidationErrors('reason');
+    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'reason' => str_repeat('x', 201)])->assertUnprocessable()->assertJsonValidationErrors('reason');
     agentTool($this, MoveIssue::class, ['issue' => 'WEB-1', 'status' => 'Done', 'reason' => str_repeat('x', 201)])->assertHasErrors();
 
     expect(ApprovalRequest::count())->toBe(0);
@@ -153,7 +154,7 @@ test('A-L6: in a one-column project the default column is Done, so an agent cann
 });
 
 test('A-L7: a mixed update applies the other fields and holds the status', function () {
-    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['title' => 'Renamed', 'priority' => 'high', 'status' => 'Done'])
+    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Renamed', 'priority' => 'high', 'status' => 'Done'])
         ->assertStatus(202)
         ->assertJsonPath('issue.title', 'Renamed')
         ->assertJsonPath('issue.priority', 'high')
@@ -172,8 +173,8 @@ test('an agent moves to any other column on its own; a person moves to Done on t
     $this->flushHeaders();
     app('auth')->forgetGuards();
     $this->actingAs($this->owner)->post(w('/issues/WEB-1/move'), ['status' => 'Done'])->assertSessionHasNoErrors();
-    $this->patch(w('/issues/WEB-1'), ['status' => 'In Review'])->assertSessionHasNoErrors();
-    $this->patch(w('/issues/WEB-1'), ['status' => 'Done'])->assertSessionHasNoErrors();
+    $this->patch(w('/issues/WEB-1'), ['version' => 3, 'status' => 'In Review'])->assertSessionHasNoErrors();
+    $this->patch(w('/issues/WEB-1'), ['version' => 4, 'status' => 'Done'])->assertSessionHasNoErrors();
 
     expect(issueOne()->status->name)->toBe('Done')->and(ApprovalRequest::count())->toBe(0);
 });
@@ -277,7 +278,7 @@ test('Review Focus 3: the issue moved since, so approving needs a second confirm
     app(BoardService::class)->move(issueOne(), $this->owner, ['status' => 'In Progress']);
 
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))
-        ->assertSessionHasErrors(['approval' => 'WEB-1 moved from In Review to In Progress since this request. Approve again to move it to Done.']);
+        ->assertSessionHasErrors(['approval' => 'Talha Imran moved WEB-1 to In Progress since this request. Approve again to move it to Done.']);
     expect(issueOne()->status->name)->toBe('In Progress')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending);
 
     $this->get(w('/issues/WEB-1'))->assertInertia(fn (Assert $page) => $page
@@ -417,7 +418,7 @@ test('revoking an agent marks its pending requests stale at once: off the dashbo
 
 test("undo's conflict message after an approved move names the move, never the request link", function () {
     $sam = addMember($this->web, User::factory()->create(['name' => 'Sam Member']), ProjectRole::Member);
-    $this->actingAs($sam)->patch(w('/issues/WEB-1'), ['title' => 'Renamed']);
+    $this->actingAs($sam)->patch(w('/issues/WEB-1'), ['version' => 1, 'title' => 'Renamed']);
     $undo = session('undo');
     $id = askForDone($this, 'move_issue');
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"));

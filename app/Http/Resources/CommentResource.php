@@ -14,6 +14,8 @@ class CommentResource extends JsonResource
         return [
             'id' => $this->id,
             'body' => $this->body,
+            // Spec 7.11: what an edit sends back.
+            'version' => $this->version,
             'author' => IssueResource::user($this->author),
             'agent' => $this->whenLoaded('agent', fn () => IssueResource::agent($this->agent)),
             'created_at' => $this->created_at,
