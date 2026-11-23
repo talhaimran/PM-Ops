@@ -60,3 +60,29 @@ test('the project row is locked before the status is resolved', function (string
     $resolve = $queries->search(fn ($q) => str_contains($q, 'from `statuses` inner join `column_statuses`'));
     expect($lock)->toBeInt()->and($resolve)->toBeInt()->and($lock)->toBeLessThan($resolve);
 })->with(['update', 'create']);
+
+test('a bulk update locks all its projects before it changes any issue, like move and approve', function () {
+    $owner = User::factory()->create();
+    makeWorkspace($owner, 'acme');
+    $web = makeProject($owner, 'WEB');
+    makeIssue($web, $owner);
+    makeIssue($web, $owner);
+
+    config(['database.connections.locker' => config('database.connections.'.config('database.default'))]);
+    $locker = DB::connection('locker');
+    $locker->beginTransaction();
+    $locker->table('projects')->where('id', $web->id)->lockForUpdate()->first();
+    DB::statement('SET SESSION innodb_lock_wait_timeout = 1');
+    DB::enableQueryLog();
+
+    try {
+        expect(fn () => app(IssueService::class)->updateMany($owner, [['key' => 'WEB-1', 'title' => 'x'], ['key' => 'WEB-2', 'status' => 'In Review']]))
+            // Inside updateMany's outer transaction Laravel reports the timeout as a DeadlockException.
+            ->toThrow(PDOException::class, 'Lock wait timeout');
+    } finally {
+        $locker->rollBack();
+    }
+
+    // Holding WEB-1's row while waiting for the project is the deadlock with approve (project, then issue).
+    expect(collect(DB::getQueryLog())->pluck('query')->filter(fn ($q) => str_starts_with($q, 'update `issues`'))->all())->toBe([]);
+});

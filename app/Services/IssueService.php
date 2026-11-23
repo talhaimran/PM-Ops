@@ -131,12 +131,19 @@ class IssueService
      */
     public function updateMany(User $actor, array $items): Collection
     {
-        return DB::transaction(fn () => collect($items)->values()->map(function ($data, $i) use ($actor) {
-            $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
-            Gate::forUser($actor)->authorize('update', $issue);
+        return DB::transaction(function () use ($actor, $items) {
+            $items = collect($items)->values();
+            $issues = $items->map(function ($data, $i) use ($actor) {
+                $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
+                Gate::forUser($actor)->authorize('update', $issue);
 
-            return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($data)->except('key')->all()));
-        }));
+                return $issue;
+            });
+            // Every project row first, in id order, before any issue row: the order move and approve use, so no deadlock.
+            Project::whereIn('id', $issues->pluck('project_id')->unique())->orderBy('id')->lockForUpdate()->get();
+
+            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except('key')->all())));
+        });
     }
 
     /** Run one bulk item, re-keying its validation errors under $prefix (or $prefix.$as) and prefixing messages. */
