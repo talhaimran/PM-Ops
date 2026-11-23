@@ -3,6 +3,9 @@ import IssueTable from '@/Components/IssueTable';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { ApprovalRequest, Issue, ProjectRole } from '@/types';
 import EmptyState from '@/Components/EmptyState';
+import { categories } from '@/Components/IssueFilters';
+import { selectClass } from '@/Components/IssueFormModal';
+import { resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import { Head, Link, router } from '@inertiajs/react';
 import { CircleCheck, FolderKanban } from 'lucide-react';
 
@@ -27,8 +30,10 @@ export default function Dashboard({
     myIssues,
     pendingApprovals,
     projects,
+    filters,
 }: {
     myIssues: Issue[];
+    filters: { category?: string; resolution?: string };
     pendingApprovals: ApprovalRequest[];
     projects: { key: string; name: string; my_role: ProjectRole; summary: Summary }[];
 }) {
@@ -67,8 +72,35 @@ export default function Dashboard({
 
                 <section>
                     <h2 className="mb-3 text-heading-2xl text-text">My issues</h2>
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                        {(
+                            [
+                                ['category', 'Status category', categories],
+                                ['resolution', 'Resolution', resolutions.map((r) => ({ value: r, label: resolutionLabels[r] }))],
+                            ] as const
+                        ).map(([name, label, choices]) => (
+                            <select
+                                key={name}
+                                aria-label={label}
+                                className={`${selectClass} !h-control-h w-auto ${filters[name] ? '!border-primary !text-primary' : ''}`}
+                                value={filters[name] ?? ''}
+                                onChange={(e) => router.get(route('dashboard'), { ...filters, [name]: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true })}
+                            >
+                                <option value="">{label}</option>
+                                {choices.map((c) => (
+                                    <option key={c.value} value={c.value}>
+                                        {c.label}
+                                    </option>
+                                ))}
+                            </select>
+                        ))}
+                    </div>
                     {myIssues.length === 0 ? (
-                        <EmptyState icon={CircleCheck} title="You're all caught up." hint="Nothing open is assigned to you." />
+                        <EmptyState
+                            icon={CircleCheck}
+                            title={filters.category || filters.resolution ? 'No issues match these filters.' : "You're all caught up."}
+                            hint={filters.category || filters.resolution ? 'Try removing a filter.' : 'Nothing open is assigned to you.'}
+                        />
                     ) : (
                         <IssueTable issues={myIssues} />
                     )}

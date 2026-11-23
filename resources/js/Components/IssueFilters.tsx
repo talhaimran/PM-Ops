@@ -8,6 +8,12 @@ import { useEffect, useState } from 'react';
 
 export type Filters = Partial<Record<'assignee' | 'type' | 'priority' | 'label' | 'category' | 'resolution' | 'q' | 'sprint' | 'sort', string>>;
 
+export const categories = [
+    { value: 'to_do', label: 'To do' },
+    { value: 'in_progress', label: 'In progress' },
+    { value: 'done', label: 'Done' },
+];
+
 /** Search box plus assignee/type/priority/category/resolution/label/sprint selects. Calls onApply with changed keys; '' clears one. */
 export default function IssueFilters({
     filters,
@@ -46,11 +52,6 @@ export default function IssueFilters({
             ))}
         </select>
     );
-    const categories = [
-        { value: 'to_do', label: 'To do' },
-        { value: 'in_progress', label: 'In progress' },
-        { value: 'done', label: 'Done' },
-    ];
     const plain = (values: string[]) => values.map((v) => ({ value: v, label: v }));
     const active = Object.entries(filters).some(([k, v]) => k !== 'sort' && v);
     const toggle = (assignee: string) => onApply({ assignee: filters.assignee === assignee ? '' : assignee });

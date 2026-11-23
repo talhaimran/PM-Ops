@@ -222,3 +222,30 @@ test('duplicate_of alone on a move is the same 422 as on an update', function ()
     $this->postJson('/api/v1/issues/WEB-1/move', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
     $this->patchJson('/api/v1/issues/WEB-1', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
 });
+
+test('the web dashboard lists my issues not done by default and takes category and resolution', function () {
+    makeIssue($this->web, $this->admin, ['title' => 'finished', 'status' => 'Done']);
+    makeIssue($this->web, $this->admin, ['title' => 'dropped', 'status' => 'Done', 'resolution' => 'wont_do']);
+    Issue::query()->update(['assignee_id' => $this->admin->id]);
+    $this->actingAs($this->admin);
+    $titles = fn (string $query) => collect($this->get(w("/dashboard{$query}"))->assertOk()->viewData('page')['props']['myIssues'])->pluck('title')->sort()->values()->all();
+
+    expect($titles(''))->toBe(['one', 'two'])
+        ->and($titles('?category=done'))->toBe(['dropped', 'finished'])
+        ->and($titles('?resolution=wont_do'))->toBe(['dropped']);
+    $this->get(w('/dashboard?category=finished'))->assertSessionHasErrors(['category' => 'The category filter must be one of: to_do, in_progress, done.']);
+    $this->get(w('/dashboard?resolution=nope'))->assertSessionHasErrors('resolution');
+});
+
+test('the dashboard filters never show issues from projects the user cannot open', function () {
+    $bob = User::factory()->create();
+    $ops = makeProject($bob, 'OPS');
+    makeIssue($ops, $bob, ['title' => 'secret', 'status' => 'Done']);
+    Issue::query()->update(['assignee_id' => $this->admin->id]);
+    asWorkspaceMember($this->admin);
+    $this->actingAs($this->admin);
+
+    $mine = collect($this->get(w('/dashboard?category=done'))->assertOk()->viewData('page')['props']['myIssues'])->pluck('title')->all();
+
+    expect($mine)->not->toContain('secret');
+});
