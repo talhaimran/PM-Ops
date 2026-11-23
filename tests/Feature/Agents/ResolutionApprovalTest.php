@@ -73,3 +73,26 @@ test('asking again with another resolution replaces the old one, duplicate_of in
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
     expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('wont_do');
 });
+
+test('asking again with no resolution clears the old one: the person decides on the latest ask', function () {
+    asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2'])->assertStatus(202);
+    $again = asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertStatus(202)
+        ->assertJsonPath('approval_request.resolution', null)->assertJsonPath('approval_request.duplicate_of', null);
+
+    expect(ApprovalRequest::count())->toBe(1)
+        ->and(ApprovalRequest::sole()->action)->not->toHaveKeys(['resolution', 'duplicate_of']);
+
+    $this->actingAs($this->owner)->post(w('/approvals/'.$again->json('approval_request.id').'/approve'))->assertSessionHasNoErrors();
+    expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('done');
+});
+
+test('an identical re-ask leaves the request unchanged', function () {
+    $ask = fn () => asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'wont_do'])->assertStatus(202);
+    $ask();
+    $before = ApprovalRequest::sole();
+    $this->travel(5)->minutes();
+
+    $ask();
+
+    expect(ApprovalRequest::sole()->updated_at->equalTo($before->updated_at))->toBeTrue();
+});

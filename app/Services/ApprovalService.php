@@ -48,7 +48,8 @@ class ApprovalService
 
     /**
      * Open a request for $agent's move of $issue to $to, or return the open one for the same issue and target.
-     * The resolution and the original's key (spec 7.4) ride along in the action, only when the agent sent them.
+     * The resolution and the original's key (spec 7.4) ride along in the action, only when the agent sent them;
+     * asking again replaces them with what the new ask sent.
      */
     public function requestDone(Issue $issue, User $owner, Agent $agent, Status $to, ?string $reason, ?Resolution $resolution = null, ?string $duplicateOf = null): ApprovalRequest
     {
@@ -60,10 +61,13 @@ class ApprovalService
             $open = ApprovalRequest::open()->where('issue_id', $issue->id)->where('action->to_status_id', $to->id)
                 ->lock('for update skip locked')->first();
 
-            // The same ask again with another resolution is the agent changing its mind: the person decides on the latest.
-            if ($open && isset($resolved['resolution'])) {
-                // A new resolution replaces the old one whole, so a stale duplicate_of can't outlive it.
-                $open->update(['action' => [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved]]);
+            // Asking again is the agent changing its mind: the person decides on the latest ask, so what it sent now
+            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole.
+            if ($open) {
+                $action = [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved];
+                if ($action != $open->action) {
+                    $open->update(['action' => $action]);
+                }
             }
             $approval = $open ?? ApprovalRequest::create([
                 'workspace_id' => $issue->project->workspace_id,
