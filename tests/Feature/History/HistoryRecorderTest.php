@@ -2,6 +2,7 @@
 
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
+use App\Models\Activity;
 use App\Models\EstimateHistory;
 use App\Models\Issue;
 use App\Models\IssueStatusHistory;
@@ -175,6 +176,26 @@ test('a held agent move writes no row; the approved move has the decider as user
 
     $row = IssueStatusHistory::sole();
     expect($row->user_id)->toBe($decider->id)->and($decider->id)->not->toBe($this->owner->id)->and($row->agent_id)->toBe($agent->id)->and($row->to_category)->toBe('done')->and($row->via)->toBe('web');
+});
+
+test('deleting a Done column across the 500-row chunk boundary writes one row and one reopened entry per issue, soft-deleted included', function () {
+    $first = makeIssue($this->project, $this->owner, ['status' => 'Done']);
+    foreach (range(2, 502) as $number) {
+        $first->replicate()->fill(['number' => $number])->saveQuietly();
+    }
+    $this->issues->delete($first, $this->owner);
+    $column = $this->project->columns()->whereRelation('statuses', 'statuses.id', $first->status_id)->sole();
+    IssueStatusHistory::query()->delete();
+    Activity::query()->delete();
+
+    app(ColumnService::class)->delete($column, 'In Progress', $this->owner);
+
+    $ids = Issue::withTrashed()->orderBy('id')->pluck('id')->all();
+    expect($ids)->toHaveCount(502)
+        ->and(IssueStatusHistory::orderBy('issue_id')->pluck('issue_id')->all())->toBe($ids)
+        ->and(IssueStatusHistory::where('to_category', 'in_progress')->count())->toBe(502)
+        ->and(Activity::where('action', 'reopened')->orderBy('issue_id')->pluck('issue_id')->all())->toBe($ids)
+        ->and(Issue::withTrashed()->whereNotNull('resolution')->count())->toBe(0);
 });
 
 test('deleting a column with several issues (one soft-deleted) writes one attributed row per issue; an issue already on the target none', function () {
