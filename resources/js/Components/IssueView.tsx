@@ -330,7 +330,10 @@ export default function IssueView({
                                     key={issue.due_date ?? ''}
                                     defaultValue={issue.due_date ?? ''}
                                     disabled={!can.contribute}
-                                    onChange={(e) => save({ due_date: e.target.value || null })}
+                                    onBlur={(e) => {
+                                        const v = e.target.value || null;
+                                        if (v !== (issue.due_date ?? null)) save({ due_date: v });
+                                    }}
                                 />,
                                 errors.due_date,
                             )}
