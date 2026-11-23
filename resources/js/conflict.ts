@@ -11,6 +11,9 @@ export type ConflictFlash = {
     at: string | null;
 };
 
+/** Window event the conflict dialog sends (detail: the ConflictFlash) once it kept theirs or saved mine, so the editor it was about closes. */
+export const CONFLICT_SETTLED = 'conflict:settled';
+
 /** A field value as text: lists joined, empty as "None". */
 export function show(value: unknown): string {
     if (Array.isArray(value)) return value.length ? value.join(', ') : 'None';
@@ -51,4 +54,13 @@ export function ago(iso: string, now = Date.now()): string {
     if (seconds < 3600) return format.format(-Math.floor(seconds / 60), 'minute');
     if (seconds < 86400) return format.format(-Math.floor(seconds / 3600), 'hour');
     return format.format(-Math.floor(seconds / 86400), 'day');
+}
+
+/**
+ * The version an open editor counts as read, after the page itself saved at `sent` and got back `saved`. Only when
+ * the editor's version was `sent` (nobody else changed the issue since it opened) does it move on, so a person's own
+ * save never makes their other open editor conflict with them, and someone else's change still does.
+ */
+export function advanceBase(base: number, sent: number, saved: number | undefined): number {
+    return saved !== undefined && base === sent ? saved : base;
 }

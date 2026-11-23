@@ -1,4 +1,4 @@
-import { ago, ConflictFlash, diffWords, fieldLabel, show } from '@/conflict';
+import { ago, CONFLICT_SETTLED, ConflictFlash, diffWords, fieldLabel, show } from '@/conflict';
 import { DialogTitle } from '@headlessui/react';
 import { router, usePage } from '@inertiajs/react';
 import { ArrowRightLeft } from 'lucide-react';
@@ -29,18 +29,20 @@ export default function ConflictDialog() {
     const fields = Object.keys(shown?.yours ?? {});
     const mine = () => (fields.length === 1 ? show(shown!.yours[fields[0]]) : fields.map((f) => `${fieldLabel(f)}: ${show(shown!.yours[f])}`).join('\n'));
     const copy = () => navigator.clipboard?.writeText(mine()).then(() => setCopied(true), () => {});
-    // Reload without local state, so open editors close and show their version.
+    // Only the editor the conflict was about closes; drafts and other open editors on the page stay as they are.
+    const settle = (conflict: ConflictFlash) => {
+        setShown(null);
+        window.dispatchEvent(new CustomEvent(CONFLICT_SETTLED, { detail: conflict }));
+    };
     const keepTheirs = () => {
         copy();
-        setShown(null);
-        router.visit(window.location.href, { preserveScroll: true, preserveState: false });
+        settle(shown!);
+        router.reload();
     };
-    const saveMine = () =>
-        router.patch(shown!.url, { ...shown!.yours, version: shown!.version, overwrite: true } as never, {
-            preserveScroll: true,
-            preserveState: false,
-            onSuccess: () => setShown(null),
-        });
+    const saveMine = () => {
+        const conflict = shown!;
+        router.patch(conflict.url, { ...conflict.yours, version: conflict.version, overwrite: true } as never, { preserveScroll: true, onSuccess: () => settle(conflict) });
+    };
 
     const side = (theirs: boolean) =>
         fields.map((f) => {

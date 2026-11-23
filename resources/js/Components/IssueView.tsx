@@ -12,11 +12,12 @@ import ResolutionChip, { DuplicateOfModal, resolutionLabels, resolutions } from 
 import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge, { lozengeClass } from '@/Components/StatusLozenge';
 import TextInput from '@/Components/TextInput';
+import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
 import { ActivityEntry, Comment, Issue, IssueLink, IssueOptions } from '@/types';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { Ellipsis } from 'lucide-react';
-import { ElementType, ReactNode, useState } from 'react';
+import { ElementType, ReactNode, useEffect, useState } from 'react';
 
 // Minimal Markdown styling without @tailwindcss/typography.
 const proseClass =
@@ -59,19 +60,39 @@ export default function IssueView({
 
     // Every edit sends the version it read (spec 7.11); a stale one opens the conflict dialog (ConflictDialog). The text
     // editors read it when they open, so a change that arrives while someone types is caught, not overwritten.
-    const [editBase, setEditBase] = useState(issue.version);
+    // One per editor; the page's own saves move them on (advanceBase).
+    const [bases, setBases] = useState({ title: issue.version, description: issue.version });
     const save = (data: Record<string, unknown>, onSuccess?: () => void, version = issue.version) =>
-        router.patch(route('issues.update', issue.key), { ...data, version } as never, { preserveScroll: true, onSuccess });
+        router.patch(route('issues.update', issue.key), { ...data, version } as never, {
+            preserveScroll: true,
+            onSuccess: (next) => {
+                const props = next.props as { issue?: Issue; peek?: IssueViewData | null };
+                const saved = (props.issue?.key === issue.key ? props.issue : props.peek?.issue)?.version;
+                setBases((b) => ({ title: advanceBase(b.title, version, saved), description: advanceBase(b.description, version, saved) }));
+                onSuccess?.();
+            },
+        });
     const editTitle = () => {
         setTitle(issue.title);
-        setEditBase(issue.version);
+        setBases((b) => ({ ...b, title: issue.version }));
         setEditingTitle(true);
     };
     const editDescription = () => {
         setDescription(issue.description ?? '');
-        setEditBase(issue.version);
+        setBases((b) => ({ ...b, description: issue.version }));
         setEditingDescription(true);
     };
+    // The conflict dialog settled this issue (kept theirs, or saved mine): close the editors it was about.
+    useEffect(() => {
+        const settle = (e: Event) => {
+            const conflict = (e as CustomEvent<ConflictFlash>).detail;
+            if (conflict.key !== issue.key) return;
+            if ('title' in conflict.yours) setEditingTitle(false);
+            if ('description' in conflict.yours) setEditingDescription(false);
+        };
+        window.addEventListener(CONFLICT_SETTLED, settle);
+        return () => window.removeEventListener(CONFLICT_SETTLED, settle);
+    }, [issue.key]);
 
     // "Close as…" (1-R8): the project's first Done status in board order, unless the issue is already Done. With none, the server explains.
     const closeAs = (data: Record<string, unknown>, onSuccess?: () => void) => {
@@ -133,7 +154,7 @@ export default function IssueView({
                             <form
                                 onSubmit={(e) => {
                                     e.preventDefault();
-                                    save({ title }, () => setEditingTitle(false), editBase);
+                                    save({ title }, () => setEditingTitle(false), bases.title);
                                 }}
                                 className="flex gap-2"
                             >
@@ -282,6 +303,7 @@ export default function IssueView({
                                     aria-label="Story points"
                                     className={`${inlineField} py-1.5`}
                                     placeholder="None"
+                                    key={issue.story_points ?? ''}
                                     defaultValue={issue.story_points ?? ''}
                                     disabled={!can.contribute}
                                     onBlur={(e) => {
@@ -305,6 +327,7 @@ export default function IssueView({
                                     type="date"
                                     aria-label="Due date"
                                     className={`${inlineField} py-1.5`}
+                                    key={issue.due_date ?? ''}
                                     defaultValue={issue.due_date ?? ''}
                                     disabled={!can.contribute}
                                     onChange={(e) => save({ due_date: e.target.value || null })}
@@ -323,6 +346,7 @@ export default function IssueView({
                                             aria-label="Epic key"
                                             className={`${inlineField} py-1.5`}
                                             placeholder={`None (e.g. ${issue.project}-1)`}
+                                            key={issue.epic?.key ?? ''}
                                             defaultValue={issue.epic?.key ?? ''}
                                             disabled={!can.contribute}
                                             onBlur={(e) => {
@@ -364,7 +388,7 @@ export default function IssueView({
                                     onChange={(e) => setDescription(e.target.value)}
                                 />
                                 <div className="flex gap-2">
-                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false), editBase)}>Save</PrimaryButton>
+                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false), bases.description)}>Save</PrimaryButton>
                                     <SecondaryButton onClick={() => setEditingDescription(false)}>Cancel</SecondaryButton>
                                 </div>
                             </div>
@@ -459,6 +483,12 @@ function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: bool
     const [editing, setEditing] = useState(false);
     // The version it read (spec 7.11), taken when editing starts.
     const form = useForm({ body: comment.body, version: comment.version });
+    // The conflict dialog settled this comment: close the editor, which then shows the comment as it is now.
+    useEffect(() => {
+        const settle = (e: Event) => (e as CustomEvent<ConflictFlash>).detail.url.endsWith(`/comments/${comment.id}`) && setEditing(false);
+        window.addEventListener(CONFLICT_SETTLED, settle);
+        return () => window.removeEventListener(CONFLICT_SETTLED, settle);
+    }, [comment.id]);
 
     return (
         <div className="flex gap-3">
