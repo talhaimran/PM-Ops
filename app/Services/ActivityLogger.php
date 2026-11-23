@@ -19,21 +19,30 @@ class ActivityLogger
     /** @param array<string, array{from: mixed, to: mixed}>|null $changes */
     public function log(Issue $issue, ?User $user, string $action, ?array $changes = null): Activity
     {
-        $approval = app()->bound(self::APPROVAL_BINDING) ? app(self::APPROVAL_BINDING) : null;
+        $approval = self::approval();
         if ($approval) {
             // shortcut: the request link lives in `changes` (no activities column in step A); move it to a column with agent_run_id (step B).
             $changes = [...($changes ?? []), 'approval_request' => ['id' => $approval->id, 'to' => $approval->action['to_status']]];
         }
 
         return $issue->activities()->create([
-            'user_id' => $user?->id,
             'action' => $action,
             'changes' => $changes,
-            'via' => self::via($user),
             // An OAuth token has no name of its own: it is the agent's.
             'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
-            'agent_id' => $approval?->agent_id ?? $user?->agent()?->id,
+            ...self::attribution($user),
         ]);
+    }
+
+    /** Who, which agent and how: the one source for activity and history rows. */
+    public static function attribution(?User $user): array
+    {
+        return ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
+    }
+
+    private static function approval(): ?ApprovalRequest
+    {
+        return app()->bound(self::APPROVAL_BINDING) ? app(self::APPROVAL_BINDING) : null;
     }
 
     /** Run $decide with its activity entries made by the decider but linked to the request and the agent that asked (A2). */

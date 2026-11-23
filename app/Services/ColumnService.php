@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 class ColumnService
 {
-    public function __construct(private StatusService $statuses, private ActivityLogger $activity) {}
+    public function __construct(private StatusService $statuses, private ActivityLogger $activity, private HistoryRecorder $history) {}
 
     /**
      * 1-R4: the column maps `status` (a library status name) when given, else a status named after the column in
@@ -92,15 +92,20 @@ class ColumnService
             $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
             // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
             $moving = Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'));
-            // Issues leaving Done are logged as reopened, like any other move out of it.
-            // shortcut: one model and one activity row per reopened issue inside the lock, chunk and bulk-insert when Done columns hold thousands.
-            $reopened = $to->isDone() ? collect() : (clone $moving)->with('status')->get()->filter(fn ($i) => $i->status->isDone());
+            // Every moved issue gets a history row (bulk-inserted per chunk); issues leaving Done are also logged as reopened, like any other move out of it.
+            // Both are written per chunk, before the bulk update, so memory stays flat for a large column.
+            // shortcut: one activity insert per reopened issue inside the lock, bulk-insert when Done columns hold thousands.
+            (clone $moving)->join('statuses', 'statuses.id', '=', 'issues.status_id')->select('issues.id', 'issues.status_id', 'statuses.category')
+                ->chunkById(500, function ($rows) use ($to, $actor) {
+                    $this->history->statusesMoved($rows, $to, $actor);
+                    $doneIds = $to->isDone() ? [] : $rows->where('category', StatusCategory::Done->value)->pluck('id')->all();
+                    foreach ($doneIds ? Issue::withTrashed()->with('status')->whereIn('id', $doneIds)->get() : [] as $issue) {
+                        $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
+                    }
+                }, 'issues.id', 'id');
             $moving->update(['status_id' => $to->id] + ($to->isDone()
                 ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
                 : ['resolution' => null, 'resolved_at' => null]));
-            foreach ($reopened as $issue) {
-                $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
-            }
             $column->delete();
             $this->resequence($others);
         });

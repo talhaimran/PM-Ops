@@ -15,7 +15,7 @@ class SprintService
 {
     public const DEFAULT_LENGTH_DAYS = 14;
 
-    public function __construct(private ActivityLogger $activity) {}
+    public function __construct(private ActivityLogger $activity, private HistoryRecorder $history) {}
 
     /** @param array{name?: ?string, goal?: ?string, start_date?: ?string, end_date?: ?string} $data */
     public function create(Project $project, array $data): Sprint
@@ -105,6 +105,7 @@ class SprintService
 
             foreach ($open as $issue) {
                 $issue->update(['sprint_id' => $target?->id]);
+                $this->history->sprintChanged($issue, $sprint, $target, $actor, $issue->story_points);
                 $this->activity->log($issue, $actor, 'updated', ['sprint' => ['from' => $sprint->name, 'to' => $target?->name]]);
             }
 
