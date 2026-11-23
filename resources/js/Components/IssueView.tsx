@@ -57,8 +57,21 @@ export default function IssueView({
     const [tab, setTab] = useState<'comments' | 'history'>('comments');
     const comment = useForm({ body: '' });
 
-    const save = (data: Record<string, unknown>, onSuccess?: () => void) =>
-        router.patch(route('issues.update', issue.key), data as never, { preserveScroll: true, onSuccess });
+    // Every edit sends the version it read (spec 7.11); a stale one opens the conflict dialog (ConflictDialog). The text
+    // editors read it when they open, so a change that arrives while someone types is caught, not overwritten.
+    const [editBase, setEditBase] = useState(issue.version);
+    const save = (data: Record<string, unknown>, onSuccess?: () => void, version = issue.version) =>
+        router.patch(route('issues.update', issue.key), { ...data, version } as never, { preserveScroll: true, onSuccess });
+    const editTitle = () => {
+        setTitle(issue.title);
+        setEditBase(issue.version);
+        setEditingTitle(true);
+    };
+    const editDescription = () => {
+        setDescription(issue.description ?? '');
+        setEditBase(issue.version);
+        setEditingDescription(true);
+    };
 
     // "Close as…" (1-R8): the project's first Done status in board order, unless the issue is already Done. With none, the server explains.
     const closeAs = (data: Record<string, unknown>, onSuccess?: () => void) => {
@@ -120,7 +133,7 @@ export default function IssueView({
                             <form
                                 onSubmit={(e) => {
                                     e.preventDefault();
-                                    save({ title }, () => setEditingTitle(false));
+                                    save({ title }, () => setEditingTitle(false), editBase);
                                 }}
                                 className="flex gap-2"
                             >
@@ -139,7 +152,7 @@ export default function IssueView({
                         ) : (
                             <Heading className="break-words text-heading-3xl text-text">
                                 {can.contribute ? (
-                                    <button type="button" className="-mx-1 min-h-control-h-sm w-full rounded-sm px-1 py-0.5 text-start hover:bg-card-2" onClick={() => setEditingTitle(true)} title="Edit summary">
+                                    <button type="button" className="-mx-1 min-h-control-h-sm w-full rounded-sm px-1 py-0.5 text-start hover:bg-card-2" onClick={editTitle} title="Edit summary">
                                         {issue.title}
                                     </button>
                                 ) : (
@@ -163,7 +176,7 @@ export default function IssueView({
                             plain(options.statuses.map((s) => s.name)),
                             `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.category)}`,
                         )}
-                        {issue.resolution && <ResolutionChip issueKey={issue.key} resolution={issue.resolution} editable={can.contribute} />}
+                        {issue.resolution && <ResolutionChip issueKey={issue.key} version={issue.version} resolution={issue.resolution} editable={can.contribute} />}
                         {can.contribute && (
                             <div className="ms-auto">
                                 <Dropdown>
@@ -351,14 +364,14 @@ export default function IssueView({
                                     onChange={(e) => setDescription(e.target.value)}
                                 />
                                 <div className="flex gap-2">
-                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false))}>Save</PrimaryButton>
+                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false), editBase)}>Save</PrimaryButton>
                                     <SecondaryButton onClick={() => setEditingDescription(false)}>Cancel</SecondaryButton>
                                 </div>
                             </div>
                         ) : (
                             <div
                                 className={`-mx-2 rounded-ctl px-2 py-1 ${can.contribute ? 'cursor-text hover:bg-card-2' : ''}`}
-                                onClick={() => can.contribute && setEditingDescription(true)}
+                                onClick={() => can.contribute && editDescription()}
                             >
                                 {/* description_html is rendered server-side with html_input=strip and no unsafe links. */}
                                 {issue.description_html ? (
@@ -444,7 +457,8 @@ export default function IssueView({
 
 function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: boolean }) {
     const [editing, setEditing] = useState(false);
-    const form = useForm({ body: comment.body });
+    // The version it read (spec 7.11), taken when editing starts.
+    const form = useForm({ body: comment.body, version: comment.version });
 
     return (
         <div className="flex gap-3">
@@ -475,7 +489,11 @@ function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: bool
                 {!editing && (comment.can_edit || canDelete) && (
                     <div className="-ms-2 flex gap-1 text-sm text-muted">
                         {comment.can_edit && (
-                            <button type="button" className="inline-flex h-control-h-sm items-center rounded-sm px-2 hover:bg-card-2 hover:text-text" onClick={() => setEditing(true)}>
+                            <button type="button" className="inline-flex h-control-h-sm items-center rounded-sm px-2 hover:bg-card-2 hover:text-text" onClick={() => {
+                                    form.setData({ body: comment.body, version: comment.version });
+                                    setEditing(true);
+                                }}
+                            >
                                 Edit
                             </button>
                         )}

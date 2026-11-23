@@ -21,7 +21,7 @@ function expiresIn(at: string): string {
 
 /**
  * Design system approval card (A2): an agent's move to Done waiting for a person. Sky tile when pending; butter
- * (`is-stale`) when the issue moved since, so approving confirms the change; read-only once expired or stale.
+ * (`is-stale`) when the issue changed since, so approving confirms the change; read-only once expired or stale.
  * `linkIssue` names the issue as a link (dashboard).
  */
 export default function ApprovalCard({ approval: a, canDecide, linkIssue = false }: { approval: ApprovalRequest; canDecide: boolean; linkIssue?: boolean }) {
@@ -33,7 +33,7 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
         router.post(route(`approvals.${action}`, a.id), data as never, { preserveScroll: true, onStart: () => setBusy(true), onFinish: () => setBusy(false) });
 
     return (
-        <article className={`grid gap-2.5 rounded-tile px-3.5 py-3 text-on-tile ${pending && a.moved ? 'bg-tile-butter' : 'bg-tile-sky'}`} aria-label={`${a.agent.name} wants to move ${a.issue} to ${a.to}`}>
+        <article className={`grid gap-2.5 rounded-tile px-3.5 py-3 text-on-tile ${pending && a.changed ? 'bg-tile-butter' : 'bg-tile-sky'}`} aria-label={`${a.agent.name} wants to move ${a.issue} to ${a.to}`}>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
                 <AgentLabel agent={a.agent} />
                 <span>
@@ -63,9 +63,9 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
                 </p>
             )}
             {a.reason && <p className="text-sm">{a.reason}</p>}
-            {pending && a.moved && (
+            {pending && a.changed && (
                 <p className="text-sm font-semibold">
-                    {a.issue} moved from {a.from ?? 'a deleted status'} to {a.now} since this request. Review before approving.
+                    {a.moved ? `${a.issue} moved from ${a.from ?? 'a deleted status'} to ${a.now}` : `${a.issue} changed`} since this request. Review before approving.
                 </p>
             )}
             {pending && canDecide && (
@@ -81,7 +81,7 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
                         />
                     )}
                     <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" disabled={busy} className={`${button} bg-primary text-on-primary hover:opacity-90`} onClick={() => send('approve', a.moved ? { confirm_changed: true } : {})}>
+                        <button type="button" disabled={busy} className={`${button} bg-primary text-on-primary hover:opacity-90`} onClick={() => send('approve', a.changed ? { confirm_changed: true } : {})}>
                             Approve move to {a.to}
                         </button>
                         <button type="button" disabled={busy} className={`${button} text-text hover:bg-card`} onClick={() => send('reject', note.trim() ? { note: note.trim() } : {})}>

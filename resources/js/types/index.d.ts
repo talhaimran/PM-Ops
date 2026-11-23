@@ -80,6 +80,8 @@ export interface IssueLink {
 export interface Comment {
     id: number;
     body: string;
+    /** Spec 7.11: sent back with an edit. */
+    version: number;
     body_html?: string;
     can_edit?: boolean;
     author: UserSummary | null;
@@ -96,6 +98,8 @@ export interface AgentRef {
 export interface Issue {
     id: number;
     key: string;
+    /** Spec 7.11: sent back with every edit. */
+    version: number;
     project: string;
     title: string;
     description: string | null;
@@ -123,7 +127,7 @@ export interface Issue {
     updated_at: string;
 }
 
-/** An agent's move waiting for a person (A2). `moved`: the issue left `from` since; it is in `now`. */
+/** An agent's move waiting for a person (A2). `moved`: the issue left `from` since; it is in `now`. `changed`: anything changed since (7.11). */
 export interface ApprovalRequest {
     id: number;
     status: 'pending' | 'approved' | 'rejected' | 'expired' | 'stale';
@@ -135,6 +139,7 @@ export interface ApprovalRequest {
     to: string;
     now: string;
     moved: boolean;
+    changed: boolean;
     reason: string | null;
     resolution: Resolution | null;
     duplicate_of: string | null;

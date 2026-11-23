@@ -18,9 +18,9 @@ export const resolutionLabels: Record<Resolution, string> = {
 };
 export const resolutions = Object.keys(resolutionLabels) as Resolution[];
 
-/** Change an issue's resolution (and status, for "Close as…"); the server rule is IssueService::update. */
-export function resolveIssue(key: string, data: Record<string, unknown>, onSuccess?: () => void) {
-    router.patch(route('issues.update', key), data as never, { preserveScroll: true, preserveState: true, onSuccess });
+/** Change an issue's resolution, sending the version it read (spec 7.11); the server rule is IssueService::update. */
+function resolveIssue(key: string, version: number, data: Record<string, unknown>, onSuccess?: () => void) {
+    router.patch(route('issues.update', key), { ...data, version } as never, { preserveScroll: true, preserveState: true, onSuccess });
 }
 
 /** Duplicate asks for the original issue's key; the server's answer ("not found", "itself") shows under the field. */
@@ -56,7 +56,7 @@ export function DuplicateOfModal({ show, projectKey, onClose, onSubmit }: { show
  * "Resolved: Done ▾" (spec 7.4): the resolution of a Done-category issue, with a menu to change it.
  * Read-only text when the viewer can't edit. Shown on a board card for as long as the move's Undo toast.
  */
-export default function ResolutionChip({ issueKey, resolution, editable, onBusy }: { issueKey: string; resolution: Resolution; editable: boolean; onBusy?: (busy: boolean) => void }) {
+export default function ResolutionChip({ issueKey, version, resolution, editable, onBusy }: { issueKey: string; version: number; resolution: Resolution; editable: boolean; onBusy?: (busy: boolean) => void }) {
     const [asking, setAsking] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     // Tells the board to keep this chip while the menu or the dialog is open, however long that takes.
@@ -87,7 +87,7 @@ export default function ResolutionChip({ issueKey, resolution, editable, onBusy 
                             <button
                                 type="button"
                                 className="flex w-full items-center gap-2 px-4 py-2 text-start text-text data-[focus]:bg-card-2"
-                                onClick={() => (r === 'duplicate' ? setAsking(true) : r !== resolution && resolveIssue(issueKey, { resolution: r }))}
+                                onClick={() => (r === 'duplicate' ? setAsking(true) : r !== resolution && resolveIssue(issueKey, version, { resolution: r }))}
                             >
                                 <span className="flex-1">{resolutionLabels[r]}</span>
                                 {r === resolution && <Check className="h-4 w-4" aria-label="Current" />}
@@ -98,7 +98,7 @@ export default function ResolutionChip({ issueKey, resolution, editable, onBusy 
                     </>
                 )}
             </Menu>
-            <DuplicateOfModal show={asking} projectKey={issueKey.split('-')[0]} onClose={() => setAsking(false)} onSubmit={(original) => resolveIssue(issueKey, { resolution: 'duplicate', duplicate_of: original }, () => setAsking(false))} />
+            <DuplicateOfModal show={asking} projectKey={issueKey.split('-')[0]} onClose={() => setAsking(false)} onSubmit={(original) => resolveIssue(issueKey, version, { resolution: 'duplicate', duplicate_of: original }, () => setAsking(false))} />
         </div>
     );
 }
