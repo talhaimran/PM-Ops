@@ -7,9 +7,9 @@ use App\Enums\ApprovalStatus;
 use App\Enums\ProjectRole;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
-use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
+use App\Models\Status;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Carbon;
@@ -20,10 +20,10 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Spec 8 (A2): an agent can't move an issue to Done on its own. Its attempt becomes an approval request that the
- * agent's owner or a project Admin decides. Before step 1, "Done" is the project's last column.
+ * agent's owner or a project Admin decides. "Done" is any Done-category status (spec 7.4).
  *
- * Locks: deciding takes the request row, then the project row, then the target column (shared), then the issue,
- * the same order BoardService::move uses after the request; an agent's attempt never waits on a request row.
+ * Locks: deciding takes the request row, then the project row, then the issue, the same order BoardService::move
+ * uses after the request; an agent's attempt never waits on a request row.
  */
 class ApprovalService
 {
@@ -32,10 +32,10 @@ class ApprovalService
 
     public function __construct(private CurrentWorkspace $current, private ActivityLogger $activity) {}
 
-    /** The one rule: an agent moving an issue into its project's last column from anywhere else needs a person. */
-    public function needsApproval(Issue $issue, Column $to, ?Agent $agent): bool
+    /** The one rule: an agent moving an issue into a Done-category status it isn't already in needs a person (1-R5). */
+    public function needsApproval(Issue $issue, Status $to, ?Agent $agent): bool
     {
-        return $agent !== null && $to->id !== $issue->column_id && $to->id === $issue->project->doneColumnId();
+        return $agent !== null && $to->isDone() && $to->id !== $issue->status_id;
     }
 
     /** Why a revoked agent's request went stale; AgentService::revoke marks them at once. */
@@ -45,13 +45,13 @@ class ApprovalService
     }
 
     /** Open a request for $agent's move of $issue to $to, or return the open one for the same issue and target. */
-    public function requestDone(Issue $issue, User $owner, Agent $agent, Column $to, ?string $reason): ApprovalRequest
+    public function requestDone(Issue $issue, User $owner, Agent $agent, Status $to, ?string $reason): ApprovalRequest
     {
         return DB::transaction(function () use ($issue, $owner, $agent, $to, $reason) {
             Issue::whereKey($issue->id)->lockForUpdate()->first();
             // A locking read sees requests committed after this transaction's snapshot; SKIP LOCKED never waits on a
             // request a person is deciding (they hold it and then wait for the project row this move may hold).
-            $open = ApprovalRequest::open()->where('issue_id', $issue->id)->where('action->to_column_id', $to->id)
+            $open = ApprovalRequest::open()->where('issue_id', $issue->id)->where('action->to_status_id', $to->id)
                 ->lock('for update skip locked')->first();
 
             $approval = $open ?? ApprovalRequest::create([
@@ -59,7 +59,7 @@ class ApprovalService
                 'issue_id' => $issue->id,
                 'agent_id' => $agent->id,
                 'owner_user_id' => $owner->id,
-                'action' => ['to_column_id' => $to->id, 'to_column' => $to->name, 'from_column_id' => $issue->column_id, 'reason' => $reason],
+                'action' => ['to_status_id' => $to->id, 'to_status' => $to->name, 'from_status_id' => $issue->status_id, 'reason' => $reason],
                 'status' => ApprovalStatus::Pending,
                 'expires_at' => now()->addDays(ApprovalRequest::DAYS),
             ]);
@@ -82,15 +82,16 @@ class ApprovalService
 
             $projectId = Issue::withTrashed()->whereKey($approval->issue_id)->value('project_id');
             $project = Project::whereKey($projectId)->lockForUpdate()->firstOrFail();
-            $column = Column::whereKey($approval->action['to_column_id'])->sharedLock()->first();
-            $issue = Issue::withTrashed()->with('column')->whereKey($approval->issue_id)->lockForUpdate()->firstOrFail()->setRelation('project', $project);
+            // 1-R2: the target must still be one of the project's statuses; the project lock holds column changes off.
+            $status = $project->statuses()->where('statuses.id', $approval->action['to_status_id'])->first();
+            $issue = Issue::withTrashed()->with('status')->whereKey($approval->issue_id)->lockForUpdate()->firstOrFail()->setRelation('project', $project);
             $this->authorize($approval->setRelation('issue', $issue), $decider);
 
             $stale = match (true) {
                 $issue->trashed() => "{$issue->key} was deleted.",
-                ! $column => "The column {$approval->action['to_column']} was deleted.",
+                ! $status => "{$approval->action['to_status']} is no longer a status in {$project->key}.",
                 $approval->agent->status === AgentStatus::Revoked => self::revokedReason($approval->agent),
-                $issue->column_id === $column->id => "{$issue->key} is already in {$column->name}.",
+                $issue->status_id === $status->id => "{$issue->key} is already in {$status->name}.",
                 default => null,
             };
             if ($stale) {
@@ -99,14 +100,15 @@ class ApprovalService
                 return $approval;
             }
 
-            if ($issue->column_id !== $approval->action['from_column_id'] && ! $confirmChanged) {
-                $from = Column::whereKey($approval->action['from_column_id'])->value('name') ?? 'a deleted column';
+            // shortcut: "moved since" compares statuses; issue versions replace it (step 1, Task 4).
+            if ($issue->status_id !== $approval->action['from_status_id'] && ! $confirmChanged) {
+                $from = Status::whereKey($approval->action['from_status_id'])->value('name') ?? 'a deleted status';
                 throw ValidationException::withMessages([
-                    'approval' => "{$issue->key} moved from {$from} to {$issue->column->name} since this request. Approve again to move it to {$column->name}.",
+                    'approval' => "{$issue->key} moved from {$from} to {$issue->status->name} since this request. Approve again to move it to {$status->name}.",
                 ])->status(409);
             }
 
-            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $column->name], 'approved'));
+            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $status->name], 'approved'));
             $approval->update(['status' => ApprovalStatus::Approved, 'decided_by' => $decider->id, 'decided_at' => now()]);
 
             return $approval;
@@ -153,7 +155,7 @@ class ApprovalService
             ->where(fn ($q) => $q
                 ->whereHas('issue', fn ($i) => $i->whereIn('project_id', $admin))
                 ->orWhere(fn ($q) => $q->where('owner_user_id', $viewer->id)->whereHas('issue', fn ($i) => $i->whereIn('project_id', $writer))))
-            ->with(['issue.project', 'issue.column', 'agent.owner'])
+            ->with(['issue.project', 'issue.status', 'agent.owner'])
             ->oldest('id')
             ->limit(50)
             ->get();
@@ -204,7 +206,7 @@ class ApprovalService
                 'kind' => "approval.{$a->status->value}",
                 'approval_request_id' => $a->id,
                 'issue' => $a->issue->key,
-                'to' => $a->action['to_column'],
+                'to' => $a->action['to_status'],
                 'decided_by' => $a->decider?->name,
                 'note' => $a->note,
                 'at' => $a->updated_at->toIso8601String(),

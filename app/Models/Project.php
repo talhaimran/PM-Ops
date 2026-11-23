@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\ProjectRole;
 use App\Services\CurrentWorkspace;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -57,10 +58,18 @@ class Project extends Model
         return $this->hasMany(Sprint::class);
     }
 
-    /** Issues in the last column count as done (sprint progress, backlog, dashboard). */
-    public function doneColumnId(): ?int
+    /**
+     * Statuses mapped to this project's columns in board order (column position, then mapping position), each with
+     * its column_name. A query, not a relation: statuses reach a project through its columns.
+     */
+    public function statuses(): Builder
     {
-        return $this->columns()->reorder('position', 'desc')->value('id');
+        return Status::query()
+            ->join('column_statuses', 'column_statuses.status_id', '=', 'statuses.id')
+            ->join('columns', 'columns.id', '=', 'column_statuses.column_id')
+            ->where('columns.project_id', $this->id)
+            ->orderBy('columns.position')->orderBy('column_statuses.position')
+            ->select('statuses.*', 'columns.name as column_name');
     }
 
     public function invitations(): HasMany

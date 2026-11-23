@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Resource;
 use Laravel\Mcp\Support\UriTemplate;
 
 #[Name('project')]
-#[Description('Project metadata by key, e.g. project://WEB: members, statuses (columns) and labels — the valid values for issue fields.')]
+#[Description('Project metadata by key, e.g. project://WEB: members, statuses (name, category, column) and labels — the valid values for issue fields.')]
 #[MimeType('application/json')]
 class ProjectResource extends Resource implements HasUriTemplate
 {
@@ -26,11 +26,11 @@ class ProjectResource extends Resource implements HasUriTemplate
 
     public function handle(Request $request, ProjectService $projects): Response
     {
-        $project = $projects->resolve($request->user(), (string) $request->get('key'))->load(['members', 'columns', 'labels']);
+        $project = $projects->resolve($request->user(), (string) $request->get('key'))->load(['members', 'labels']);
 
         return Response::json([
             ...(new ProjectJson($project))->resolve(),
-            'statuses' => $project->columns->pluck('name')->all(),
+            'statuses' => $project->statuses()->get()->map(fn ($s) => ['name' => $s->name, 'category' => $s->category->value, 'column' => $s->column_name])->all(),
             'labels' => LabelResource::collection($project->labels)->resolve(),
         ]);
     }

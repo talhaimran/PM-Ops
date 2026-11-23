@@ -73,7 +73,7 @@ class IssueController extends Controller
             $status = $before['status'] ?? null;
 
             return back()->with('undo', [
-                'message' => $status !== null && $status !== $issue->column->name ? "{$issue->key} moved to {$issue->column->name}" : "{$issue->key} updated",
+                'message' => $status !== null && $status !== $issue->status->name ? "{$issue->key} moved to {$issue->status->name}" : "{$issue->key} updated",
                 'method' => 'patch',
                 'url' => route('issues.update', $issue->key),
                 'data' => [...$before, 'undo_of' => $token],

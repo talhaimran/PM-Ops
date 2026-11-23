@@ -136,7 +136,7 @@ test('deleting a column moves its deleted issues too', function () {
     app(ColumnService::class)->delete($column, null);
 
     $restored = $this->issues->restore($this->issues->resolveDeleted($this->admin, 'WEB-1'), $this->admin);
-    expect($restored->column->name)->toBe('To Do');
+    expect($restored->status->name)->toBe('To Do');
 });
 
 test('completing a sprint ignores deleted issues', function () {

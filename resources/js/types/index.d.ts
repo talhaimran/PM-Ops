@@ -65,11 +65,14 @@ export interface Label {
     color: string;
 }
 
+export type StatusCategory = 'to_do' | 'in_progress' | 'done';
+
 export interface IssueLink {
     key: string;
     title: string;
     type?: string;
     status?: string;
+    category?: StatusCategory;
 }
 
 export interface Comment {
@@ -98,6 +101,7 @@ export interface Issue {
     type: string;
     priority: string;
     status: string;
+    category: StatusCategory;
     assignee: UserSummary | null;
     reporter: UserSummary | null;
     labels: string[];
@@ -120,7 +124,9 @@ export interface ApprovalRequest {
     status: 'pending' | 'approved' | 'rejected' | 'expired' | 'stale';
     issue: string;
     title: string;
-    from: string;
+    /** Null only when that status was deleted since. */
+    from: string | null;
+    from_category: StatusCategory | null;
     to: string;
     now: string;
     moved: boolean;
@@ -135,7 +141,7 @@ export interface ActivityEntry {
     id: number;
     action: string;
     changes: Record<string, { from: unknown; to: unknown }> | null;
-    /** On an approved or rejected agent request: which request, and the column it asked for. */
+    /** On an approved or rejected agent request: which request, and the status it asked for. */
     approval_request?: { id: number; to: string };
     user: UserSummary | null;
     agent?: AgentRef | null;
@@ -145,7 +151,8 @@ export interface ActivityEntry {
 }
 
 export interface IssueOptions {
-    columns: string[];
+    /** The project's statuses in board order. */
+    statuses: { name: string; category: StatusCategory }[];
     members: { name: string; email: string }[];
     labels: Label[];
     types: string[];

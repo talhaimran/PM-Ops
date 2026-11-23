@@ -14,6 +14,7 @@ use App\Models\Activity;
 use App\Models\ApprovalRequest;
 use App\Models\AuditLog;
 use App\Models\Issue;
+use App\Models\Status;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\AgentService;
@@ -22,11 +23,12 @@ use App\Services\BoardService;
 use App\Services\ColumnService;
 use App\Services\IssueService;
 use App\Services\MembershipService;
+use App\Services\StatusService;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Testing\AssertableInertia as Assert;
 
 /*
- * Step A2: moving to Done (the project's last column, before step 1) needs a person. Every path an agent has opens
+ * Step A2: moving to Done (a Done-category status since step 1) needs a person. Every path an agent has opens
  * one approval request and moves nothing; the agent's owner or a project Admin decides, re-checked when they do.
  */
 
@@ -40,7 +42,7 @@ beforeEach(function () {
 
 function issueOne(): Issue
 {
-    return Issue::withTrashed()->with('column')->where('number', 1)->sole();
+    return Issue::withTrashed()->with('status')->where('number', 1)->sole();
 }
 
 /** Call an MCP tool as $agent (its owner with the agent's token), like the HTTP and stdio servers do. */
@@ -79,7 +81,7 @@ test('Review Focus 2: every path to Done by an agent opens one approval request 
     expect(askForDone($this, $path))->toBe($id);
 
     $request = ApprovalRequest::sole();
-    expect(issueOne()->column->name)->toBe('In Review')
+    expect(issueOne()->status->name)->toBe('In Review')
         ->and(issueOne()->rank)->toBe($rank)
         ->and($request->id)->toBe($id)
         ->and($request->status)->toBe(ApprovalStatus::Pending)
@@ -88,9 +90,9 @@ test('Review Focus 2: every path to Done by an agent opens one approval request 
         ->and($request->workspace_id)->toBe($this->ws->id)
         ->and($request->issue_version)->toBeNull()
         ->and($request->action)->toEqual([
-            'to_column_id' => $this->web->columns()->where('name', 'Done')->value('id'),
-            'to_column' => 'Done',
-            'from_column_id' => $this->web->columns()->where('name', 'In Review')->value('id'),
+            'to_status_id' => Status::where('name', 'Done')->value('id'),
+            'to_status' => 'Done',
+            'from_status_id' => Status::where('name', 'In Review')->value('id'),
             'reason' => 'PR merged',
         ])
         ->and($request->expires_at->toDateString())->toBe(now()->addDays(7)->toDateString())
@@ -123,8 +125,8 @@ test('A-L5: the reason is optional and at most 200 characters', function () {
     expect(ApprovalRequest::count())->toBe(0);
 });
 
-test('A-L6: an agent cannot create an issue in the last column', function () {
-    $message = "Agents can't create issues in Done. Create it in another column, then move it; a person approves the move.";
+test('A-L6: an agent cannot create an issue in a Done-category status', function () {
+    $message = "Agents can't create issues in Done. Create it in another status, then move it; a person approves the move.";
 
     asToken($this->plain)->postJson('/api/v1/projects/WEB/issues', ['title' => 'x', 'status' => 'Done'])
         ->assertUnprocessable()->assertJsonPath('errors.status.0', $message);
@@ -138,7 +140,7 @@ test('A-L6: an agent cannot create an issue in the last column', function () {
 test('A-L6: in a one-column project the default column is Done, so an agent cannot create an issue there either', function () {
     $solo = makeProject($this->owner, 'SOLO');
     $solo->columns()->where('name', '!=', 'Done')->delete();
-    $message = "Agents can't create issues in Done. Create it in another column, then move it; a person approves the move.";
+    $message = "Agents can't create issues in Done. Create it in another status, then move it; a person approves the move.";
 
     asToken($this->plain)->postJson('/api/v1/projects/SOLO/issues', ['title' => 'x'])->assertUnprocessable()->assertJsonPath('errors.status.0', $message);
     agentTool($this, CreateIssue::class, ['project' => 'SOLO', 'title' => 'x'])->assertHasErrors([$message]);
@@ -173,7 +175,7 @@ test('an agent moves to any other column on its own; a person moves to Done on t
     $this->patch(w('/issues/WEB-1'), ['status' => 'In Review'])->assertSessionHasNoErrors();
     $this->patch(w('/issues/WEB-1'), ['status' => 'Done'])->assertSessionHasNoErrors();
 
-    expect(issueOne()->column->name)->toBe('Done')->and(ApprovalRequest::count())->toBe(0);
+    expect(issueOne()->status->name)->toBe('Done')->and(ApprovalRequest::count())->toBe(0);
 });
 
 test("the agent's owner approves: the issue moves as the owner, with the agent and request in one activity entry", function () {
@@ -184,7 +186,7 @@ test("the agent's owner approves: the issue moves as the owner, with the agent a
 
     $request = ApprovalRequest::sole();
     $activity = Activity::latest('id')->first();
-    expect(issueOne()->column->name)->toBe('Done')
+    expect(issueOne()->status->name)->toBe('Done')
         ->and($request->status)->toBe(ApprovalStatus::Approved)
         ->and($request->decided_by)->toBe($this->owner->id)
         ->and($request->decided_at)->not->toBeNull()
@@ -219,7 +221,7 @@ test('undo after approving puts the issue back', function () {
     $undo = session('undo');
     $this->post($undo['url'], $undo['data'])->assertSessionHasNoErrors();
 
-    expect(issueOne()->column->name)->toBe('In Review');
+    expect(issueOne()->status->name)->toBe('In Review');
 });
 
 test('a project Admin decides for a Member\'s agent; another Member cannot; a Viewer owner cannot either', function () {
@@ -235,10 +237,10 @@ test('a project Admin decides for a Member\'s agent; another Member cannot; a Vi
     app(MembershipService::class)->changeRole($this->web, $sam, ProjectRole::Viewer);
     $this->actingAs($sam)->post(w("/approvals/{$id}/approve"))->assertForbidden()
         ->assertSee("Your role in WEB is viewer; viewers can't make changes.");
-    expect(issueOne()->column->name)->toBe('In Review')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending);
+    expect(issueOne()->status->name)->toBe('In Review')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending);
 
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
-    expect(issueOne()->column->name)->toBe('Done')->and(ApprovalRequest::sole()->decided_by)->toBe($this->owner->id);
+    expect(issueOne()->status->name)->toBe('Done')->and(ApprovalRequest::sole()->decided_by)->toBe($this->owner->id);
 });
 
 test('rejecting keeps the issue where it is and logs one activity entry with the note on the request', function () {
@@ -249,7 +251,7 @@ test('rejecting keeps the issue where it is and logs one activity entry with the
     $this->post(w("/approvals/{$id}/reject"), ['note' => 'Tests are failing'])->assertSessionHasNoErrors();
 
     $request = ApprovalRequest::sole();
-    expect(issueOne()->column->name)->toBe('In Review')
+    expect(issueOne()->status->name)->toBe('In Review')
         ->and($request->status)->toBe(ApprovalStatus::Rejected)
         ->and($request->note)->toBe('Tests are failing')
         ->and($request->decided_by)->toBe($this->owner->id)
@@ -258,7 +260,7 @@ test('rejecting keeps the issue where it is and logs one activity entry with the
         ->and(AuditLog::count())->toBe($audits);
 
     $this->post(w("/approvals/{$id}/approve"))->assertSessionHasErrors(['approval' => 'This request was already rejected.']);
-    expect(issueOne()->column->name)->toBe('In Review');
+    expect(issueOne()->status->name)->toBe('In Review');
 });
 
 test('a second decision finds the request already decided', function () {
@@ -276,7 +278,7 @@ test('Review Focus 3: the issue moved since, so approving needs a second confirm
 
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))
         ->assertSessionHasErrors(['approval' => 'WEB-1 moved from In Review to In Progress since this request. Approve again to move it to Done.']);
-    expect(issueOne()->column->name)->toBe('In Progress')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending);
+    expect(issueOne()->status->name)->toBe('In Progress')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending);
 
     $this->get(w('/issues/WEB-1'))->assertInertia(fn (Assert $page) => $page
         ->where('issue.pending_approvals.0.moved', true)
@@ -285,7 +287,7 @@ test('Review Focus 3: the issue moved since, so approving needs a second confirm
         ->where('issue.pending_approvals.0.can_decide', true));
 
     $this->post(w("/approvals/{$id}/approve"), ['confirm_changed' => true])->assertSessionHasNoErrors();
-    expect(issueOne()->column->name)->toBe('Done')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Approved);
+    expect(issueOne()->status->name)->toBe('Done')->and(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Approved);
 });
 
 test('Review Focus 3: a move that is no longer possible marks the request stale and moves nothing', function (Closure $change, string $why) {
@@ -300,7 +302,7 @@ test('Review Focus 3: a move that is no longer possible marks the request stale 
         ->and(Activity::where('action', 'approved')->exists())->toBeFalse();
 })->with([
     'issue deleted' => [fn ($t) => app(IssueService::class)->delete(issueOne(), $t->owner), 'WEB-1 was deleted.'],
-    'target column deleted' => [fn ($t) => app(ColumnService::class)->delete($t->web->columns()->where('name', 'Done')->sole()->setRelation('project', $t->web), null), 'The column Done was deleted.'],
+    'target column deleted' => [fn ($t) => app(ColumnService::class)->delete($t->web->columns()->where('name', 'Done')->sole()->setRelation('project', $t->web), null), 'Done is no longer a status in WEB.'],
     'already there' => [fn ($t) => app(BoardService::class)->move(issueOne(), $t->owner, ['status' => 'Done']), 'WEB-1 is already in Done.'],
 ]);
 
@@ -314,7 +316,7 @@ test('Review Focus 3: a decider who lost Admin gets 403 and the request stays pe
     app(MembershipService::class)->changeRole($this->web, $ada, ProjectRole::Member);
 
     $this->actingAs($ada)->post(w("/approvals/{$id}/approve"))->assertForbidden();
-    expect(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending)->and(issueOne()->column->name)->toBe('In Review');
+    expect(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending)->and(issueOne()->status->name)->toBe('In Review');
 });
 
 test('pending requests expire after 7 days; an expired one cannot be approved and the agent can ask again', function () {
@@ -329,7 +331,7 @@ test('pending requests expire after 7 days; an expired one cannot be approved an
     expect(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Expired);
 
     $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasErrors(['approval' => 'This request was already expired.']);
-    expect(issueOne()->column->name)->toBe('In Review');
+    expect(issueOne()->status->name)->toBe('In Review');
 
     $again = askForDone($this, 'move_issue');
     expect($again)->not->toBe($id)->and(ApprovalRequest::find($again)->status)->toBe(ApprovalStatus::Pending);
@@ -385,7 +387,7 @@ test('the dashboard lists exactly the requests the viewer can decide, in this wo
     $ops = makeProject($this->owner, 'OPS');
     makeIssue($ops, $this->owner);
     [$otherAgent] = makeAgent($this->owner, AgentLevel::Write);
-    app(ApprovalService::class)->requestDone($ops->issues()->sole()->setRelation('project', $ops), $this->owner, $otherAgent, $ops->columns()->where('name', 'Done')->sole(), null);
+    app(ApprovalService::class)->requestDone($ops->issues()->sole()->setRelation('project', $ops), $this->owner, $otherAgent, app(StatusService::class)->resolveFor($ops, 'Done'), null);
     useWorkspace($this->ws, $this->owner);
 
     $ids = fn (User $user) => collect($this->actingAs($user)->get(w('/dashboard'))->viewData('page')['props']['pendingApprovals'])->pluck('id')->all();
@@ -410,7 +412,7 @@ test('revoking an agent marks its pending requests stale at once: off the dashbo
 
     // Review Focus 3: approving afterwards moves nothing.
     $this->post(w("/approvals/{$id}/approve"))->assertSessionHasErrors(['approval' => 'This request was already stale.']);
-    expect(issueOne()->column->name)->toBe('In Review');
+    expect(issueOne()->status->name)->toBe('In Review');
 });
 
 test("undo's conflict message after an approved move names the move, never the request link", function () {

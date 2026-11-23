@@ -15,7 +15,7 @@ trait IssueFields
             'description' => $schema->string()->description('Markdown description.'),
             'type' => $schema->string()->enum(IssueType::class)->description('Default task.'),
             'priority' => $schema->string()->enum(IssuePriority::class)->description('Default medium.'),
-            'status' => $schema->string()->description('Board column name, e.g. "To Do", "In Progress". Case-insensitive.'),
+            'status' => $schema->string()->description('Status name, e.g. "To Do", "In Progress" (a column name works when the column has one status). Case-insensitive.'),
             'assignee' => $schema->string()->nullable()->description('Assignee email (must be a project member); null to unassign.'),
             'labels' => $schema->array()->items($schema->string())->description('Label names; replaces the current labels. Labels must exist.'),
             'story_points' => $schema->integer()->min(0)->max(1000)->nullable(),

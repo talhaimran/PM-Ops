@@ -13,6 +13,7 @@ use App\Services\IssueService;
 use App\Services\LabelService;
 use App\Services\ProjectService;
 use App\Services\SprintService;
+use App\Services\StatusService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Seeder;
 
@@ -132,7 +133,7 @@ class DemoSeeder extends Seeder
         // One pending approval so the dashboard's "Pending approvals" and the issue's AI box have something to show.
         $approvals->requestDone(
             $issues->resolve($demo, 'WEB-5'), $demo, $agent,
-            $project->columns()->where('name', 'Done')->sole(), 'Review notes are addressed and checks are green.',
+            app(StatusService::class)->resolveFor($project, 'Done'), 'Review notes are addressed and checks are green.',
         );
 
         $this->command?->newLine();

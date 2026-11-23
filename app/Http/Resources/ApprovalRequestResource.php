@@ -3,14 +3,15 @@
 namespace App\Http\Resources;
 
 use App\Models\ApprovalRequest;
-use App\Models\Column;
+use App\Models\Status;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * An approval request (A2). Needs issue.project, issue.column and agent.owner loaded. `from` is where the issue was
- * when the agent asked, `now` where it is; `moved` says it moved since, so approving needs a second confirm.
+ * An approval request (A2). Needs issue.project, issue.status and agent.owner loaded. `from` is the status the issue
+ * had when the agent asked, `now` its status; `moved` says it changed since, so approving needs a second confirm.
+ * `to` is always a Done-category status.
  *
  * @mixin ApprovalRequest
  */
@@ -19,17 +20,19 @@ class ApprovalRequestResource extends JsonResource
     public function toArray(Request $request): array
     {
         $issue = $this->issue;
-        $moved = $issue->column_id !== $this->action['from_column_id'];
+        $moved = $issue->status_id !== $this->action['from_status_id'];
+        // shortcut: one query per moved request for the old status; store its name in `action` if lists grow.
+        $from = $moved ? Status::find($this->action['from_status_id']) : $issue->status;
 
         return [
             'id' => $this->id,
             'status' => $this->status->value,
             'issue' => $issue->key,
             'title' => $issue->title,
-            // shortcut: one query per moved request for the old column's name; store it in `action` if lists grow.
-            'from' => $moved ? Column::whereKey($this->action['from_column_id'])->value('name') : $issue->column->name,
-            'to' => $this->action['to_column'],
-            'now' => $issue->column->name,
+            'from' => $from?->name,
+            'from_category' => $from?->category->value,
+            'to' => $this->action['to_status'],
+            'now' => $issue->status->name,
             'moved' => $moved,
             'reason' => $this->action['reason'] ?? null,
             'agent' => IssueResource::agent($this->agent),
@@ -47,6 +50,6 @@ class ApprovalRequestResource extends JsonResource
     /** "WEB-12 needs a person's approval to move to Done (request 41, expires …)." for MCP summaries. */
     public static function sentence(ApprovalRequest $approval): string
     {
-        return "{$approval->issue->key} needs a person's approval to move to {$approval->action['to_column']} (request {$approval->id}, expires {$approval->expires_at->toIso8601String()}).";
+        return "{$approval->issue->key} needs a person's approval to move to {$approval->action['to_status']} (request {$approval->id}, expires {$approval->expires_at->toIso8601String()}).";
     }
 }

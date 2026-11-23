@@ -107,7 +107,6 @@ export default function Backlog({
                             key={sprint.id}
                             lane={sprint.name}
                             cards={lanes[sprint.name] ?? []}
-                            columns={options.columns}
                             draggable={can.contribute}
                             title={sprint.name}
                             meta={
@@ -179,13 +178,12 @@ export default function Backlog({
                     <Section
                         lane={BACKLOG}
                         cards={lanes[BACKLOG] ?? []}
-                        columns={options.columns}
                         draggable={can.contribute}
                         title="Backlog"
                         meta={<span>{(lanes[BACKLOG] ?? []).length} issues</span>}
                         actions={can.contribute && <SecondaryButton onClick={() => setEditing('new')}>Create sprint</SecondaryButton>}
                     />
-                    <DragOverlay dropAnimation={css('drop')}>{active ? <Row card={active} columns={options.columns} dragging /> : null}</DragOverlay>
+                    <DragOverlay dropAnimation={css('drop')}>{active ? <Row card={active} dragging /> : null}</DragOverlay>
                 </DndContext>
             </div>
 
@@ -216,7 +214,6 @@ const css = (moment: 'lift' | 'drop') => {
 function Section({
     lane,
     cards,
-    columns,
     draggable,
     title,
     meta,
@@ -225,7 +222,6 @@ function Section({
 }: {
     lane: string;
     cards: Card[];
-    columns: string[];
     draggable: boolean;
     title: string;
     meta: React.ReactNode;
@@ -268,7 +264,7 @@ function Section({
                             </li>
                         )}
                         {cards.map((card) => (
-                            <SortableRow key={card.key} card={card} columns={columns} disabled={!draggable} />
+                            <SortableRow key={card.key} card={card} disabled={!draggable} />
                         ))}
                     </ul>
                 </SortableContext>
@@ -277,7 +273,7 @@ function Section({
     );
 }
 
-function SortableRow({ card, columns, disabled }: { card: Card; columns: string[]; disabled: boolean }) {
+function SortableRow({ card, disabled }: { card: Card; disabled: boolean }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.key, disabled, transition: css('drop') });
 
     return (
@@ -288,12 +284,12 @@ function SortableRow({ card, columns, disabled }: { card: Card; columns: string[
             {...attributes}
             {...listeners}
         >
-            <Row card={card} columns={columns} />
+            <Row card={card} />
         </li>
     );
 }
 
-function Row({ card, columns, dragging = false }: { card: Card; columns: string[]; dragging?: boolean }) {
+function Row({ card, dragging = false }: { card: Card; dragging?: boolean }) {
     return (
         <div
             className={`flex h-11 items-center gap-2.5 rounded-ctl border px-3 ${dragging ? 'border-line-2 bg-card shadow-lift' : 'border-transparent bg-card-2 hover:border-line-2'}`}
@@ -306,7 +302,7 @@ function Row({ card, columns, dragging = false }: { card: Card; columns: string[
                 {card.title}
             </span>
             <span className="hidden max-w-32 sm:block">
-                <StatusLozenge status={card.status} columns={columns} />
+                <StatusLozenge status={card.status} category={card.category} />
             </span>
             {card.story_points !== null && <span className="shrink-0 text-sm text-muted">{card.story_points} pts</span>}
             <PriorityIcon priority={card.priority} />

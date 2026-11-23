@@ -18,7 +18,7 @@ test('?issue= opens the same issue the full page shows', function (string $url) 
         ->where('peek.issue.key', 'WEB-1')
         ->where('peek.issue.title', 'Peek at me')
         ->where('peek.issue.description_html', fn ($html) => str_contains($html, '<strong>bold</strong>'))
-        ->has('peek.options.columns')
+        ->has('peek.options.statuses')
         ->where('peek.can.contribute', true));
 })->with('screens');
 

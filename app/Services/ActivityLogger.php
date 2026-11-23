@@ -22,7 +22,7 @@ class ActivityLogger
         $approval = app()->bound(self::APPROVAL_BINDING) ? app(self::APPROVAL_BINDING) : null;
         if ($approval) {
             // shortcut: the request link lives in `changes` (no activities column in step A); move it to a column with agent_run_id (step B).
-            $changes = [...($changes ?? []), 'approval_request' => ['id' => $approval->id, 'to' => $approval->action['to_column']]];
+            $changes = [...($changes ?? []), 'approval_request' => ['id' => $approval->id, 'to' => $approval->action['to_status']]];
         }
 
         return $issue->activities()->create([

@@ -12,12 +12,12 @@ import { placement, useLaneDroppable, useSortableLanes } from '@/Components/useS
 import { issueUrl, onPeekClick } from '@/issueUrl';
 import EmptyState from '@/Components/EmptyState';
 import IssueDrawer from '@/Components/IssueDrawer';
-import { statusCategory } from '@/Components/StatusLozenge';
+import { categoryDot } from '@/Components/StatusLozenge';
 import { transition } from '@/motion';
 import { Calendar, CircleAlert, Inbox } from 'lucide-react';
 import { motion } from 'motion/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { IssueOptions, Project } from '@/types';
+import { IssueOptions, Project, StatusCategory } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -30,6 +30,7 @@ export interface Card {
     type: string;
     priority: string;
     status: string;
+    category: StatusCategory;
     assignee: { name: string; email: string } | null;
     labels: string[];
     story_points: number | null;
@@ -38,7 +39,7 @@ export interface Card {
 }
 
 interface BoardData {
-    columns: { name: string; position: number; issues: Card[] }[];
+    columns: { name: string; position: number; statuses: { name: string; category: StatusCategory; color: string | null }[]; issues: Card[] }[];
     truncated: boolean;
 }
 
@@ -67,7 +68,8 @@ export default function Board({
         setMoved(`${key} moved to ${lane}, position ${index + 1} of ${cards.length}`);
         router.post(
             route('issues.move', key),
-            { ...(laneChanged ? { status: lane } : {}), ...placement(index, cards) },
+            // Spec 7.4: a drop takes the column's first status (lanes are keyed by column name).
+            { ...(laneChanged ? { status: board.columns.find((c) => c.name === lane)!.statuses[0].name } : {}), ...placement(index, cards) },
             { preserveScroll: true, preserveState: true, onError: reset },
         );
     });
@@ -75,7 +77,6 @@ export default function Board({
     const [completing, setCompleting] = useState(false);
     const openCreate = useCallback(() => setCreating(true), []);
     useCreateShortcut(openCreate, can.contribute);
-    const columnNames = board.columns.map((c) => c.name);
     const total = board.columns.reduce((n, c) => n + c.issues.length, 0);
     const hasFilters = Object.values(filters).some(Boolean);
     const clearFilters = () => router.get(route('projects.show', project.key), {}, { preserveState: true, replace: true });
@@ -142,8 +143,8 @@ export default function Board({
                 ) : (
                     <DndContext sensors={sensors} collisionDetection={closestCorners} {...handlers}>
                         <div className="flex snap-x items-start gap-2.5 overflow-x-auto pb-4">
-                            {columnNames.map((name) => (
-                                <Lane key={name} name={name} columns={columnNames} cards={lanes[name] ?? []} draggable={can.contribute} />
+                            {board.columns.map(({ name, statuses }) => (
+                                <Lane key={name} name={name} category={statuses[0].category} cards={lanes[name] ?? []} draggable={can.contribute} />
                             ))}
                         </div>
                         <DragOverlay dropAnimation={css('drop')}>
@@ -188,10 +189,8 @@ const css = (moment: 'lift' | 'drop') => {
     return { duration: t.duration * 1000, easing: `cubic-bezier(${t.ease.join(',')})` };
 };
 
-const categoryDot = { todo: 'bg-c-sky', progress: 'bg-c-amber', done: 'bg-c-good' };
-
-/** Design system BoardColumn: status square, name, count; the points total; the cards; a dashed target when empty. */
-function Lane({ name, columns, cards, draggable }: { name: string; columns: string[]; cards: Card[]; draggable: boolean }) {
+/** Design system BoardColumn: status square (its first status's category), name, count; the points total; the cards; a dashed target when empty. */
+function Lane({ name, category, cards, draggable }: { name: string; category: StatusCategory; cards: Card[]; draggable: boolean }) {
     const { setNodeRef, isOver } = useLaneDroppable(name);
     // shortcut: totals cover the cards on screen, so a board cut off at 500 issues (the notice above says so) or a filtered
     // board shows partial sums; move the sum to BoardService when estimates get a unit (step 10).
@@ -206,7 +205,7 @@ function Lane({ name, columns, cards, draggable }: { name: string; columns: stri
             }`}
         >
             <h3 className="flex items-center gap-2 px-1.5 pt-1 text-md text-text">
-                <span aria-hidden="true" className={`h-[9px] w-[9px] shrink-0 rounded-[3px] ${categoryDot[statusCategory(name, columns)]}`} />
+                <span aria-hidden="true" className={`h-[9px] w-[9px] shrink-0 rounded-[3px] ${categoryDot(category)}`} />
                 <span className="truncate">{name}</span>
                 <span className="rounded-pill bg-well px-2 text-xs text-muted">{cards.length}</span>
             </h3>

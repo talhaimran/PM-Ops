@@ -80,7 +80,7 @@ class ProjectController extends Controller
                 'provider' => app(AiSettingsService::class)->for($workspace) !== null,
             ],
             'labels' => LabelResource::collection($project->labels()->get())->resolve(),
-            'columns' => ColumnResource::collection($project->columns()->withCount('issues')->get())->resolve(),
+            'columns' => ColumnResource::collection($project->columns()->with('statuses')->withCount('issues')->get())->resolve(),
             // Admin-only (spec 5.1): restore from here until issues:purge removes them after 30 days.
             'deletedIssues' => $canManage ? app(IssueService::class)->deleted($project) : [],
             'can' => ['manage' => $canManage, 'contribute' => $request->user()->can('contribute', $project)],

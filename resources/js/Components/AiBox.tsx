@@ -5,7 +5,7 @@ import { ApprovalRequest } from '@/types';
  * The AI box on the issue page and in the peek drawer (spec 5.1). Step A has pending approval requests only; later
  * steps add the latest agent run and "Ask agent". Shows nothing when there is nothing to show; never a summary.
  */
-export default function AiBox({ approvals, columns }: { approvals?: (ApprovalRequest & { can_decide?: boolean })[]; columns: string[] }) {
+export default function AiBox({ approvals }: { approvals?: (ApprovalRequest & { can_decide?: boolean })[] }) {
     if (!approvals?.length) return null;
 
     return (
@@ -14,7 +14,7 @@ export default function AiBox({ approvals, columns }: { approvals?: (ApprovalReq
                 Waiting for approval
             </h2>
             {approvals.map((a) => (
-                <ApprovalCard key={a.id} approval={a} canDecide={!!a.can_decide} columns={columns} />
+                <ApprovalCard key={a.id} approval={a} canDecide={!!a.can_decide} />
             ))}
         </section>
     );

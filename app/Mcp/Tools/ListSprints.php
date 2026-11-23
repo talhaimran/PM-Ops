@@ -28,7 +28,7 @@ class ListSprints extends Tool
         $data = $request->validate(['project' => 'required|string', 'state' => 'nullable|in:planned,active,completed', 'page' => 'integer|min:1|max:10000', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
         $project = $projects->resolve($request->user(), $data['project']);
         [$perPage, $pageNumber] = Pagination::resolve($data['cursor'] ?? null, $data['per_page'] ?? null, $data['page'] ?? null, max: 50);
-        $page = $sprints->withStats($project->sprints()->getQuery(), $project)
+        $page = $sprints->withStats($project->sprints()->getQuery())
             ->when($data['state'] ?? null, fn ($q, $state) => $q->where('state', $state))
             ->orderByDesc('id')
             ->paginate($perPage, page: $pageNumber);

@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('move_issue')]
-#[Description('Move an issue to a board column (status) and/or a position in that column. Moving to the last column (Done) waits for a person\'s approval; give a reason.')]
+#[Description('Move an issue to a status and/or a position in its board column. Moving to a Done-category status waits for a person\'s approval; give a reason.')]
 class MoveIssue extends Tool
 {
     use RespondsWithJson;
@@ -32,14 +32,14 @@ class MoveIssue extends Tool
             return $this->held($issue);
         }
 
-        return $this->result("Moved {$issue->key} to {$issue->column->name}.", new IssueResource($issue));
+        return $this->result("Moved {$issue->key} to {$issue->status->name}.", new IssueResource($issue));
     }
 
     public function schema(JsonSchema $schema): array
     {
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
-            'status' => $schema->string()->description('Destination column name; omit to reorder within the current column.'),
+            'status' => $schema->string()->description('Destination status name (a column name works when the column has one status); omit to reorder within the current column.'),
             'position' => $schema->integer()->min(0)->description('0-based index in the destination column; default bottom. Do not combine with after.'),
             'after' => $schema->string()->description('Place directly after this issue key (must be in the destination column).'),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),

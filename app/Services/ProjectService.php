@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
 
 class ProjectService
 {
-    public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents) {}
+    public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents, private StatusService $statuses) {}
 
     public function listFor(User $user, int $perPage = 25, ?int $page = null, ?string $cursor = null, int $max = 100): LengthAwarePaginator
     {
@@ -44,9 +44,10 @@ class ProjectService
             $project->workspace_id = $this->current->get()->id;
             $project->save();
             $project->members()->attach($creator, ['role' => ProjectRole::Admin->value]);
-            $project->columns()->createMany(
-                collect(Column::DEFAULTS)->map(fn ($name, $i) => ['name' => $name, 'position' => $i])->all()
-            );
+            foreach (array_keys(Column::DEFAULTS) as $i => $name) {
+                $column = $project->columns()->create(['name' => $name, 'position' => $i])->setRelation('project', $project);
+                $this->statuses->attach($column, $this->statuses->forColumn($workspace, $name, Column::DEFAULTS[$name], $project->key, $creator));
+            }
             $this->audit->log('project.created', $project, ['name' => $project->name], $this->current->get(), $creator);
 
             return $project;
@@ -120,7 +121,8 @@ class ProjectService
     public function issueOptions(Project $project): array
     {
         return [
-            'columns' => $project->columns()->pluck('name')->all(),
+            // Board order; each issue takes one of these (1-R2).
+            'statuses' => $project->statuses()->get()->map(fn ($s) => ['name' => $s->name, 'category' => $s->category->value])->all(),
             'members' => $project->members()->orderBy('name')->get(['users.id', 'name', 'email'])
                 ->map(fn ($u) => ['name' => $u->name, 'email' => $u->email])->all(),
             'labels' => $project->labels()->get(['id', 'name', 'color'])

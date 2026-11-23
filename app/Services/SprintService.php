@@ -88,7 +88,7 @@ class SprintService
     }
 
     /**
-     * Complete the active sprint. Issues not in the done column move to the backlog or to a planned sprint.
+     * Complete the active sprint. Issues whose status isn't Done-category move to the backlog or to a planned sprint.
      *
      * @return int number of unfinished issues moved
      */
@@ -98,11 +98,10 @@ class SprintService
             throw ValidationException::withMessages(['sprint' => "{$sprint->name} is {$sprint->state->value}; only the active sprint can be completed."]);
         }
 
-        $project = $sprint->project;
         $target = $this->resolveCompletionTarget($sprint, $moveTo);
 
-        return DB::transaction(function () use ($sprint, $actor, $project, $target) {
-            $open = $sprint->issues()->where('column_id', '!=', $project->doneColumnId())->get();
+        return DB::transaction(function () use ($sprint, $actor, $target) {
+            $open = $sprint->issues()->open()->get();
 
             foreach ($open as $issue) {
                 $issue->update(['sprint_id' => $target?->id]);
@@ -118,7 +117,7 @@ class SprintService
     /** The project's active sprint with issue/point stats, or null. */
     public function active(Project $project): ?Sprint
     {
-        return $this->withStats($project->sprints()->getQuery(), $project)->where('state', SprintState::Active->value)->first();
+        return $this->withStats($project->sprints()->getQuery())->where('state', SprintState::Active->value)->first();
     }
 
     /** Find a sprint by id or name (case-insensitive); 404 lists the project's sprints. */
@@ -138,14 +137,12 @@ class SprintService
     }
 
     /** Adds issue_count, points_total and points_done to a sprint query. */
-    public function withStats(Builder $query, Project $project): Builder
+    public function withStats(Builder $query): Builder
     {
-        $done = $project->doneColumnId();
-
         return $query
             ->withCount('issues')
             ->withSum('issues as points_total', 'story_points')
-            ->withSum(['issues as points_done' => fn ($q) => $q->where('column_id', $done)], 'story_points');
+            ->withSum(['issues as points_done' => fn ($q) => $q->done()], 'story_points');
     }
 
     private function resolveCompletionTarget(Sprint $sprint, string $moveTo): ?Sprint

@@ -33,10 +33,10 @@ class BoardController extends Controller
     /**
      * Move an issue to a column and/or place in it.
      *
-     * `status` is the destination column name (default: current). Place it with `position` (0-based index
-     * in the destination column, default bottom) or `after` (key of an issue in that column).
+     * `status` is the destination status name, or a column name when that column has one status (default: current).
+     * Place it with `position` (0-based index in the destination column, default bottom) or `after` (key of an issue in that column).
      *
-     * An agent moving to the last column (Done) gets 202 `{"status": "pending_approval", "approval_request": {...}, "issue": {...}}`
+     * An agent moving to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...}, "issue": {...}}`
      * and the issue stays where it is until a person approves. `reason` (optional, max 200) says why.
      */
     public function move(MoveIssueRequest $request, string $key): IssueResource|JsonResponse

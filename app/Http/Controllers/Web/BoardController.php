@@ -71,7 +71,7 @@ class BoardController extends Controller
         $issue = $this->board->move($issue, $request->user(), $request->validated());
 
         return back()->with('undo', [
-            'message' => $before['status'] === $issue->column->name ? "{$issue->key} moved" : "{$issue->key} moved to {$issue->column->name}",
+            'message' => $before['status'] === $issue->status->name ? "{$issue->key} moved" : "{$issue->key} moved to {$issue->status->name}",
             'method' => 'post',
             'url' => route('issues.move', $issue->key),
             'data' => [...$before, 'undo_of' => $this->undo->token($issue)],
@@ -81,7 +81,7 @@ class BoardController extends Controller
     public function storeColumn(ColumnRequest $request, Project $project): RedirectResponse
     {
         Gate::authorize('manage', $project);
-        $this->columns->create($project, $request->validated());
+        $this->columns->create($project, $request->user(), $request->validated());
 
         return back();
     }

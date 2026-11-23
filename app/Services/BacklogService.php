@@ -25,18 +25,17 @@ class BacklogService
      */
     public function backlog(Project $project): array
     {
-        $sprints = $this->sprints->withStats($project->sprints()->getQuery(), $project)
+        $sprints = $this->sprints->withStats($project->sprints()->getQuery())
             ->where('state', '!=', SprintState::Completed->value)
             ->orderByRaw('state = ? desc', [SprintState::Active->value])
             ->orderBy('id')
             ->get();
-        $done = $project->doneColumnId();
 
         $issues = $project->issues()
             ->where('type', '!=', IssueType::Epic->value)
             ->where(fn ($q) => $q->whereIn('sprint_id', $sprints->pluck('id'))
-                ->orWhere(fn ($b) => $b->whereNull('sprint_id')->where('column_id', '!=', $done)))
-            ->with(['assignee', 'labels', 'parent', 'column'])
+                ->orWhere(fn ($b) => $b->whereNull('sprint_id')->open()))
+            ->with(['assignee', 'labels', 'parent', 'status'])
             ->orderBy('rank')
             ->limit(self::LIMIT + 1)
             ->get()
@@ -72,7 +71,7 @@ class BacklogService
                 ->when(
                     $issue->sprint_id,
                     fn ($q, $id) => $q->where('sprint_id', $id),
-                    fn ($q) => $q->whereNull('sprint_id')->where('column_id', '!=', $issue->project->doneColumnId()),
+                    fn ($q) => $q->whereNull('sprint_id')->open(),
                 );
 
             $position = match (true) {

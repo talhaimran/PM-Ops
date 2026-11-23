@@ -8,6 +8,7 @@ use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\User;
 use App\Services\ApprovalService;
+use App\Services\StatusService;
 
 /*
  * Step A2: only an agent that may move the issue can open a request (owner's role → level → project list), only a
@@ -43,12 +44,12 @@ test('an agent token cannot decide: the approve and reject routes are web-only',
     app('auth')->shouldUse('web');
     $this->post(w("/approvals/{$id}/approve"))->assertRedirect(route('login'));
     $this->post(w("/approvals/{$id}/reject"))->assertRedirect(route('login'));
-    expect(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending)->and(Issue::sole()->column->name)->toBe('To Do');
+    expect(ApprovalRequest::sole()->status)->toBe(ApprovalStatus::Pending)->and(Issue::sole()->status->name)->toBe('To Do');
 });
 
 test('a person who cannot see the project gets the same answer as for a request that does not exist', function () {
     [$agent] = makeAgent($this->owner, AgentLevel::Write);
-    $request = app(ApprovalService::class)->requestDone(Issue::sole()->setRelation('project', $this->web), $this->owner, $agent, $this->web->columns()->where('name', 'Done')->sole(), null);
+    $request = app(ApprovalService::class)->requestDone(Issue::sole()->setRelation('project', $this->web), $this->owner, $agent, app(StatusService::class)->resolveFor($this->web, 'Done'), null);
     $outsider = asWorkspaceMember(addMember(makeProject($this->owner, 'OPS'), User::factory()->create(), ProjectRole::Admin));
 
     $notFound = fn (int $id) => ['approval' => "Approval request {$id} was not found. Open your dashboard to see the requests you can decide."];
@@ -63,7 +64,7 @@ test('a workspace Admin who has not joined the project cannot decide its request
     $wsAdmin = User::factory()->create();
     $this->ws->addMember($wsAdmin, WorkspaceRole::Admin);
     [$agent] = makeAgent($this->owner, AgentLevel::Write);
-    $request = app(ApprovalService::class)->requestDone(Issue::sole()->setRelation('project', $this->web), $this->owner, $agent, $this->web->columns()->where('name', 'Done')->sole(), null);
+    $request = app(ApprovalService::class)->requestDone(Issue::sole()->setRelation('project', $this->web), $this->owner, $agent, app(StatusService::class)->resolveFor($this->web, 'Done'), null);
 
     $this->actingAs($wsAdmin)->post(w("/approvals/{$request->id}/approve"))->assertForbidden();
     expect($request->fresh()->status)->toBe(ApprovalStatus::Pending);

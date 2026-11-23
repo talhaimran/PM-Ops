@@ -6,7 +6,7 @@ use App\Models\Issue;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** Wraps BoardService::board(): columns with compact issue cards. */
+/** Wraps BoardService::board(): columns with their statuses and compact issue cards. */
 class BoardResource extends JsonResource
 {
     public function toArray(Request $request): array
@@ -15,6 +15,7 @@ class BoardResource extends JsonResource
             'columns' => $this->resource['columns']->map(fn ($column) => [
                 'name' => $column->name,
                 'position' => $column->position,
+                'statuses' => StatusResource::collection($column->statuses)->resolve(),
                 'issues' => $column->issues->map(fn (Issue $i) => self::card($i))->values()->all(),
             ])->values()->all(),
             'truncated' => $this->resource['truncated'],
@@ -28,7 +29,8 @@ class BoardResource extends JsonResource
             'title' => $issue->title,
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
-            'status' => $issue->column->name,
+            'status' => $issue->status->name,
+            'category' => $issue->status->category->value,
             'assignee' => $issue->assignee ? ['name' => $issue->assignee->name, 'email' => $issue->assignee->email] : null,
             'labels' => $issue->labels->pluck('name')->all(),
             'story_points' => $issue->story_points,

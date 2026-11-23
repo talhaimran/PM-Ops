@@ -55,7 +55,7 @@ class UndoService
             'description' => $issue->description,
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
-            'status' => $issue->column->name,
+            'status' => $issue->status->name,
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->values()->all(),
             'story_points' => $issue->story_points,
@@ -69,20 +69,21 @@ class UndoService
     }
 
     /**
-     * Request data for the move endpoint that returns the issue to its column and place. Call it before the move.
+     * Request data for the move endpoint that returns the issue to its status and place. Call it before the move.
      *
      * @return array<string, mixed>
      */
     public function forMove(Issue $issue): array
     {
         $issue->loadMissing(IssueService::DISPLAY);
-        $previous = Issue::where('column_id', $issue->column_id)
+        $previous = Issue::where('project_id', $issue->project_id)
+            ->whereIn('status_id', BoardService::columnOf($issue)->statuses->modelKeys())
             ->where('type', '!=', $issue->type->value === 'epic' ? '' : 'epic')
             ->where('rank', '<', $issue->rank)
             ->orderByDesc('rank')
             ->first();
 
-        return ['status' => $issue->column->name] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
+        return ['status' => $issue->status->name] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
     }
 
     /**
@@ -99,7 +100,7 @@ class UndoService
             ->when(
                 $issue->sprint_id,
                 fn ($q, $id) => $q->where('sprint_id', $id),
-                fn ($q) => $q->whereNull('sprint_id')->where('column_id', '!=', $issue->project->doneColumnId()),
+                fn ($q) => $q->whereNull('sprint_id')->open(),
             )
             ->where('rank', '<', $issue->rank)
             ->orderByDesc('rank')
