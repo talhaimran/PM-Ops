@@ -80,9 +80,11 @@ class IssueService
     public function update(Issue $issue, User $actor, array $data, string $action = 'updated'): Issue
     {
         return DB::transaction(function () use ($issue, $actor, $data, $action) {
-            if (isset($data['status'])) {
+            if (isset($data['status']) || isset($data['resolution'])) {
                 // The project row first (as moves and column changes do), so the status read can't race a column delete.
                 Project::whereKey($issue->project_id)->lockForUpdate()->first();
+                // Then the issue as it is now: a copy loaded earlier may have been reopened or moved since.
+                $issue->refresh();
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
@@ -115,8 +117,12 @@ class IssueService
             }
             if ($changes) {
                 // Leaving Done is a reopen (spec 7.4); an undo or an approval keeps its own action.
-                $reopened = $action === 'updated' && $wasDone && ! $issue->status->isDone();
-                $this->activity->log($issue, $actor, $reopened ? 'reopened' : $action, $changes);
+                $reopened = $wasDone && ! $issue->status->isDone();
+                if ($reopened && $action !== 'updated') {
+                    // An Undo keeps its own entry (and its changes) but still leaves the reopen marker before it.
+                    $this->activity->log($issue, $actor, 'reopened');
+                }
+                $this->activity->log($issue, $actor, $reopened && $action === 'updated' ? 'reopened' : $action, $changes);
             }
 
             return $issue;

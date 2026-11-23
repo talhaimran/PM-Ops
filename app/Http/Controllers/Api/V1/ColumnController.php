@@ -51,7 +51,7 @@ class ColumnController extends Controller
     {
         $project = $this->projects->resolve($request->user(), $key);
         Gate::authorize('removeColumn', $project);
-        $this->columns->delete($this->columns->resolve($project, $name), $request->validated('move_issues_to'));
+        $this->columns->delete($this->columns->resolve($project, $name), $request->validated('move_issues_to'), $request->user());
 
         return response()->noContent();
     }

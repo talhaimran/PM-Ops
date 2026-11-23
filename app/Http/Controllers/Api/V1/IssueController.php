@@ -80,7 +80,7 @@ class IssueController extends Controller
     /**
      * Update an issue. Send only the fields to change; send null to clear assignee, epic, parent, points or due date.
      *
-     * An agent moving the issue to the last column (Done) gets 202 `{"status": "pending_approval", "approval_request": {...},
+     * An agent moving the issue to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...},
      * "issue": {...}}`: a person must approve the move; the other fields are applied. `reason` (optional) says why.
      */
     public function update(UpdateIssueRequest $request, string $key): IssueResource|JsonResponse

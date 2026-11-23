@@ -61,8 +61,9 @@ class ApprovalService
                 ->lock('for update skip locked')->first();
 
             // The same ask again with another resolution is the agent changing its mind: the person decides on the latest.
-            if ($open && $resolved) {
-                $open->update(['action' => [...$open->action, ...$resolved]]);
+            if ($open && isset($resolved['resolution'])) {
+                // A new resolution replaces the old one whole, so a stale duplicate_of can't outlive it.
+                $open->update(['action' => [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved]]);
             }
             $approval = $open ?? ApprovalRequest::create([
                 'workspace_id' => $issue->project->workspace_id,

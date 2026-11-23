@@ -51,7 +51,7 @@ class BoardService
         return DB::transaction(function () use ($issue, $actor, $input, $action) {
             Project::whereKey($issue->project_id)->lockForUpdate()->first();
 
-            if (isset($input['status']) || isset($input['resolution'])) {
+            if (isset($input['status']) || isset($input['resolution']) || isset($input['duplicate_of'])) {
                 $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of']), $action);
             }
             // An agent's move to Done waits for a person (A2): the issue stays where it was.

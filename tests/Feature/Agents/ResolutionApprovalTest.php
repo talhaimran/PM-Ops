@@ -63,3 +63,13 @@ test('1-D7: an agent changing the resolution of an already-Done issue needs no a
         ->and($activity->changes)->toEqual(['resolution' => ['from' => 'done', 'to' => 'cannot_reproduce']])
         ->and($activity->agent_id)->toBe($this->agent->id);
 });
+
+test('asking again with another resolution replaces the old one, duplicate_of included, and approving works', function () {
+    asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2'])->assertStatus(202);
+    $id = asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'wont_do'])->assertStatus(202)->json('approval_request.id');
+
+    expect(ApprovalRequest::sole()->action)->toMatchArray(['resolution' => 'wont_do'])->not->toHaveKey('duplicate_of');
+
+    $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
+    expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('wont_do');
+});

@@ -3,8 +3,10 @@
 use App\Models\Activity;
 use App\Models\Issue;
 use App\Models\User;
+use App\Services\IssueService;
 use App\Services\SprintService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 // Spec 7.4: entering a Done-category status always sets a resolution, leaving clears it, only Done counts as completed.
 
@@ -183,4 +185,40 @@ test('deleting a column moves its issues under the same rule: into Done they are
 
     $this->deleteJson('/api/v1/projects/WEB/columns/Done', ['confirm' => true, 'move_issues_to' => 'In Progress'])->assertNoContent();
     expect(Issue::where('number', 1)->sole())->resolution->toBeNull()->resolved_at->toBeNull();
+});
+
+test('a resolution-only update reads the issue under the lock, not a stale copy', function () {
+    $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertOk();
+    $stale = Issue::where('number', 1)->sole()->load('status');
+    app(IssueService::class)->update(Issue::where('number', 1)->sole(), $this->admin, ['status' => 'To Do']);
+
+    expect(fn () => app(IssueService::class)->update($stale, $this->admin, ['resolution' => 'wont_do']))
+        ->toThrow(ValidationException::class, 'Resolution applies to Done statuses.');
+    expect(Issue::where('number', 1)->sole()->resolution)->toBeNull();
+});
+
+test('Undo out of Done leaves a reopened entry before the undid one', function () {
+    $this->actingAs($this->admin);
+    $this->post(w('/issues/WEB-1/move'), ['status' => 'Done'])->assertRedirect();
+    $undo = session('undo');
+
+    $this->{$undo['method']}($undo['url'], $undo['data'])->assertSessionHasNoErrors();
+
+    expect(Activity::where('action', 'reopened')->count())->toBe(1)
+        ->and(Activity::latest('id')->first()->action)->toBe('undid');
+});
+
+test('deleting a Done column logs a reopened entry for each issue it moves out of Done', function () {
+    $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertOk();
+
+    $this->deleteJson('/api/v1/projects/WEB/columns/Done', ['confirm' => true, 'move_issues_to' => 'In Progress'])->assertNoContent();
+
+    $reopened = Activity::where('action', 'reopened')->sole();
+    expect($reopened->user_id)->toBe($this->admin->id)
+        ->and($reopened->changes)->toEqual(['status' => ['from' => 'Done', 'to' => 'In Progress'], 'resolution' => ['from' => 'done', 'to' => null]]);
+});
+
+test('duplicate_of alone on a move is the same 422 as on an update', function () {
+    $this->postJson('/api/v1/issues/WEB-1/move', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
+    $this->patchJson('/api/v1/issues/WEB-1', ['duplicate_of' => 'WEB-2'])->assertUnprocessable()->assertJsonValidationErrors('resolution');
 });

@@ -27,7 +27,7 @@ class DeleteColumn extends Tool
         $project = $projects->resolve($request->user(), $data['project']);
         Gate::authorize('removeColumn', $project);
         $column = $columns->resolve($project, $data['column']);
-        $columns->delete($column, $data['move_issues_to'] ?? null);
+        $columns->delete($column, $data['move_issues_to'] ?? null, $request->user());
 
         return $this->result("Deleted column \"{$column->name}\" from {$project->key}.", ['deleted' => $column->name]);
     }

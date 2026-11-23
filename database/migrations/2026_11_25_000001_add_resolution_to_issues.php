@@ -13,6 +13,7 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // shortcut: not re-runnable after a partial failure, drop the two columns by hand first (MySQL DDL isn't transactional); move to a guarded migration if installs need it.
         Schema::table('issues', function (Blueprint $table) {
             $table->string('resolution', 20)->nullable()->after('status_id');
             $table->timestamp('resolved_at')->nullable()->after('resolution');

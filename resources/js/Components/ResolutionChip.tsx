@@ -8,7 +8,7 @@ import { Resolution } from '@/types';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { router, usePage } from '@inertiajs/react';
 import { Check, ChevronDown } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 
 export const resolutionLabels: Record<Resolution, string> = {
     done: 'Done',
@@ -56,8 +56,11 @@ export function DuplicateOfModal({ show, projectKey, onClose, onSubmit }: { show
  * "Resolved: Done ▾" (spec 7.4): the resolution of a Done-category issue, with a menu to change it.
  * Read-only text when the viewer can't edit. Shown on a board card for as long as the move's Undo toast.
  */
-export default function ResolutionChip({ issueKey, resolution, editable }: { issueKey: string; resolution: Resolution; editable: boolean }) {
+export default function ResolutionChip({ issueKey, resolution, editable, onBusy }: { issueKey: string; resolution: Resolution; editable: boolean; onBusy?: (busy: boolean) => void }) {
     const [asking, setAsking] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(false);
+    // Tells the board to keep this chip while the menu or the dialog is open, however long that takes.
+    useEffect(() => onBusy?.(menuOpen || asking), [menuOpen, asking, onBusy]);
     const label = `Resolved: ${resolutionLabels[resolution]}`;
     const chip = `inline-flex h-pill-h items-center gap-1 rounded-pill px-2.5 text-xs ${lozengeClass('done')}`;
 
@@ -67,6 +70,9 @@ export default function ResolutionChip({ issueKey, resolution, editable }: { iss
         // Stop the board's drag handlers: this sits inside a draggable card.
         <div onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
             <Menu>
+                {({ open }) => (
+                    <>
+                <OpenState open={open} onChange={setMenuOpen} />
                 <MenuButton className={chip}>
                     {label}
                     <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" />
@@ -85,8 +91,16 @@ export default function ResolutionChip({ issueKey, resolution, editable }: { iss
                         </MenuItem>
                     ))}
                 </MenuItems>
+                    </>
+                )}
             </Menu>
             <DuplicateOfModal show={asking} projectKey={issueKey.split('-')[0]} onClose={() => setAsking(false)} onSubmit={(original) => resolveIssue(issueKey, { resolution: 'duplicate', duplicate_of: original }, () => setAsking(false))} />
         </div>
     );
+}
+
+/** Headless UI only gives `open` to a render prop; this hands it up as state. */
+function OpenState({ open, onChange }: { open: boolean; onChange: (open: boolean) => void }) {
+    useEffect(() => onChange(open), [open, onChange]);
+    return null;
 }

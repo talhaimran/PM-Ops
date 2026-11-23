@@ -54,12 +54,6 @@ class Issue extends Model
         return $this->belongsTo(Status::class);
     }
 
-    /** Spec 7.4: done is the status's category, never a column's position. */
-    public function scopeDone(Builder $query): void
-    {
-        $query->whereHas('status', fn ($status) => $status->where('category', StatusCategory::Done));
-    }
-
     /** Completed work: only resolution Done counts (sprint progress); Won't do and the rest are Done-category but not completed. */
     public function scopeCompleted(Builder $query): void
     {
