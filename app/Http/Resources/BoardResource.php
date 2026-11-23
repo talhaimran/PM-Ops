@@ -38,6 +38,8 @@ class BoardResource extends JsonResource
             'story_points' => $issue->story_points,
             'due_date' => $issue->due_date?->format('Y-m-d'),
             'parent' => $issue->parent ? $issue->project->key.'-'.$issue->parent->number : null,
+            // Spec 7.11: what an edit from a list sends back (the board's resolution chip, an agent's update_issue).
+            'version' => $issue->version,
         ];
     }
 }

@@ -26,6 +26,9 @@ class Issue extends Model
     /** Set by IssueService::update when an agent's move to Done was held for a person (spec 8, A2); never stored. */
     public ?ApprovalRequest $heldApproval = null;
 
+    /** Spec 7.11: the version a new issue starts at (the column default), so a created model carries it too. */
+    protected $attributes = ['version' => 1];
+
     protected function casts(): array
     {
         return [
@@ -35,6 +38,7 @@ class Issue extends Model
             'story_points' => 'integer',
             'resolution' => Resolution::class,
             'resolved_at' => 'datetime',
+            'version' => 'integer',
         ];
     }
 

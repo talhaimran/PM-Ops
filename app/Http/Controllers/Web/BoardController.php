@@ -58,11 +58,11 @@ class BoardController extends Controller
     {
         $issue = $this->issues->resolve($request->user(), $key);
         Gate::authorize('update', $issue);
-        $undoOf = $request->validate(['undo_of' => ['nullable', 'integer']])['undo_of'] ?? null;
+        $undoOf = $request->validate(['undo_of' => ['nullable', 'integer', 'min:1']])['undo_of'] ?? null;
 
         if ($undoOf) {
-            $this->undo->guard($issue, (int) $undoOf);
-            $this->board->move($issue, $request->user(), $request->validated(), 'undid');
+            // undo_of is the version right after the change; if the issue changed since, IssueService refuses it.
+            $this->board->move($issue, $request->user(), [...$request->validated(), 'version' => (int) $undoOf], 'undid');
 
             return back();
         }

@@ -29,18 +29,18 @@ test('issues join sprints by name and the change is logged', function () {
     $this->postJson('/api/v1/projects/WEB/sprints', []);
     makeIssue($this->project, $this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['sprint' => 'web sprint 1'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'sprint' => 'web sprint 1'])
         ->assertOk()
         ->assertJsonPath('data.sprint.name', 'WEB Sprint 1');
 
     expect(Activity::where('action', 'updated')->sole()->changes)
         ->toEqual(['sprint' => ['from' => null, 'to' => 'WEB Sprint 1']]);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['sprint' => 'Nope'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'sprint' => 'Nope'])
         ->assertUnprocessable()
         ->assertJsonPath('errors.sprint.0', fn ($m) => str_contains($m, 'WEB Sprint 1'));
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['sprint' => null])->assertJsonPath('data.sprint', null);
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'sprint' => null])->assertJsonPath('data.sprint', null);
 });
 
 test('starting a sprint defaults dates and only one can be active', function () {
@@ -109,7 +109,7 @@ test('only active sprints complete and completed sprints are closed', function (
     $this->postJson('/api/v1/projects/WEB/sprints/WEB Sprint 1/start');
     $this->postJson('/api/v1/projects/WEB/sprints/WEB Sprint 1/complete', ['confirm' => true, 'move_open_issues_to' => 'backlog']);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['sprint' => 'WEB Sprint 1'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'sprint' => 'WEB Sprint 1'])
         ->assertUnprocessable()->assertJsonValidationErrors('sprint');
     $this->patchJson('/api/v1/projects/WEB/sprints/WEB Sprint 1', ['goal' => 'x'])
         ->assertUnprocessable()->assertJsonValidationErrors('sprint');

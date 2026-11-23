@@ -73,13 +73,13 @@ test('a name clash with another category gets the project key', function () {
 test('an issue takes a status name, or a column name when that column has one status', function () {
     makeIssue($this->web, $this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'In Review'])->assertOk()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'In Review'])->assertOk()
         ->assertJsonPath('data.status', 'In Review')->assertJsonPath('data.category', 'in_progress');
     $this->patchJson('/api/v1/projects/WEB/columns/In Review', ['name' => 'Review'])->assertOk();
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Review'])->assertOk()->assertJsonPath('data.status', 'In Review');
     PmServer::tool(MoveIssue::class, ['issue' => 'WEB-1', 'status' => 'done'])->assertOk()->assertSee(['Moved WEB-1 to Done', '"category":"done"']);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Nope'])->assertUnprocessable()
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 3, 'status' => 'Nope'])->assertUnprocessable()
         ->assertJsonPath('errors.status.0', 'Unknown status "Nope". Valid statuses for WEB: To Do, In Progress, In Review, Done.');
 });
 

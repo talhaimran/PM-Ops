@@ -39,6 +39,8 @@ export interface Card {
     story_points: number | null;
     due_date: string | null;
     parent: string | null;
+    /** Spec 7.11: what an edit from the card (the resolution chip) sends back. */
+    version: number;
 }
 
 interface BoardData {
@@ -277,7 +279,7 @@ function CardView({ card, dragging = false, chip }: { card: Card; dragging?: boo
             {dimmed && <p className="mt-1 text-sm text-muted">{resolutionLabels[card.resolution!]}</p>}
             {chip && card.resolution && (
                 <div className="mt-2">
-                    <ResolutionChip issueKey={card.key} resolution={card.resolution} editable={chip.editable} onBusy={chip.onBusy} />
+                    <ResolutionChip issueKey={card.key} version={card.version} resolution={card.resolution} editable={chip.editable} onBusy={chip.onBusy} />
                 </div>
             )}
             {card.labels.length > 0 && <p className="mt-1 truncate text-sm text-muted">{card.labels.join(' · ')}</p>}

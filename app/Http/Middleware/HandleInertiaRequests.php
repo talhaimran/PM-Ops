@@ -59,6 +59,8 @@ class HandleInertiaRequests extends Middleware
                 'recoveryCodes' => fn () => $request->session()->get('recoveryCodes'),
                 // {message, method, url, data}: what the toast sends back when the person picks Undo (UndoService).
                 'undo' => fn () => $request->session()->get('undo'),
+                // Spec 7.11: {key, version, url, yours, theirs, by, at} after a stale save, for the conflict dialog (EditConflict).
+                'conflict' => fn () => $request->session()->get('conflict'),
             ],
         ];
     }

@@ -51,9 +51,9 @@ test('an undo payload is useless to someone who may not write, and cannot reach 
     // A viewer replaying it is refused by the policy before the undo guard runs.
     $this->actingAs($this->viewer)->post($undo['url'], $undo['data'])->assertForbidden();
     $this->actingAs($this->viewer)->post(w('/issues/WEB-1/move'), $undo['data'])->assertForbidden();
-    // An outsider gets the ordinary not-found error, and pointing the token at their own issue does nothing.
+    // An outsider gets the ordinary not-found error. The token is only a version number (spec 7.11), so it grants
+    // nothing: sent to their own issue it is just an edit they could make anyway.
     $this->actingAs($this->outsider)->post($undo['url'], $undo['data'])->assertSessionHasErrors('project');
-    $this->actingAs($this->outsider)->patch(w('/issues/OPS-1'), ['title' => 'Hijacked', 'undo_of' => $undo['data']['undo_of']])->assertSessionHasErrors('undo');
     expect(Issue::where('title', 'Untouched')->exists())->toBeTrue()
         ->and(Activity::where('action', 'undid')->count())->toBe(0);
 });
@@ -64,7 +64,7 @@ test('the flashed undo only ever points at this app\'s own issue and comment rou
     $this->actingAs($this->admin);
     $base = url(w(''));
 
-    $this->patch(w('/issues/WEB-1'), ['title' => '//evil.example'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'title' => '//evil.example'])->assertRedirect();
     expect(session('undo.url'))->toBe("{$base}/issues/WEB-1")->and(session('undo.method'))->toBe('patch');
     $this->delete(w("/comments/{$comment->id}"))->assertRedirect();
     expect(session('undo.url'))->toBe("{$base}/comments/{$comment->id}/restore")->and(session('undo.method'))->toBe('post');
@@ -87,9 +87,9 @@ test('comments of a deleted issue cannot be read, edited, deleted or restored', 
     $this->issues->delete($issue, $this->admin);
 
     $this->actingAs($this->admin)->post(w("/comments/{$comment->id}/restore"))->assertSessionHasErrors('comment');
-    $this->patch(w("/comments/{$comment->id}"), ['body' => 'Edited'])->assertSessionHasErrors('comment');
+    $this->patch(w("/comments/{$comment->id}"), ['version' => 1, 'body' => 'Edited'])->assertSessionHasErrors('comment');
     apiAs($this->admin);
-    $this->patchJson("/api/v1/comments/{$comment->id}", ['body' => 'Edited'])->assertNotFound();
+    $this->patchJson("/api/v1/comments/{$comment->id}", ['version' => 1, 'body' => 'Edited'])->assertNotFound();
     $this->deleteJson("/api/v1/comments/{$comment->id}")->assertNotFound();
     $this->getJson('/api/v1/issues/WEB-1/activity')->assertNotFound();
     expect(Comment::withTrashed()->sole()->body)->toBe('Buried');
@@ -99,7 +99,7 @@ test('a deleted issue cannot be written to through any API or web route', functi
     $this->issues->delete(makeIssue($this->project, $this->admin), $this->admin);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Zombie'])->assertNotFound();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Zombie'])->assertNotFound();
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertNotFound();
     $this->postJson('/api/v1/issues/WEB-1/rank', ['position' => 0])->assertNotFound();
     $this->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'Hi'])->assertNotFound();

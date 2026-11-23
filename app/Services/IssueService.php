@@ -6,6 +6,7 @@ use App\Enums\IssuePriority;
 use App\Enums\IssueType;
 use App\Enums\Resolution;
 use App\Enums\SprintState;
+use App\Exceptions\EditConflict;
 use App\Models\Activity;
 use App\Models\Column;
 use App\Models\Issue;
@@ -78,7 +79,10 @@ class IssueService
     }
 
     /**
-     * $action is 'updated', 'undid' when the web UI's Undo sends a change back, or 'approved' for an approved request.
+     * $action is 'updated', 'undid' when the web UI's Undo sends a change back, 'overwrote' when the web conflict
+     * dialog saves over someone else's change, or 'approved' for an approved request.
+     * $data['version'] (spec 7.11), when given, must be the issue's current version or nothing is saved (EditConflict);
+     * moves leave it out (1-D3). Any change bumps the version (1-D4).
      * An agent's move to Done is held instead (A2): the other fields still change (A-L7) and $issue->heldApproval
      * holds the request; $data['reason'] (A-L5) goes on it.
      */
@@ -88,8 +92,17 @@ class IssueService
             if (isset($data['status']) || isset($data['resolution'])) {
                 // The project row first (as moves and column changes do), so the status read can't race a column delete.
                 Project::whereKey($issue->project_id)->lockForUpdate()->first();
-                // Then the issue as it is now: a copy loaded earlier may have been reopened or moved since.
-                $issue->refresh();
+            }
+            // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
+            // and the bump below can't interleave with another save (Review Focus 3).
+            // A locking read: it sees the latest committed row even if this transaction read the issue before (REPEATABLE READ).
+            $issue->setRawAttributes(Issue::withTrashed()->whereKey($issue->id)->lockForUpdate()->firstOrFail()->getAttributes(), true)->unsetRelations();
+            if ($issue->trashed()) {
+                // Deleted after the caller loaded it: the same 404 as asking for a deleted issue.
+                throw ValidationException::withMessages(['issue' => "Issue {$issue->key} was not found. Search the project's issues to find the right key."])->status(404);
+            }
+            if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
+                throw EditConflict::issue($issue, (int) $data['version']);
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
@@ -99,11 +112,11 @@ class IssueService
             [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
 
             $issue->heldApproval = null;
-            if ($status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent())) {
+            $held = $status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent());
+            if ($held) {
                 unset($attributes['status_id']);
                 // The issue stays where it is, so its resolution does too; the request carries the new one.
                 $resolution = [];
-                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null, isset($data['resolution']) ? Resolution::from($data['resolution']) : null, $data['duplicate_of'] ?? null);
             }
 
             $issue->update([...$attributes, ...$resolution]);
@@ -115,11 +128,21 @@ class IssueService
             $after = $this->snapshot($issue);
             $changes = collect($before)
                 ->filter(fn ($value, $field) => $value !== $after[$field])
-                ->map(fn ($value, $field) => ['from' => $value, 'to' => $after[$field]])
+                // The full values decide what changed (1-D4); a long description is shortened only for the log.
+                ->map(fn ($value, $field) => $field === 'description'
+                    ? ['from' => $value === null ? null : Str::limit($value, 200), 'to' => $after[$field] === null ? null : Str::limit($after[$field], 200)]
+                    : ['from' => $value, 'to' => $after[$field]])
                 ->all();
 
             if ($original && $resolution) {
                 $changes['duplicate_of'] = ['from' => null, 'to' => $original];
+            }
+            if ($changes) {
+                $issue->increment('version');
+            }
+            if ($held) {
+                // After the bump, so the request remembers the version this change left the issue at.
+                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null, isset($data['resolution']) ? Resolution::from($data['resolution']) : null, $data['duplicate_of'] ?? null);
             }
             if (isset($changes['status'])) {
                 $this->history->statusChanged($issue, $fromStatus, $issue->status, $actor);
@@ -131,7 +154,7 @@ class IssueService
                 $this->history->estimateChanged($issue, $changes['story_points']['from'], $changes['story_points']['to'], $actor);
             }
             if ($changes) {
-                // Leaving Done is a reopen (spec 7.4); an undo or an approval keeps its own action.
+                // Leaving Done is a reopen (spec 7.4); an undo, an overwrite or an approval keeps its own action.
                 $reopened = $wasDone && ! $issue->status->isDone();
                 if ($reopened && $action !== 'updated') {
                     // An Undo keeps its own entry (and its changes) but still leaves the reopen marker before it.
@@ -164,19 +187,31 @@ class IssueService
      */
     public function updateMany(User $actor, array $items): Collection
     {
-        return DB::transaction(function () use ($actor, $items) {
-            $items = collect($items)->values();
-            $issues = $items->map(function ($data, $i) use ($actor) {
-                $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
-                Gate::forUser($actor)->authorize('update', $issue);
+        $items = collect($items)->values();
+        // Found and authorized before the transaction, so its first plain read comes after the locks below and sees
+        // what other saves committed while it waited (REPEATABLE READ): the 409 then shows the real version and changes.
+        $issues = $items->map(function ($data, $i) use ($actor) {
+            $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
+            Gate::forUser($actor)->authorize('update', $issue);
 
-                return $issue;
-            });
+            return $issue;
+        });
+
+        return DB::transaction(function () use ($actor, $items, $issues) {
             // Every project row first, in id order, before any issue row: the order move and approve use, so no deadlock.
             Project::whereIn('id', $issues->pluck('project_id')->unique())->orderBy('id')->lockForUpdate()->get();
+            // Then every issue row, in id order, so all stale items are found before anything changes (1-R11).
+            $versions = Issue::whereIn('id', $issues->pluck('id'))->orderBy('id')->lockForUpdate()->pluck('version', 'id');
+            // Deleted meanwhile: the same not-found error as if it had been gone before the call.
+            $issues->reject(fn ($issue) => $versions->has($issue->id))->each(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $items[$i]['key']), as: 'key'));
+            $stale = $issues->filter(fn ($issue, $i) => isset($items[$i]['version']) && (int) $items[$i]['version'] !== $versions[$issue->id]);
+            if ($stale->isNotEmpty()) {
+                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version']))->values()->all());
+            }
 
-            // A fresh copy: an earlier item may have changed the same issue.
-            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue->refresh(), $actor, collect($items[$i])->except('key')->all())));
+            // Checked once above, against the versions the call was sent with: two items for one issue both carry the
+            // version read before the call. update() reads each issue afresh, as an earlier item may have changed it.
+            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all())));
         });
     }
 
@@ -603,14 +638,14 @@ class IssueService
         return $linked;
     }
 
-    /** Human-readable values used for activity diffs. */
+    /** Human-readable values used for activity diffs; update() shortens the description when it logs one. */
     private function snapshot(Issue $issue): array
     {
         $key = fn (?Issue $i) => $i ? "{$issue->project->key}-{$i->number}" : null;
 
         return [
             'title' => $issue->title,
-            'description' => $issue->description === null ? null : Str::limit($issue->description, 200),
+            'description' => $issue->description,
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,

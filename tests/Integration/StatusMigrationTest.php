@@ -107,7 +107,7 @@ test('1-R6: approval requests are converted to statuses; a pending one whose col
 
     $statusId = fn (string $name) => DB::table('statuses')->where('name', $name)->value('id');
     $row = fn (int $id) => DB::table('approval_requests')->find($id);
-    expect(json_decode($row($i['live'])->action, true))->toEqual(['to_status_id' => $statusId('Done'), 'to_status' => 'Done', 'from_status_id' => $statusId('In Review'), 'reason' => 'PR merged'])
+    expect(json_decode($row($i['live'])->action, true))->toEqual(['to_status_id' => $statusId('Done'), 'to_status' => 'Done', 'from_status_id' => $statusId('In Review'), 'reason' => 'PR merged', 'issue_version' => 1])
         ->and($row($i['live'])->status)->toBe('pending')
         ->and(json_decode($row($i['gone'])->action, true))->toEqual(['to_status_id' => null, 'to_status' => 'Shipped', 'from_status_id' => $statusId('To Do'), 'reason' => null])
         ->and($row($i['gone'])->status)->toBe('stale')

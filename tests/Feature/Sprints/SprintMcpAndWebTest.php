@@ -24,7 +24,7 @@ test('sprint lifecycle over mcp', function () {
 
     PmServer::tool(CreateSprint::class, ['project' => 'WEB', 'goal' => 'Login'])->assertOk()->assertSee('Created WEB Sprint 1');
     PmServer::tool(UpdateSprint::class, ['project' => 'WEB', 'sprint' => 'WEB Sprint 1', 'name' => 'Alpha'])->assertOk();
-    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'sprint' => 'Alpha'])->assertOk()->assertSee('"name":"Alpha"');
+    PmServer::tool(UpdateIssue::class, ['issue' => 'WEB-1', 'version' => 1, 'sprint' => 'Alpha'])->assertOk()->assertSee('"name":"Alpha"');
     PmServer::tool(StartSprint::class, ['project' => 'WEB', 'sprint' => 'Alpha'])->assertOk()->assertSee('Started Alpha');
     PmServer::tool(ListSprints::class, ['project' => 'WEB'])->assertOk()->assertSee('"state":"active"');
     PmServer::tool(CompleteSprint::class, ['project' => 'WEB', 'sprint' => 'Alpha', 'move_open_issues_to' => 'backlog'])

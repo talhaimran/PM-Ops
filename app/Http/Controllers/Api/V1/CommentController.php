@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Issues\CommentRequest;
+use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Resources\CommentResource;
 use App\Services\CommentService;
 use App\Services\IssueService;
@@ -24,13 +25,16 @@ class CommentController extends Controller
         return new CommentResource($this->comments->add($issue, $request->user(), $request->validated('body')));
     }
 
-    /** Edit your own comment. */
-    public function update(CommentRequest $request, int $comment): CommentResource
+    /**
+     * Edit your own comment. Send the `version` you read (get the issue): if the comment changed since, nothing is saved
+     * and you get 409 `{"error": "conflict", "current_version": …, "comment": {…}}`.
+     */
+    public function update(UpdateCommentRequest $request, int $comment): CommentResource
     {
         $comment = $this->comments->resolve($request->user(), $comment);
         Gate::authorize('update', $comment);
 
-        return new CommentResource($this->comments->update($comment, $request->validated('body')));
+        return new CommentResource($this->comments->update($comment, $request->validated('body'), (int) $request->validated('version')));
     }
 
     /** Delete a comment (author or project admin). */

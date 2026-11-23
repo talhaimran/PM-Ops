@@ -61,7 +61,7 @@ test('undo of a reorder inside a column puts the issue back first', function () 
 test('undo of a status change from the issue page', function () {
     makeIssue($this->project, $this->admin);
 
-    $this->patch(w('/issues/WEB-1'), ['status' => 'In Review'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['status' => 'In Review', 'version' => 1])->assertRedirect();
     expect(session('undo.message'))->toBe('WEB-1 moved to In Review');
 
     sendUndo($this)->assertSessionHasNoErrors();
@@ -73,7 +73,7 @@ test('undo of field edits restores the exact previous values', function () {
     app(LabelService::class)->create($this->project, ['name' => 'ux', 'color' => '#111111']);
     makeIssue($this->project, $this->admin, ['title' => 'Before', 'description' => $long, 'assignee' => 'sam@example.com', 'labels' => ['ux'], 'story_points' => 3]);
 
-    $this->patch(w('/issues/WEB-1'), ['title' => 'After', 'description' => 'Short', 'assignee' => null, 'labels' => [], 'story_points' => 8])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['title' => 'After', 'description' => 'Short', 'assignee' => null, 'labels' => [], 'story_points' => 8, 'version' => 1])->assertRedirect();
     expect(session('undo.message'))->toBe('WEB-1 updated');
 
     sendUndo($this)->assertSessionHasNoErrors();
@@ -89,7 +89,7 @@ test('undo of field edits restores the exact previous values', function () {
 test('an update that changes nothing offers no undo', function () {
     makeIssue($this->project, $this->admin, ['title' => 'Same']);
 
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Same'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Same', 'version' => 1])->assertRedirect();
 
     expect(session('undo'))->toBeNull();
 });
@@ -127,7 +127,7 @@ test('undo stops with a message when someone else changed the issue meanwhile', 
 
 test('a comment by someone else does not block undo', function () {
     $issue = makeIssue($this->project, $this->admin);
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed', 'version' => 1])->assertRedirect();
     $undo = session('undo');
 
     app(CommentService::class)->add($issue, $this->sam, 'Looks good');
@@ -150,7 +150,7 @@ test('undo into a column that was deleted meanwhile fails with the valid options
 
 test('the same undo cannot run twice', function () {
     makeIssue($this->project, $this->admin);
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed', 'version' => 1])->assertRedirect();
     $undo = session('undo');
 
     $this->patch($undo['url'], $undo['data'])->assertSessionHasNoErrors();
@@ -158,14 +158,15 @@ test('the same undo cannot run twice', function () {
     expect(Activity::where('action', 'undid')->count())->toBe(1);
 });
 
-test('undo_of must be an activity of that issue', function () {
+test('another issue\'s undo token does not undo this one', function () {
     makeIssue($this->project, $this->admin);
     makeIssue($this->project, $this->admin);
-    $this->patch(w('/issues/WEB-2'), ['title' => 'Other'])->assertRedirect();
+    $this->patch(w('/issues/WEB-2'), ['title' => 'Other', 'version' => 1])->assertRedirect();
     $other = session('undo.data.undo_of');
 
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Sneaky', 'undo_of' => $other])->assertSessionHasErrors('undo');
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Sneaky', 'undo_of' => 'abc'])->assertSessionHasErrors('undo_of');
+    // The token is WEB-2's version after its change, which isn't WEB-1's version.
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Sneaky', 'version' => $other, 'undo_of' => $other])->assertSessionHasErrors('undo');
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Sneaky', 'version' => 1, 'undo_of' => 'abc'])->assertSessionHasErrors('undo_of');
     expect(Issue::where('number', 1)->sole()->title)->toBe('Issue');
 });
 
@@ -173,14 +174,14 @@ test('the API input shape is unchanged: undo_of is ignored there', function () {
     makeIssue($this->project, $this->admin);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Via API', 'undo_of' => 999])->assertOk();
+    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Via API', 'version' => 1, 'undo_of' => 999])->assertOk();
 
     expect(Activity::latest('id')->first()->action)->toBe('updated');
 });
 
 test('a viewer cannot use an undo payload', function () {
     makeIssue($this->project, $this->admin);
-    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed'])->assertRedirect();
+    $this->patch(w('/issues/WEB-1'), ['title' => 'Renamed', 'version' => 1])->assertRedirect();
     $undo = session('undo');
     $viewer = addMember($this->project, User::factory()->create(), ProjectRole::Viewer);
 

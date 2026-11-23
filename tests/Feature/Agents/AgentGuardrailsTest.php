@@ -101,11 +101,11 @@ test('Review Focus 1: the owner demoted to Viewer between two agent calls makes 
     $alex = addMember($this->web, User::factory()->create(), ProjectRole::Member);
     [, $plain] = makeAgent($alex, AgentLevel::Write);
 
-    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['title' => 'First'])->assertOk();
+    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'First'])->assertOk();
 
     app(MembershipService::class)->changeRole($this->web, $alex, ProjectRole::Viewer);
 
-    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['title' => 'Second'])
+    asToken($plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Second'])
         ->assertForbidden()
         ->assertJsonPath('message', "Your role in WEB is viewer; viewers can't make changes.");
     expect($this->web->issues()->sole()->title)->toBe('First');

@@ -18,7 +18,7 @@ beforeEach(function () {
 });
 
 test('an agent sending a resolution with a Done status waits for a person; approving applies both together', function () {
-    $response = asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['status' => 'Done', 'resolution' => 'wont_do', 'reason' => 'Out of scope'])
+    $response = asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'wont_do', 'reason' => 'Out of scope'])
         ->assertStatus(202)->assertJsonPath('status', 'pending_approval')->assertJsonPath('issue.resolution', null);
     $id = $response->json('approval_request.id');
     $issue = fn () => Issue::where('number', 1)->sole()->load('status');
@@ -45,7 +45,7 @@ test('a duplicate request carries duplicate_of and is refused without it', funct
 });
 
 test('a resolution alone on an open issue is a 422, never a move', function () {
-    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['resolution' => 'wont_do'])->assertUnprocessable()
+    asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'resolution' => 'wont_do'])->assertUnprocessable()
         ->assertJsonPath('errors.resolution.0', 'Resolution applies to Done statuses. Move the issue to one of: Done.');
     asToken($this->plain)->postJson('/api/v1/issues/WEB-1/move', ['resolution' => 'wont_do'])->assertUnprocessable();
 
@@ -55,7 +55,7 @@ test('a resolution alone on an open issue is a 422, never a move', function () {
 test('1-D7: an agent changing the resolution of an already-Done issue needs no approval', function () {
     $this->actingAs($this->owner)->post(w('/issues/WEB-2/move'), ['status' => 'Done'])->assertSessionHasNoErrors();
 
-    asToken($this->plain)->patchJson('/api/v1/issues/WEB-2', ['resolution' => 'cannot_reproduce'])->assertOk()->assertJsonPath('data.resolution', 'cannot_reproduce');
+    asToken($this->plain)->patchJson('/api/v1/issues/WEB-2', ['version' => 2, 'resolution' => 'cannot_reproduce'])->assertOk()->assertJsonPath('data.resolution', 'cannot_reproduce');
 
     $activity = Activity::latest('id')->first();
     expect(ApprovalRequest::count())->toBe(0)

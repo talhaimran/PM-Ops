@@ -28,10 +28,10 @@ test('only the author edits a comment', function () {
     apiAs($this->member);
     $id = $this->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'v1'])->json('data.id');
 
-    $this->patchJson("/api/v1/comments/{$id}", ['body' => 'v2'])->assertOk()->assertJsonPath('data.body', 'v2');
+    $this->patchJson("/api/v1/comments/{$id}", ['version' => 1, 'body' => 'v2'])->assertOk()->assertJsonPath('data.body', 'v2');
 
     apiAs($this->admin);
-    $this->patchJson("/api/v1/comments/{$id}", ['body' => 'hijack'])->assertForbidden();
+    $this->patchJson("/api/v1/comments/{$id}", ['version' => 1, 'body' => 'hijack'])->assertForbidden();
 });
 
 test('authors and admins delete comments, other members cannot', function () {
@@ -60,7 +60,7 @@ test('labels are created, listed, renamed and deleted', function () {
         ->assertUnprocessable()->assertJsonValidationErrors('name');
     $this->getJson('/api/v1/projects/WEB/labels')->assertOk()->assertJsonPath('data.0.name', 'bug');
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['labels' => ['bug']])->assertJsonPath('data.labels', ['bug']);
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'labels' => ['bug']])->assertJsonPath('data.labels', ['bug']);
     $this->patchJson('/api/v1/projects/WEB/labels/bug', ['name' => 'defect'])->assertOk();
     $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.labels', ['defect']);
 

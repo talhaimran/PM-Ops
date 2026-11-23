@@ -44,7 +44,8 @@ class BoardService
 
     /**
      * Move an issue to a status and/or a place in its column. $input: status?, resolution?, duplicate_of?, position?, after?
-     * Status changes are logged through IssueService::update; reordering alone isn't logged.
+     * Status changes are logged through IssueService::update; reordering alone isn't logged. Moves don't check the
+     * version (spec 7.11, 1-D3), except an Undo's, which sends `version` (UndoService::token).
      */
     public function move(Issue $issue, User $actor, array $input, string $action = 'updated'): Issue
     {
@@ -52,7 +53,7 @@ class BoardService
             Project::whereKey($issue->project_id)->lockForUpdate()->first();
 
             if (isset($input['status']) || isset($input['resolution']) || isset($input['duplicate_of'])) {
-                $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of']), $action);
+                $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of', 'version']), $action);
             }
             // An agent's move to Done waits for a person (A2): the issue stays where it was.
             if ($issue->heldApproval) {

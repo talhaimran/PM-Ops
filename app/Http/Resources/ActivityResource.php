@@ -14,6 +14,8 @@ class ActivityResource extends JsonResource
         return [
             'id' => $this->id,
             'action' => $this->action,
+            // The issue's version after this change (spec 7.11).
+            'issue_version' => $this->issue_version,
             // approval_request: {id, to} on an approved or rejected agent request (A2); stored beside the field changes.
             'changes' => collect($this->changes)->except('approval_request')->all() ?: null,
             'approval_request' => $this->when(isset($this->changes['approval_request']), fn () => $this->changes['approval_request']),

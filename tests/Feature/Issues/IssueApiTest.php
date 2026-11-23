@@ -110,10 +110,10 @@ test('epic links require an epic and epics cannot be linked', function () {
     $task = makeIssue($this->project, $this->admin, ['title' => 'Task']);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-2', ['epic' => 'WEB-1'])->assertOk()->assertJsonPath('data.epic.key', 'WEB-1');
+    $this->patchJson('/api/v1/issues/WEB-2', ['version' => 1, 'epic' => 'WEB-1'])->assertOk()->assertJsonPath('data.epic.key', 'WEB-1');
     $this->postJson('/api/v1/projects/WEB/issues', ['title' => 'X', 'epic' => 'WEB-2'])
         ->assertUnprocessable()->assertJsonValidationErrors('epic');
-    $this->patchJson('/api/v1/issues/WEB-1', ['epic' => 'WEB-1'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'epic' => 'WEB-1'])
         ->assertUnprocessable()->assertJsonValidationErrors('epic');
 
     $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.epic_issues.0.key', 'WEB-2');
@@ -134,7 +134,7 @@ test('sub-tasks are one level deep', function () {
 
     // WEB-1 has a sub-task, so it can't become a sub-task itself.
     makeIssue($this->project, $this->admin, ['title' => 'Other']);
-    $this->patchJson('/api/v1/issues/WEB-1', ['parent' => 'WEB-3'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'parent' => 'WEB-3'])
         ->assertUnprocessable()->assertJsonValidationErrors('parent');
 
     $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.subtasks.0.key', 'WEB-2');
@@ -146,7 +146,7 @@ test('links must stay inside the project', function () {
     makeIssue($this->project, $this->admin);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['epic' => 'API-1'])
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'epic' => 'API-1'])
         ->assertUnprocessable()->assertJsonValidationErrors('epic');
 });
 
@@ -155,7 +155,7 @@ test('updates are logged with display values and the token name', function () {
     makeIssue($this->project, $this->admin, ['title' => 'Old']);
     $token = makeAgent($this->admin, AgentLevel::Write, name: 'claude-agent')[1];
 
-    $this->withToken($token)->patchJson('/api/v1/issues/WEB-1', [
+    $this->withToken($token)->patchJson('/api/v1/issues/WEB-1', ['version' => 1,
         'title' => 'New', 'status' => 'In Progress', 'assignee' => 'dev@example.com',
     ])->assertOk();
 
@@ -175,7 +175,7 @@ test('updates that change nothing are not logged', function () {
     makeIssue($this->project, $this->admin, ['title' => 'Same']);
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'Same'])->assertOk();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Same'])->assertOk();
 
     expect(Activity::where('action', 'updated')->count())->toBe(0);
 });
@@ -183,7 +183,7 @@ test('updates that change nothing are not logged', function () {
 test('activity endpoint lists newest first', function () {
     makeIssue($this->project, $this->admin);
     apiAs($this->admin);
-    $this->patchJson('/api/v1/issues/WEB-1', ['priority' => 'high']);
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'priority' => 'high']);
 
     $this->getJson('/api/v1/issues/WEB-1/activity')
         ->assertOk()
@@ -200,7 +200,7 @@ test('viewers and read-only tokens cannot write issues', function () {
     $this->getJson('/api/v1/issues/WEB-1')->assertOk();
 
     apiAs($this->admin, AgentLevel::Read);
-    $this->patchJson('/api/v1/issues/WEB-1', ['title' => 'X'])->assertForbidden();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'X'])->assertForbidden();
 });
 
 test('deleting an issue requires confirm true', function () {

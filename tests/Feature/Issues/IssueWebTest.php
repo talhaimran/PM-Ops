@@ -43,7 +43,7 @@ test('issue page renders markdown safely', function () {
 test('web edits are logged as via web without a token name', function () {
     makeIssue($this->project, $this->admin);
 
-    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['priority' => 'low'])->assertRedirect();
+    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['version' => 1, 'priority' => 'low'])->assertRedirect();
 
     $activity = Activity::where('action', 'updated')->sole();
     expect($activity->via)->toBe('web')->and($activity->token_name)->toBeNull();

@@ -12,6 +12,14 @@ class Comment extends Model
 {
     use SoftDeletes;
 
+    /** Spec 7.11: the version a new comment starts at (the column default), so a created model carries it too. */
+    protected $attributes = ['version' => 1];
+
+    protected function casts(): array
+    {
+        return ['version' => 'integer'];
+    }
+
     public function issue(): BelongsTo
     {
         return $this->belongsTo(Issue::class);

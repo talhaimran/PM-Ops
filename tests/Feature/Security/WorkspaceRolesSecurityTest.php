@@ -33,9 +33,9 @@ test('an Admin cannot make themselves an Owner', function () {
 test('seeing every project gives a workspace Admin no write on API or MCP until they join', function () {
     apiAs($this->admin);
 
-    $this->patchJson('/api/v1/issues/SEC-1', ['title' => 'x'])->assertForbidden();
+    $this->patchJson('/api/v1/issues/SEC-1', ['version' => 1, 'title' => 'x'])->assertForbidden();
     $this->deleteJson('/api/v1/projects/SEC', ['confirm' => true])->assertForbidden();
-    PmServer::tool(UpdateIssue::class, ['issue' => 'SEC-1', 'title' => 'x'])->assertHasErrors(["You haven't joined SEC."]);
+    PmServer::tool(UpdateIssue::class, ['issue' => 'SEC-1', 'version' => 1, 'title' => 'x'])->assertHasErrors(["You haven't joined SEC."]);
     PmServer::tool(DeleteProject::class, ['project' => 'SEC', 'confirm' => true])->assertHasErrors(["You haven't joined SEC."]);
     expect($this->secret->fresh())->not->toBeNull()->and($this->secret->roleFor($this->admin))->toBeNull();
 });

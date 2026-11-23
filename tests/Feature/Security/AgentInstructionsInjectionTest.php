@@ -56,10 +56,10 @@ test('1. cross-project reads are 404s that list only reachable projects and leak
 test('2. cross-project writes are refused and change nothing', function () {
     $before = Issue::where('project_id', $this->ops->id)->first()->only('title', 'status_id', 'priority', 'updated_at');
 
-    expect(toolFailed(callTool($this->token, 'update_issue', ['issue' => 'OPS-1', 'title' => 'pwned'])))->toBeTrue()
+    expect(toolFailed(callTool($this->token, 'update_issue', ['issue' => 'OPS-1', 'version' => 1, 'title' => 'pwned'])))->toBeTrue()
         ->and(toolFailed(callTool($this->token, 'move_issue', ['issue' => 'OPS-1', 'status' => 'In Progress'])))->toBeTrue()
         ->and(toolFailed(callTool($this->token, 'add_comment', ['issue' => 'OPS-1', 'body' => 'x'])))->toBeTrue();
-    asToken($this->token)->patchJson('/api/v1/issues/OPS-1', ['title' => 'pwned'])->assertNotFound();
+    asToken($this->token)->patchJson('/api/v1/issues/OPS-1', ['version' => 1, 'title' => 'pwned'])->assertNotFound();
 
     expect(Issue::where('project_id', $this->ops->id)->first()->only('title', 'status_id', 'priority', 'updated_at'))->toEqual($before)
         ->and(Issue::where('project_id', $this->ops->id)->first()->comments()->count())->toBe(0);

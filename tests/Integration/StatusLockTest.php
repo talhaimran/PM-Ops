@@ -76,7 +76,7 @@ test('a bulk update locks all its projects before it changes any issue, like mov
     DB::enableQueryLog();
 
     try {
-        expect(fn () => app(IssueService::class)->updateMany($owner, [['key' => 'WEB-1', 'title' => 'x'], ['key' => 'WEB-2', 'status' => 'In Review']]))
+        expect(fn () => app(IssueService::class)->updateMany($owner, [['key' => 'WEB-1', 'version' => 1, 'title' => 'x'], ['key' => 'WEB-2', 'version' => 1, 'status' => 'In Review']]))
             // Inside updateMany's outer transaction Laravel reports the timeout as a DeadlockException.
             ->toThrow(PDOException::class, 'Lock wait timeout');
     } finally {

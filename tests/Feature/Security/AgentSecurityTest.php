@@ -293,15 +293,15 @@ test('final review: an agent edits only its own comments; a person only their ow
     $byA = asToken($a)->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'From A'])->assertCreated()->json('data.id');
 
     // REST: the owner's Write agent can't rewrite the owner's own words, nor a sibling agent's.
-    asToken($a)->patchJson("/api/v1/comments/{$typed->id}", ['body' => 'forged'])->assertForbidden();
-    asToken($b)->patchJson("/api/v1/comments/{$byA}", ['body' => 'forged'])->assertForbidden();
+    asToken($a)->patchJson("/api/v1/comments/{$typed->id}", ['version' => 1, 'body' => 'forged'])->assertForbidden();
+    asToken($b)->patchJson("/api/v1/comments/{$byA}", ['version' => 1, 'body' => 'forged'])->assertForbidden();
     // MCP over HTTP: same.
     asToken($a, ['Accept' => 'application/json, text/event-stream'])->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call',
-        'params' => ['name' => 'update_comment', 'arguments' => ['comment_id' => $typed->id, 'body' => 'forged']]])->assertOk()->assertJsonPath('result.isError', true);
+        'params' => ['name' => 'update_comment', 'arguments' => ['comment_id' => $typed->id, 'version' => 1, 'body' => 'forged']]])->assertOk()->assertJsonPath('result.isError', true);
     expect($typed->fresh()->body)->toBe('Typed by Talha')->and(Comment::find($byA)->body)->toBe('From A');
 
     // An agent edits its own.
-    asToken($a)->patchJson("/api/v1/comments/{$byA}", ['body' => 'A again'])->assertOk();
+    asToken($a)->patchJson("/api/v1/comments/{$byA}", ['version' => 1, 'body' => 'A again'])->assertOk();
 
     // On the web the person edits their typed comment, not their agent's.
     $this->flushHeaders();
@@ -309,8 +309,8 @@ test('final review: an agent edits only its own comments; a person only their ow
     $this->actingAs($this->owner)->get(w('/issues/WEB-1'))->assertOk()->assertInertia(fn ($page) => $page
         ->where('issue.comments.0.body', 'Typed by Talha')->where('issue.comments.0.can_edit', true)
         ->where('issue.comments.1.body', 'A again')->where('issue.comments.1.can_edit', false));
-    $this->patchJson(w("/comments/{$byA}"), ['body' => 'person on agent'])->assertForbidden();
-    $this->patchJson(w("/comments/{$typed->id}"), ['body' => 'Typed again'])->assertRedirect();
+    $this->patchJson(w("/comments/{$byA}"), ['body' => 'person on agent', 'version' => 2])->assertForbidden();
+    $this->patchJson(w("/comments/{$typed->id}"), ['body' => 'Typed again', 'version' => 1])->assertRedirect();
     expect($typed->fresh()->body)->toBe('Typed again');
 });
 

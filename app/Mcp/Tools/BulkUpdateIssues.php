@@ -43,12 +43,13 @@ class BulkUpdateIssues extends Tool
             'updates' => $schema->array()
                 ->items($schema->object([
                     'key' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
+                    'version' => $schema->integer()->min(1)->description('The version you read (get_issue). If the issue changed since, nothing in the call is saved and the error names it; read it again and resend.')->required(),
                     'title' => $schema->string()->max(255),
                     ...$this->issueFields($schema),
                     'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),
                 ]))
                 ->min(1)->max(BulkStoreIssueRequest::MAX)
-                ->description('Each item names an issue key plus only the fields to change.')
+                ->description('Each item names an issue key and the version you read, plus only the fields to change.')
                 ->required(),
         ];
     }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\EditConflict;
 use App\Models\Comment;
 use App\Models\Issue;
 use App\Models\User;
@@ -22,11 +23,27 @@ class CommentService
         });
     }
 
-    public function update(Comment $comment, string $body): Comment
+    /** Spec 7.11: $version must be the comment's current version, or nothing is saved (EditConflict). A change bumps it. */
+    public function update(Comment $comment, string $body, int $version): Comment
     {
-        $comment->update(['body' => $body]);
+        return DB::transaction(function () use ($comment, $body, $version) {
+            // The issue row, then the comment row, held: the check and the write can't interleave with another save or a delete.
+            $issueGone = Issue::withTrashed()->whereKey($comment->issue_id)->lockForUpdate()->first()?->trashed() ?? true;
+            Comment::withTrashed()->whereKey($comment->id)->lockForUpdate()->first();
+            $comment->refresh();
+            if ($issueGone || $comment->trashed()) {
+                // It or its issue was deleted after the caller loaded it: the same 404 as asking for a deleted comment.
+                throw ValidationException::withMessages(['comment' => "Comment {$comment->id} was not found. Get the issue to see its comment ids."])->status(404);
+            }
+            if ($comment->version !== $version) {
+                throw EditConflict::comment($comment, $version);
+            }
+            if ($comment->body !== $body) {
+                $comment->increment('version', 1, ['body' => $body]);
+            }
 
-        return $comment->loadMissing('author');
+            return $comment->loadMissing('author');
+        });
     }
 
     /** Soft delete: hidden everywhere, restorable until issues:purge removes it. */

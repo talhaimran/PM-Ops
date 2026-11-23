@@ -12,11 +12,12 @@ import ResolutionChip, { DuplicateOfModal, resolutionLabels, resolutions } from 
 import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge, { lozengeClass } from '@/Components/StatusLozenge';
 import TextInput from '@/Components/TextInput';
+import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
 import { ActivityEntry, Comment, Issue, IssueLink, IssueOptions } from '@/types';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
 import { Ellipsis } from 'lucide-react';
-import { ElementType, ReactNode, useState } from 'react';
+import { ElementType, ReactNode, useEffect, useState } from 'react';
 
 // Minimal Markdown styling without @tailwindcss/typography.
 const proseClass =
@@ -57,8 +58,44 @@ export default function IssueView({
     const [tab, setTab] = useState<'comments' | 'history'>('comments');
     const comment = useForm({ body: '' });
 
-    const save = (data: Record<string, unknown>, onSuccess?: () => void) =>
-        router.patch(route('issues.update', issue.key), data as never, { preserveScroll: true, onSuccess });
+    // Every edit sends the version it read (spec 7.11); a stale one opens the conflict dialog (ConflictDialog). The text
+    // editors read it when they open, so a change that arrives while someone types is caught, not overwritten.
+    // One per editor; the page's own saves move them on (advanceBase).
+    const [bases, setBases] = useState({ title: issue.version, description: issue.version });
+    const save = (data: Record<string, unknown>, onSuccess?: () => void, version = issue.version) =>
+        router.patch(route('issues.update', issue.key), { ...data, version } as never, {
+            preserveScroll: true,
+            onSuccess: (next) => {
+                const props = next.props as { issue?: Issue; peek?: IssueViewData | null };
+                const saved = (props.issue?.key === issue.key ? props.issue : props.peek?.issue)?.version;
+                setBases((b) => ({ title: advanceBase(b.title, version, saved), description: advanceBase(b.description, version, saved) }));
+                onSuccess?.();
+            },
+        });
+    const editTitle = () => {
+        setTitle(issue.title);
+        setBases((b) => ({ ...b, title: issue.version }));
+        setEditingTitle(true);
+    };
+    const editDescription = () => {
+        setDescription(issue.description ?? '');
+        setBases((b) => ({ ...b, description: issue.version }));
+        setEditingDescription(true);
+    };
+    // The conflict dialog settled this issue (kept theirs, or saved mine): close the editors it was about, and remount the
+    // blur-saved inputs, which keep the typed value otherwise when theirs equals what the page already had.
+    const [settled, setSettled] = useState(0);
+    useEffect(() => {
+        const settle = (e: Event) => {
+            const conflict = (e as CustomEvent<ConflictFlash>).detail;
+            if (conflict.key !== issue.key) return;
+            if ('title' in conflict.yours) setEditingTitle(false);
+            if ('description' in conflict.yours) setEditingDescription(false);
+            setSettled((n) => n + 1);
+        };
+        window.addEventListener(CONFLICT_SETTLED, settle);
+        return () => window.removeEventListener(CONFLICT_SETTLED, settle);
+    }, [issue.key]);
 
     // "Close as…" (1-R8): the project's first Done status in board order, unless the issue is already Done. With none, the server explains.
     const closeAs = (data: Record<string, unknown>, onSuccess?: () => void) => {
@@ -120,7 +157,7 @@ export default function IssueView({
                             <form
                                 onSubmit={(e) => {
                                     e.preventDefault();
-                                    save({ title }, () => setEditingTitle(false));
+                                    save({ title }, () => setEditingTitle(false), bases.title);
                                 }}
                                 className="flex gap-2"
                             >
@@ -139,7 +176,7 @@ export default function IssueView({
                         ) : (
                             <Heading className="break-words text-heading-3xl text-text">
                                 {can.contribute ? (
-                                    <button type="button" className="-mx-1 min-h-control-h-sm w-full rounded-sm px-1 py-0.5 text-start hover:bg-card-2" onClick={() => setEditingTitle(true)} title="Edit summary">
+                                    <button type="button" className="-mx-1 min-h-control-h-sm w-full rounded-sm px-1 py-0.5 text-start hover:bg-card-2" onClick={editTitle} title="Edit summary">
                                         {issue.title}
                                     </button>
                                 ) : (
@@ -163,7 +200,7 @@ export default function IssueView({
                             plain(options.statuses.map((s) => s.name)),
                             `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.category)}`,
                         )}
-                        {issue.resolution && <ResolutionChip issueKey={issue.key} resolution={issue.resolution} editable={can.contribute} />}
+                        {issue.resolution && <ResolutionChip issueKey={issue.key} version={issue.version} resolution={issue.resolution} editable={can.contribute} />}
                         {can.contribute && (
                             <div className="ms-auto">
                                 <Dropdown>
@@ -269,6 +306,7 @@ export default function IssueView({
                                     aria-label="Story points"
                                     className={`${inlineField} py-1.5`}
                                     placeholder="None"
+                                    key={`${settled}-${issue.story_points ?? ''}`}
                                     defaultValue={issue.story_points ?? ''}
                                     disabled={!can.contribute}
                                     onBlur={(e) => {
@@ -292,9 +330,13 @@ export default function IssueView({
                                     type="date"
                                     aria-label="Due date"
                                     className={`${inlineField} py-1.5`}
+                                    key={`${settled}-${issue.due_date ?? ''}`}
                                     defaultValue={issue.due_date ?? ''}
                                     disabled={!can.contribute}
-                                    onChange={(e) => save({ due_date: e.target.value || null })}
+                                    onBlur={(e) => {
+                                        const v = e.target.value || null;
+                                        if (v !== (issue.due_date ?? null)) save({ due_date: v });
+                                    }}
                                 />,
                                 errors.due_date,
                             )}
@@ -310,6 +352,7 @@ export default function IssueView({
                                             aria-label="Epic key"
                                             className={`${inlineField} py-1.5`}
                                             placeholder={`None (e.g. ${issue.project}-1)`}
+                                            key={`${settled}-${issue.epic?.key ?? ''}`}
                                             defaultValue={issue.epic?.key ?? ''}
                                             disabled={!can.contribute}
                                             onBlur={(e) => {
@@ -351,14 +394,14 @@ export default function IssueView({
                                     onChange={(e) => setDescription(e.target.value)}
                                 />
                                 <div className="flex gap-2">
-                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false))}>Save</PrimaryButton>
+                                    <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false), bases.description)}>Save</PrimaryButton>
                                     <SecondaryButton onClick={() => setEditingDescription(false)}>Cancel</SecondaryButton>
                                 </div>
                             </div>
                         ) : (
                             <div
                                 className={`-mx-2 rounded-ctl px-2 py-1 ${can.contribute ? 'cursor-text hover:bg-card-2' : ''}`}
-                                onClick={() => can.contribute && setEditingDescription(true)}
+                                onClick={() => can.contribute && editDescription()}
                             >
                                 {/* description_html is rendered server-side with html_input=strip and no unsafe links. */}
                                 {issue.description_html ? (
@@ -444,7 +487,14 @@ export default function IssueView({
 
 function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: boolean }) {
     const [editing, setEditing] = useState(false);
-    const form = useForm({ body: comment.body });
+    // The version it read (spec 7.11), taken when editing starts.
+    const form = useForm({ body: comment.body, version: comment.version });
+    // The conflict dialog settled this comment: close the editor, which then shows the comment as it is now.
+    useEffect(() => {
+        const settle = (e: Event) => (e as CustomEvent<ConflictFlash>).detail.url.endsWith(`/comments/${comment.id}`) && setEditing(false);
+        window.addEventListener(CONFLICT_SETTLED, settle);
+        return () => window.removeEventListener(CONFLICT_SETTLED, settle);
+    }, [comment.id]);
 
     return (
         <div className="flex gap-3">
@@ -475,7 +525,11 @@ function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: bool
                 {!editing && (comment.can_edit || canDelete) && (
                     <div className="-ms-2 flex gap-1 text-sm text-muted">
                         {comment.can_edit && (
-                            <button type="button" className="inline-flex h-control-h-sm items-center rounded-sm px-2 hover:bg-card-2 hover:text-text" onClick={() => setEditing(true)}>
+                            <button type="button" className="inline-flex h-control-h-sm items-center rounded-sm px-2 hover:bg-card-2 hover:text-text" onClick={() => {
+                                    form.setData({ body: comment.body, version: comment.version });
+                                    setEditing(true);
+                                }}
+                            >
                                 Edit
                             </button>
                         )}
