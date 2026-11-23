@@ -190,10 +190,25 @@ test('removing the provider deletes the key and logs ai_provider.removed; removi
 
     $this->delete(w('/settings/ai'))->assertRedirect();
 
-    expect(AiProvider::count())->toBe(0)->and($this->ai->for($this->ws))->toBeNull()->and($this->ai->key($this->ws))->toBeNull()
+    expect(AiProvider::sole()->only(['provider', 'model', 'endpoint']))->toBe(['provider' => null, 'model' => null, 'endpoint' => null])
+        ->and($this->ai->for($this->ws))->toBeNull()->and($this->ai->key($this->ws))->toBeNull()->and($this->ai->hasKey($this->ws))->toBeFalse()
         ->and(AuditLog::where('action', 'ai_provider.removed')->sole()->metadata)->toEqual(['provider' => 'anthropic', 'model' => 'claude-sonnet-4-5']);
     $this->delete(w('/settings/ai'))->assertRedirect();
     expect(AuditLog::where('action', 'ai_provider.removed')->count())->toBe(1);
+});
+
+test('removing the provider keeps the monthly cap and this month\'s usage, which are still there after setting a provider again', function () {
+    $this->actingAs($this->owner)->patch(w('/settings/ai'), $this->payload);
+    $this->patch(w('/settings/ai/cap'), ['monthly_token_cap' => 5000]);
+    AiProvider::sole()->update(['tokens_used_month' => 1234]);
+
+    $this->delete(w('/settings/ai'))->assertRedirect();
+    expect($this->ai->usage($this->ws))->toBe(['cap' => 5000, 'used' => 1234])
+        ->and(AuditLog::where('action', 'ai_provider.removed')->count())->toBe(1);
+    $this->get(w('/settings/ai'))->assertInertia(fn (Assert $page) => $page->where('connection', null));
+
+    $this->patch(w('/settings/ai'), $this->payload)->assertSessionHasNoErrors();
+    expect($this->ai->usage($this->ws))->toBe(['cap' => 5000, 'used' => 1234])->and($this->ai->for($this->ws))->not->toBeNull();
 });
 
 test('the monthly token cap is optional, needs a provider, and logs before and after', function () {

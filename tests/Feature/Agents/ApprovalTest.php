@@ -135,6 +135,21 @@ test('A-L6: an agent cannot create an issue in the last column', function () {
     asToken($this->plain)->postJson('/api/v1/projects/WEB/issues', ['title' => 'x', 'status' => 'In Review'])->assertCreated();
 });
 
+test('A-L6: in a one-column project the default column is Done, so an agent cannot create an issue there either', function () {
+    $solo = makeProject($this->owner, 'SOLO');
+    $solo->columns()->where('name', '!=', 'Done')->delete();
+    $message = "Agents can't create issues in Done. Create it in another column, then move it; a person approves the move.";
+
+    asToken($this->plain)->postJson('/api/v1/projects/SOLO/issues', ['title' => 'x'])->assertUnprocessable()->assertJsonPath('errors.status.0', $message);
+    agentTool($this, CreateIssue::class, ['project' => 'SOLO', 'title' => 'x'])->assertHasErrors([$message]);
+    expect($solo->issues()->count())->toBe(0);
+
+    $this->flushHeaders();
+    app('auth')->forgetGuards();
+    $this->actingAs($this->owner)->post(w('/projects/SOLO/issues'), ['title' => 'by a person'])->assertSessionHasNoErrors();
+    expect($solo->issues()->count())->toBe(1);
+});
+
 test('A-L7: a mixed update applies the other fields and holds the status', function () {
     asToken($this->plain)->patchJson('/api/v1/issues/WEB-1', ['title' => 'Renamed', 'priority' => 'high', 'status' => 'Done'])
         ->assertStatus(202)
@@ -185,6 +200,16 @@ test("the agent's owner approves: the issue moves as the owner, with the agent a
         ->where('activity.0.agent', ['name' => "Talha's agent", 'owner' => 'Talha Imran'])
         ->where('activity.0.approval_request', ['id' => $id, 'to' => 'Done'])
         ->where('activity.0.changes', ['status' => ['from' => 'In Review', 'to' => 'Done']]));
+});
+
+test('REST and MCP activity lists show the agent behind an approved move', function () {
+    $id = askForDone($this, 'move_issue');
+    $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
+    $agent = ['name' => "Talha's agent", 'owner' => 'Talha Imran'];
+
+    asToken($this->plain)->getJson('/api/v1/issues/WEB-1/activity')->assertOk()
+        ->assertJsonPath('data.0.action', 'approved')->assertJsonPath('data.0.agent', $agent);
+    expect(mcpJson($this->plain, 'get_issue_activity', ['issue' => 'WEB-1'])['data'][0])->toMatchArray(['action' => 'approved', 'agent' => $agent]);
 });
 
 test('undo after approving puts the issue back', function () {

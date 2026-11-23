@@ -109,6 +109,6 @@ class IssueController extends Controller
 
         [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'), 50);
 
-        return Pagination::collection(ActivityResource::class, $issue->activities()->with('user')->latest('id')->paginate($perPage, page: $page));
+        return Pagination::collection(ActivityResource::class, $issue->activities()->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $page));
     }
 }

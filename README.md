@@ -7,7 +7,7 @@ A lightweight, self-hosted, Jira-like project tracker that people use through a 
 - **Issues:** Task, Bug, Story and Epic types, priorities, assignee, labels, story points, due dates, epics and one level of sub-tasks. Descriptions and comments are Markdown, and an activity log records who changed what and whether it came via web, API or MCP (with the token name).
 - **Kanban board** with drag and drop and per-project columns. **Backlog** with drag-to-rank. **Sprints:** create, start and complete, with unfinished issues moved to the backlog or the next sprint.
 - **List view**, cross-project **search**, and a **dashboard** with my issues, status counts and sprint progress.
-- **For agents:** 36 MCP tools over HTTP or stdio, a REST API with OpenAPI docs, agents with read, write or delete levels and project-scoped tokens, Idempotency-Key, per-token rate limits, bulk create/update, and errors that list the valid options.
+- **For agents:** 38 MCP tools over HTTP or stdio, a REST API with OpenAPI docs, agents with read, write or delete levels and project-scoped tokens, Idempotency-Key, per-agent rate limits, bulk create/update, and errors that list the valid options.
 
 See [AGENTS.md](AGENTS.md) for how agents should use it. [SPEC.md](SPEC.md) is the product spec, and [PROGRESS.md](PROGRESS.md) logs the decisions made while building it.
 
@@ -46,7 +46,7 @@ Migrate and load the demo workspace:
 php artisan migrate:fresh --seed
 ```
 
-The seed prints a **demo API token** and creates workspace **Demo** at `/demo`:
+The seed prints a **demo API token** (for the "Demo token" agent) and creates workspace **Demo** at `/demo`:
 
 | Login | Password | Workspace role | Role in WEB |
 |---|---|---|---|
@@ -54,7 +54,7 @@ The seed prints a **demo API token** and creates workspace **Demo** at `/demo`:
 | alex@example.com | password | Admin | Member |
 | sam@example.com | password | Member | Viewer |
 
-It also creates project **WEB** (about 30 issues, labels, epics, sub-tasks, an active sprint and a planned one). Use `php artisan migrate` without `--seed` for an empty install, then register at `/register`: the first person creates the workspace and becomes its Owner.
+It also creates project **WEB** (about 30 issues, labels, epics, sub-tasks, an active sprint and a planned one), a "Demo token" agent at Read and write, and one pending approval (the agent asks to move WEB-5 to Done) that demo@example.com can decide on the dashboard. Use `php artisan migrate` without `--seed` for an empty install, then register at `/register`: the first person creates the workspace and becomes its Owner.
 
 ### Editions
 
@@ -81,7 +81,7 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `APP_URL` | `http://localhost` | Base URL used in links and printed endpoints. Set it to where you serve the app. |
 | `MAIL_MAILER` | `log` | Invitations are written to `storage/logs/laravel.log`. Set SMTP to really send them. |
 | `PM_EDITION` | `self_hosted` | `self_hosted` (one workspace, sign-up by invitation after the first person) or `cloud` (anyone signs up, many workspaces, free plan limits). See [Editions](#editions). |
-| `PM_API_RATE_LIMIT` | `120` | Requests per minute per API token (REST and MCP over HTTP), when the workspace has no `api_per_minute` limit. |
+| `PM_API_RATE_LIMIT` | `120` | Requests per minute per agent (REST and MCP over HTTP), when the workspace has no `api_per_minute` limit. |
 | `PM_IDEMPOTENCY_TTL_HOURS` | `24` | How long a response is kept for `Idempotency-Key` replay. |
 | `PM_INVITE_RATE_LIMIT` | `30` | Invitation emails per hour per user (web and API). |
 | `PM_MCP_TOKEN` | — | Token the stdio MCP server acts as. Usually set in the MCP client's config, not `.env`. |
@@ -159,11 +159,22 @@ npm run build             # TypeScript check + production build
 Create an agent at **sidebar → Agents** (`/demo/settings/agents`, under your workspace's address). Each agent has one token:
 
 - **One workspace:** an agent belongs to the workspace it was made in and only sees that workspace. Make one per workspace if you need several.
-- **Level:** read only, read and write, or read, write and delete. An agent never does more than you can (a Viewer's agent is read only).
+- **Level:** Read, Read and write, or Read, write and delete. An agent never does more than you can (a Viewer's agent is read only). Only the Delete level can delete anything, including comments, labels, sprints and projects, and project settings, members and columns are people-only.
+- **Existing tokens:** tokens made before agents existed became agents at their old level. A migrated write token lost delete until its owner picks "Read, write and delete" on the agent's edit page.
 - **All my projects** or a chosen subset. A scoped agent can't see or create anything outside its projects.
 - **Expiry:** 30 days, 90 days (the default), 1 year or never. Expired tokens stop working on REST and both MCP transports.
 - The token is shown once. The page lists each agent's level, projects, status, **last used** time and expiry, and lets you **edit**, **pause**, **resume**, make a **new token** or **revoke** it. Workspace Owners and Admins also see everyone's agents and can pause, resume or revoke them.
 - Owners and Admins can turn agents off for the whole workspace in Settings → Security; every agent call then gets `403 agents_disabled`.
+
+### Approvals
+
+An agent's move into a project's last column (Done) doesn't happen at once. It opens an approval request and the agent is told `pending_approval` (REST 202). The agent's owner, or an Admin of the project who could make the move, decides on the dashboard under **Pending approvals** or in the **AI box** on the issue. If the issue changed since the request, approving needs a second confirm. A request goes stale if the issue or column is deleted or the agent is revoked, and expires after 7 days. Agents learn the outcome with `get_updates`.
+
+### Settings → AI
+
+Workspace Owners and Admins set the AI provider (Anthropic, OpenAI, Google, or an OpenAI-compatible endpoint such as Ollama or a company gateway), model, key and a monthly token cap at **Settings → AI**. The key is stored encrypted and is never shown or returned. Changing the provider or endpoint needs a new key. Mode C sends issue content to the chosen provider; there is a workspace switch here and one per project.
+
+To configure it on the server instead, set `PM_AI_PROVIDER`, `PM_AI_MODEL`, `PM_AI_KEY` and, for `openai_compatible`, `PM_AI_ENDPOINT`. The page is then read-only ("Configured by your server"); only the token cap stays editable. If the variables are incomplete or unusable (no key, no endpoint, a refused endpoint), they are ignored and the page says so, naming the variables and never their values. Endpoints must be `https://` (or `http://localhost`) and may not point at private or reserved addresses.
 
 Every REST and MCP call uses the token as `Authorization: Bearer <token>`.
 
@@ -194,14 +205,14 @@ curl -s -X POST http://localhost:8000/api/v1/projects/WEB/issues \
 
 ## MCP server
 
-The same server (`App\Mcp\Servers\PmServer`, 36 tools plus `issue://{key}` and `project://{key}` resources) is available over two transports. Both act as the owner of an API token, so that token's read-only and project scope apply.
+The same server (`App\Mcp\Servers\PmServer`, 38 tools plus `issue://{key}` and `project://{key}` resources) is available over two transports. Both act as one of your agents, so that agent's level and project scope apply.
 
 | Transport | How it runs | Auth |
 |---|---|---|
 | HTTP | `POST http://localhost:8000/mcp` (the app must be running) | `Authorization: Bearer <token>` header |
 | stdio | `php artisan mcp:start pm` (the client starts it) | `PM_MCP_TOKEN=<token>` environment variable |
 
-**OAuth (HTTP only).** A client that speaks MCP OAuth (Claude Desktop's and claude.ai's custom connectors, the MCP Inspector) needs no token: add `http://localhost:8000/mcp` as the server URL. It registers itself, opens a consent screen in the browser, and you pick which of your agents (in your current workspace) it acts as, or create "{First name}'s {client} agent" at Read and write. The consent screen says where the client will send you back and that it registered itself (PmOps doesn't verify apps), and applies the workspace's rules (sign-in methods, required two-factor, agents turned on). Each connection shows under that agent in Settings → Agents; pausing or revoking the agent stops it. A **new token** for the agent does not disconnect its OAuth clients: revoke the agent to cut them off (disconnecting one client is planned).
+**OAuth (HTTP only).** Run `php artisan passport:keys` once per install (see Setup) before the first client connects; without keys OAuth refuses to start. A client that speaks MCP OAuth (Claude Desktop's and claude.ai's custom connectors, Cursor, VS Code, the MCP Inspector) needs no token: add `http://localhost:8000/mcp` as the server URL (in Cursor or VS Code, as a remote HTTP server with no headers). It registers itself, opens a consent screen in the browser, and you pick which of your agents (in your current workspace) it acts as, or create "{First name}'s {client} agent" at Read and write. The consent screen says where the client will send you back and that it registered itself (PmOps doesn't verify apps), and applies the workspace's rules (sign-in methods, required two-factor, agents turned on). When a workspace requires two-factor, creating an agent needs it on; agents that already exist keep working. Each connection shows under that agent in Settings → Agents; pausing or revoking the agent stops it. A **new token** for the agent does not disconnect its OAuth clients: revoke the agent to cut them off (disconnecting one client is planned).
 
 The redirect allowlist is a trust boundary: any app can register itself, and the allowlist decides where a consent code may be sent. The defaults (`claude.ai`, `claude.com`, `localhost`, and the `cursor`/`vscode` schemes) rely on those clients' own state checks to reject a code they didn't ask for. On a self-hosted install, set `PM_MCP_REDIRECT_DOMAINS` and `PM_MCP_REDIRECT_SCHEMES` to only the callbacks your people actually use, for example `PM_MCP_REDIRECT_DOMAINS=claude.ai` and `PM_MCP_REDIRECT_SCHEMES=` (empty) if everyone connects from claude.ai. OAuth tokens work on `/mcp` only, not the REST API. In production, set `PASSPORT_PRIVATE_KEY` and `PASSPORT_PUBLIC_KEY` instead of the key files if storage isn't persistent.
 

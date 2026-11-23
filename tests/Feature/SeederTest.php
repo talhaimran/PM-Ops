@@ -5,6 +5,7 @@ use App\Enums\IssueType;
 use App\Enums\SprintState;
 use App\Enums\WorkspaceRole;
 use App\Models\Agent;
+use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
@@ -43,6 +44,18 @@ test('demo seed builds a usable project and prints a working token', function ()
         ->and(Issue::where('assignee_id', $demo->id)->count())->toBeGreaterThan(0)
         ->and(Agent::where('name', 'Demo token')->sole()->permission_level)->toBe(AgentLevel::Write)
         ->and(PersonalAccessToken::where('name', 'Demo token')->sole()->agent_id)->not->toBeNull();
+});
+
+test('demo seed leaves one pending approval that demo can decide', function () {
+    $this->artisan('db:seed')->assertSuccessful();
+
+    $approval = ApprovalRequest::open()->sole();
+    $demo = User::where('email', 'demo@example.com')->sole();
+
+    expect($approval->agent->name)->toBe('Demo token')
+        ->and($approval->issue->key)->toBe('WEB-5')
+        ->and($approval->action['to_column'])->toBe('Done')
+        ->and($demo->can('decide', $approval))->toBeTrue();
 });
 
 test('the printed demo token works against the api', function () {

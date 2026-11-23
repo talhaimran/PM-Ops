@@ -19,10 +19,10 @@ trait PresentsIssue
         $issue = app(IssueService::class)->loadFull($issue);
         $data = (new IssueResource($issue))->resolve();
         $data['description_html'] = self::markdown($issue->description);
-        $data['comments'] = collect($data['comments'])->map(fn ($c) => [
-            ...$c,
-            'body_html' => self::markdown($c['body']),
-            'can_edit' => ($c['author']['id'] ?? null) === $user->id,
+        $data['comments'] = $issue->comments->values()->map(fn ($comment, $i) => [
+            ...$data['comments'][$i],
+            'body_html' => self::markdown($comment->body),
+            'can_edit' => $comment->isWrittenBy($user),
         ])->all();
         $data['pending_approvals'] = $issue->pendingApprovals->map(fn ($approval, $i) => [
             ...$data['pending_approvals'][$i],

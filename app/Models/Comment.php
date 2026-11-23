@@ -26,4 +26,10 @@ class Comment extends Model
     {
         return $this->belongsTo(Agent::class);
     }
+
+    /** Written by this user, and by the same hand: an agent's comment is its own, a person's typed one is theirs. */
+    public function isWrittenBy(User $user): bool
+    {
+        return $this->user_id === $user->id && $this->agent_id === $user->agent()?->id;
+    }
 }

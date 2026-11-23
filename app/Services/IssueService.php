@@ -39,7 +39,8 @@ class IssueService
         return DB::transaction(function () use ($project, $actor, $data) {
             [$attributes, $labelIds, $column] = $this->resolveInput($project, $data, null);
 
-            // A-L6: an agent can't skip the approval by creating the issue in Done.
+            // A-L6: an agent can't skip the approval by creating the issue in Done, even when Done is the only (default) column.
+            $column ??= $project->columns()->first();
             if ($column && $this->approvals->needsApproval((new Issue)->setRelation('project', $project), $column, $actor->agent())) {
                 throw ValidationException::withMessages([
                     'status' => "Agents can't create issues in {$column->name}. Create it in another column, then move it; a person approves the move.",
@@ -49,7 +50,7 @@ class IssueService
             $issue = Issue::create([
                 'type' => IssueType::Task,
                 'priority' => IssuePriority::Medium,
-                'column_id' => $project->columns()->value('id'),
+                'column_id' => $column?->id,
                 ...$attributes,
                 'project_id' => $project->id,
                 'number' => $this->nextNumber($project),

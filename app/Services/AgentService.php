@@ -97,7 +97,10 @@ class AgentService
             $this->ensureNotRevoked($agent);
             $before = ['name' => $agent->name, 'level' => $agent->permission_level->value, 'projects' => $this->projectKeys($agent)];
             if (isset($data['name'])) {
-                $this->ensureUniqueName($this->agentsOf($agent->workspace_id, $agent->owner_user_id)->whereKeyNot($agent->id), trim($data['name']));
+                // Skipped when unchanged, so an agent that migrated with a duplicate name can still be edited.
+                if (trim($data['name']) !== $agent->name) {
+                    $this->ensureUniqueName($this->agentsOf($agent->workspace_id, $agent->owner_user_id)->whereKeyNot($agent->id), trim($data['name']));
+                }
                 $agent->name = trim($data['name']);
             }
             if (array_key_exists('description', $data)) {
@@ -194,20 +197,22 @@ class AgentService
             [$agent] = $this->create($user, ['name' => self::oauthAgentName($user, $clientName), 'level' => AgentLevel::Write->value]);
             // Its only credential is the client's OAuth token; "New token" on the Agents page can add one later.
             $agent->token()->delete();
-
-            return $agent;
+        } else {
+            $agent = $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
+                ?? throw ValidationException::withMessages([
+                    'agent' => 'Choose one of your active agents in this workspace ('.(collect($this->oauthChoices($user))->pluck('name')->implode(', ') ?: 'none yet').') or create a new one.',
+                ]);
         }
+        // The client name is untrusted text from dynamic registration; no code or token goes in the row.
+        $this->log('agent.oauth_connected', $agent, $user, ['client' => Str::limit(trim($clientName), 60, '')]);
 
-        return $this->agentsOf($this->current->id() ?? 0, $user->id)->where('status', AgentStatus::Active)->find((int) $choice)
-            ?? throw ValidationException::withMessages([
-                'agent' => 'Choose one of your active agents in this workspace ('.(collect($this->oauthChoices($user))->pluck('name')->implode(', ') ?: 'none yet').') or create a new one.',
-            ]);
+        return $agent;
     }
 
-    /** Spec 8: an owner leaving the workspace takes their agents with them (history kept). */
-    public function revokeAllOf(User $owner, Workspace $workspace): void
+    /** Spec 8: an owner leaving the workspace (or deleting their account) takes their agents with them (history kept). */
+    public function revokeAllOf(User $owner, Workspace $workspace, string $reason = 'owner_left'): void
     {
-        $this->agentsOf($workspace->id, $owner->id)->get()->each(fn (Agent $agent) => $this->revoke($agent, null, 'owner_left'));
+        $this->agentsOf($workspace->id, $owner->id)->get()->each(fn (Agent $agent) => $this->revoke($agent, null, $reason));
     }
 
     /** Revoked agents are left out. Owners and Admins see every agent in the workspace, `mine` flags their own. */
@@ -279,7 +284,8 @@ class AgentService
     }
 
     /**
-     * Refuses a paused or revoked agent (REST, MCP over HTTP, and every stdio tool call). Re-reads the agent, so a
+     * Refuses a paused or revoked agent, or one in a workspace scheduled for deletion or with agents turned off (REST,
+     * MCP over HTTP, OAuth and every stdio tool call). Re-reads the agent, so a
      * long-lived process sees a pause, revoke or level change at its next call. Bumps last_used_at at most once a minute.
      */
     public function ensureUsable(?Agent $agent): void
@@ -295,6 +301,10 @@ class AgentService
 
         $deny = fn (int $status, string $error, string $message) => throw new HttpResponseException(response()->json(['error' => $error, 'message' => $message], $status));
         $workspace = $agent->workspace()->first();
+        // The same answer ResolveTokenWorkspace gives; this is what stops a long-lived stdio server.
+        if ($workspace?->deletion_scheduled_at) {
+            throw new HttpResponseException(response()->json(['message' => app(WorkspaceService::class)->lockedMessage($workspace, $agent->owner()->first())], 403));
+        }
         if ($workspace && ! $workspace->setting('agents_enabled')) {
             $deny(403, 'agents_disabled', self::disabledMessage($workspace));
         }
@@ -303,6 +313,7 @@ class AgentService
             AgentStatus::Revoked => $deny(401, 'agent_revoked', "{$agent->label()} was revoked. Its owner can create a new agent in Settings → Agents."),
             AgentStatus::Active => null,
         };
+        // Spec 7.0e: require_2fa doesn't stop existing agents; only creating one needs two-factor (AgentService::create).
 
         if (! $agent->last_used_at?->gt(now()->subMinute())) {
             // A query, not save(): last use is not an edit, so updated_at stays.

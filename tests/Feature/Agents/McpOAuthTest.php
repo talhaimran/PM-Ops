@@ -202,3 +202,15 @@ test('someone in no workspace gets a clear refusal, not an empty consent screen'
         ->assertInertia(fn (Assert $page) => $page->component('Workspaces/NoAccess')
             ->where('message', 'You are not a member of any workspace yet. Ask an admin to invite you.'));
 });
+
+test('connecting an MCP client to an agent is audited with the client name only, for an existing and a new agent', function () {
+    $tokens = oauthConnect($this->owner, $this->agent->id);
+    oauthConnect($this->owner, 'new', 'Cursor');
+
+    $rows = AuditLog::where('action', 'agent.oauth_connected')->orderBy('id')->get();
+    expect($rows)->toHaveCount(2)
+        ->and($rows[0]->only(['target_id', 'actor_user_id', 'metadata']))->toEqual(['target_id' => $this->agent->id, 'actor_user_id' => $this->owner->id, 'metadata' => ['client' => 'Claude Desktop']])
+        ->and($rows[1]->metadata)->toEqual(['client' => 'Cursor'])
+        ->and($rows[1]->target_id)->toBe(Agent::where('name', "Talha's Cursor agent")->sole()->id)
+        ->and(json_encode($rows))->not->toContain($tokens['access_token'])->not->toContain($tokens['refresh_token']);
+});

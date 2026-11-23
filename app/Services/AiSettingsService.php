@@ -106,8 +106,10 @@ class AiSettingsService
         DB::transaction(function () use ($workspace, $actor) {
             $row = AiProvider::where('workspace_id', $workspace->id)->lockForUpdate()->first();
             if ($row?->provider) {
-                $row->delete();
-                $this->audit->log('ai_provider.removed', $workspace, ['provider' => $row->provider->value, 'model' => $row->model], $workspace, $actor);
+                $removed = ['provider' => $row->provider->value, 'model' => $row->model];
+                // The row stays: the cap and this month's usage belong to the workspace, not to the connection.
+                $row->forceFill(['provider' => null, 'model' => null, 'endpoint' => null, 'key' => null])->save();
+                $this->audit->log('ai_provider.removed', $workspace, $removed, $workspace, $actor);
             }
         });
     }

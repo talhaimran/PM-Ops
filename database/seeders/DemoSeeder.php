@@ -6,6 +6,7 @@ use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
 use App\Models\User;
 use App\Services\AgentService;
+use App\Services\ApprovalService;
 use App\Services\CommentService;
 use App\Services\CurrentWorkspace;
 use App\Services\IssueService;
@@ -29,6 +30,7 @@ class DemoSeeder extends Seeder
         SprintService $sprints,
         CommentService $comments,
         AgentService $agents,
+        ApprovalService $approvals,
         WorkspaceService $workspaces,
         CurrentWorkspace $current,
     ): void {
@@ -125,7 +127,13 @@ class DemoSeeder extends Seeder
         $comment('WEB-7', $demo, "Design review notes:\n\n1. Keep the summary sticky on desktop\n2. Show delivery estimate before payment");
         $comment('WEB-5', $alex, 'Looks great. One nit: the loading spinner shifts the label by 2px.');
 
-        [, $token] = $agents->create($demo, ['name' => 'Demo token', 'level' => 'write']);
+        [$agent, $token] = $agents->create($demo, ['name' => 'Demo token', 'level' => 'write']);
+
+        // One pending approval so the dashboard's "Pending approvals" and the issue's AI box have something to show.
+        $approvals->requestDone(
+            $issues->resolve($demo, 'WEB-5'), $demo, $agent,
+            $project->columns()->where('name', 'Done')->sole(), 'Review notes are addressed and checks are green.',
+        );
 
         $this->command?->newLine();
         $this->command?->info('Demo workspace ready: project WEB with '.$project->issues()->count().' issues, active sprint "'.$sprint1->name.'".');

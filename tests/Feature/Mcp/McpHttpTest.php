@@ -88,3 +88,14 @@ test('the mcp endpoint shares the per-token rate limit', function () {
     rpc($token, 'tools/list')->assertOk();
     rpc($token, 'tools/list')->assertStatus(429);
 });
+
+test('every paged tool declares page, per_page and cursor, so clients can send what the tool accepts', function () {
+    $tools = rpc(makeAgent($this->me, AgentLevel::Read, name: 'agent')[1], 'tools/list')->assertOk()->json('result.tools');
+
+    $paged = collect($tools)->filter(fn ($t) => isset($t['inputSchema']['properties']['page']));
+    expect($paged->pluck('name'))->toContain('list_sprints', 'get_issue_activity');
+    foreach ($paged as $tool) {
+        expect(array_keys($tool['inputSchema']['properties']))->toContain('per_page', 'cursor');
+        expect($tool['inputSchema']['properties']['per_page']['maximum'])->toBe(50);
+    }
+});

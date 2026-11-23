@@ -26,7 +26,7 @@ class GetIssueActivity extends Tool
         $data = $request->validate(['issue' => 'required|string', 'page' => 'integer|min:1|max:10000', 'per_page' => 'integer|min:1|max:50', 'cursor' => 'nullable|string|max:100']);
         $issue = $issues->resolve($request->user(), $data['issue']);
         [$perPage, $pageNumber] = Pagination::resolve($data['cursor'] ?? null, $data['per_page'] ?? null, $data['page'] ?? null, max: 50);
-        $page = $issue->activities()->with('user')->latest('id')->paginate($perPage, page: $pageNumber);
+        $page = $issue->activities()->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $pageNumber);
 
         return $this->paginated("activity entries for {$issue->key}", $page, ActivityResource::class);
     }
@@ -36,7 +36,8 @@ class GetIssueActivity extends Tool
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
             'page' => $schema->integer()->min(1)->max(10000),
-            'per_page' => $schema->integer()->min(1)->max(50),
+            'cursor' => $schema->string()->description('next_cursor from the previous page; use instead of page.'),
+            'per_page' => $schema->integer()->min(1)->max(50)->description('Items per page, default 25, max 50.'),
         ];
     }
 }

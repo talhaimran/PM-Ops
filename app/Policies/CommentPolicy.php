@@ -17,7 +17,8 @@ class CommentPolicy
             return $allowed;
         }
 
-        return $comment->user_id === $user->id
+        // An agent's comment is its own to edit, and a person's hand-typed one is theirs: an agent of the same owner can't rewrite it.
+        return $comment->isWrittenBy($user)
             ? Response::allow()
             : Response::deny('Only the author can edit a comment.');
     }
