@@ -15,6 +15,7 @@ use App\Http\Controllers\Web\LabelController;
 use App\Http\Controllers\Web\ProjectController;
 use App\Http\Controllers\Web\ProjectMemberController;
 use App\Http\Controllers\Web\SprintController;
+use App\Http\Controllers\Web\StatusController;
 use App\Http\Controllers\Web\UsageController;
 use App\Http\Controllers\Web\WorkspaceController;
 use App\Http\Controllers\Web\WorkspaceInvitationController;
@@ -79,6 +80,10 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::patch('/settings/general', [WorkspaceSettingsController::class, 'update'])->name('settings.general.update');
     Route::delete('/settings/general', [WorkspaceSettingsController::class, 'destroy'])->name('settings.destroy');
     Route::get('/settings/members', [WorkspaceSettingsController::class, 'members'])->name('settings.members');
+    Route::get('/settings/statuses', [StatusController::class, 'index'])->name('statuses.index');
+    Route::patch('/settings/statuses/{status}', [StatusController::class, 'update'])->name('statuses.update')->whereNumber('status');
+    Route::post('/settings/statuses/{status}/merge', [StatusController::class, 'merge'])->name('statuses.merge')->whereNumber('status');
+    Route::delete('/settings/statuses/{status}', [StatusController::class, 'destroy'])->name('statuses.destroy')->whereNumber('status');
     Route::get('/settings/audit-log', [AuditLogController::class, 'index'])->name('settings.audit-log');
     Route::get('/settings/usage', UsageController::class)->name('settings.usage');
     Route::get('/settings/security', [WorkspaceSettingsController::class, 'security'])->name('settings.security');
@@ -116,6 +121,8 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
         Route::post('/columns', [BoardController::class, 'storeColumn'])->name('columns.store');
         Route::patch('/columns/{column}', [BoardController::class, 'updateColumn'])->name('columns.update')->scopeBindings();
         Route::delete('/columns/{column}', [BoardController::class, 'destroyColumn'])->name('columns.destroy')->scopeBindings();
+        Route::post('/columns/{column}/statuses', [StatusController::class, 'attach'])->name('columns.statuses.store')->scopeBindings();
+        Route::delete('/columns/{column}/statuses/{status}', [StatusController::class, 'detach'])->name('columns.statuses.destroy')->scopeBindings()->whereNumber('status');
         Route::get('/backlog', [SprintController::class, 'backlog'])->name('backlog');
         Route::get('/issues', [IssueListController::class, 'index'])->name('issues.index');
         Route::post('/sprints', [SprintController::class, 'store'])->name('sprints.store');
