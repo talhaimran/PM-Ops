@@ -176,3 +176,20 @@ test('a held agent move writes no row; the approved move has the decider as user
     $row = IssueStatusHistory::sole();
     expect($row->user_id)->toBe($decider->id)->and($decider->id)->not->toBe($this->owner->id)->and($row->agent_id)->toBe($agent->id)->and($row->to_category)->toBe('done')->and($row->via)->toBe('web');
 });
+
+test('deleting a column with several issues (one soft-deleted) writes one attributed row per issue; an issue already on the target none', function () {
+    $a = makeIssue($this->project, $this->owner, ['status' => 'In Review']);
+    $b = makeIssue($this->project, $this->owner, ['status' => 'In Review']);
+    $gone = makeIssue($this->project, $this->owner, ['status' => 'In Review']);
+    $this->issues->delete($gone, $this->owner);
+    $from = $a->status_id;
+    $column = $this->project->columns()->whereRelation('statuses', 'statuses.id', $from)->sole();
+    IssueStatusHistory::query()->delete();
+
+    app(ColumnService::class)->delete($column, 'Done', $this->owner);
+
+    $to = $a->refresh()->status_id;
+    $rows = IssueStatusHistory::orderBy('issue_id')->get();
+    expect($rows->pluck('issue_id')->all())->toBe(collect([$a, $b, $gone])->pluck('id')->sort()->values()->all())
+        ->and($rows->every(fn ($r) => $r->from_status_id === $from && $r->to_status_id === $to && $r->to_category === 'done' && $r->user_id === $this->owner->id && $r->via === 'web' && $r->agent_id === null && $r->created_at !== null))->toBeTrue();
+});

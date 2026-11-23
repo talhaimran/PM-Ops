@@ -92,16 +92,20 @@ class ColumnService
             $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
             // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
             $moving = Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'));
-            // Issues leaving Done are logged as reopened, like any other move out of it; every moved issue gets a history row.
-            // shortcut: one model and one activity or history row per moved issue inside the lock, chunk and bulk-insert when a column holds thousands.
-            $issues = (clone $moving)->with('status')->get();
-            $reopened = $to->isDone() ? collect() : $issues->filter(fn ($i) => $i->status->isDone());
+            // Every moved issue gets a history row (bulk-inserted per chunk); issues leaving Done are also logged as reopened, like any other move out of it.
+            // shortcut: one activity row (and model) per reopened issue inside the lock, chunk and bulk-insert when Done columns hold thousands.
+            $reopenedIds = [];
+            (clone $moving)->join('statuses', 'statuses.id', '=', 'issues.status_id')->select('issues.id', 'issues.status_id', 'statuses.category')
+                ->chunkById(500, function ($rows) use ($to, $actor, &$reopenedIds) {
+                    $this->history->statusesMoved($rows, $to, $actor);
+                    if (! $to->isDone()) {
+                        array_push($reopenedIds, ...$rows->where('category', StatusCategory::Done->value)->pluck('id')->all());
+                    }
+                }, 'issues.id', 'id');
+            $reopened = $reopenedIds ? Issue::withTrashed()->with('status')->whereIn('id', $reopenedIds)->get() : collect();
             $moving->update(['status_id' => $to->id] + ($to->isDone()
                 ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
                 : ['resolution' => null, 'resolved_at' => null]));
-            foreach ($issues as $issue) {
-                $this->history->statusChanged($issue, $issue->status, $to, $actor);
-            }
             foreach ($reopened as $issue) {
                 $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
             }

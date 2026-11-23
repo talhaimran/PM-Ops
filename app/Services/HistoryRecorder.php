@@ -9,6 +9,7 @@ use App\Models\Sprint;
 use App\Models\SprintScopeEvent;
 use App\Models\Status;
 use App\Models\User;
+use Illuminate\Support\Collection;
 
 /** Spec 7.13: one row per real change of status, sprint or estimate, attributed like the activity log. Call inside the change's transaction. */
 class HistoryRecorder
@@ -22,6 +23,14 @@ class HistoryRecorder
             'issue_id' => $issue->id, 'from_status_id' => $from?->id, 'to_status_id' => $to->id, 'to_category' => $to->category->value,
             ...ActivityLogger::attribution($actor),
         ]);
+    }
+
+    /** Bulk form of statusChanged() for a column delete: $rows have id and status_id (the status they leave). */
+    public function statusesMoved(Collection $rows, Status $to, ?User $actor): void
+    {
+        $who = [...ActivityLogger::attribution($actor), 'created_at' => now()];
+        IssueStatusHistory::insert($rows->reject(fn ($r) => $r->status_id === $to->id)
+            ->map(fn ($r) => ['issue_id' => $r->id, 'from_status_id' => $r->status_id, 'to_status_id' => $to->id, 'to_category' => $to->category->value, ...$who])->all());
     }
 
     /** Left $from (with the estimate it had then) and/or joined $to (with the issue's estimate now). */

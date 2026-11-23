@@ -89,3 +89,45 @@ test('the history migration rebuilds status, sprint and estimate history from th
 
     Artisan::call('migrate', ['--force' => true]);
 });
+
+test('backfill: left keeps the estimate from before the activity, joined takes the new one; activities follow created_at, not id', function () {
+    $paths = collect(File::files(database_path('migrations')))->map(fn ($f) => $f->getPathname())
+        ->filter(fn ($p) => basename($p) < '2026_11_26')->sort()->values()->all();
+    Artisan::call('migrate:fresh', ['--path' => $paths, '--realpath' => true, '--force' => true]);
+
+    $this->freezeTime();
+    $base = now()->startOfSecond();
+    $t = fn (int $day) => $base->copy()->subDays(30 - $day)->toDateTimeString();
+    $user = DB::table('users')->insertGetId(['name' => 'demo', 'email' => 'demo@example.com', 'password' => 'x', 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    $ws = DB::table('workspaces')->insertGetId(['name' => 'Acme', 'slug' => 'acme', 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    $project = DB::table('projects')->insertGetId(['workspace_id' => $ws, 'key' => 'WEB', 'name' => 'Web', 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    $todo = DB::table('statuses')->insertGetId(['workspace_id' => $ws, 'name' => 'To Do', 'category' => 'to_do', 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    $done = DB::table('statuses')->insertGetId(['workspace_id' => $ws, 'name' => 'Done', 'category' => 'done', 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    foreach ([['To Do', $todo], ['Done', $done]] as $i => [$name, $id]) {
+        $column = DB::table('columns')->insertGetId(['project_id' => $project, 'name' => $name, 'position' => $i, 'created_at' => $t(0), 'updated_at' => $t(0)]);
+        DB::table('column_statuses')->insert(['column_id' => $column, 'status_id' => $id, 'position' => 0]);
+    }
+    $sprint = fn (string $name) => DB::table('sprints')->insertGetId(['project_id' => $project, 'name' => $name, 'created_at' => $t(0), 'updated_at' => $t(0)]);
+    [$a, $b] = [$sprint('A'), $sprint('B')];
+    $issue = DB::table('issues')->insertGetId([
+        'project_id' => $project, 'number' => 1, 'title' => 'i', 'type' => 'task', 'priority' => 'medium', 'status_id' => $done, 'sprint_id' => $b, 'story_points' => 8,
+        'rank' => 1024, 'reporter_id' => $user, 'created_at' => $t(1), 'updated_at' => $t(9),
+    ]);
+    $activity = fn (int $day, array $changes) => DB::table('activities')->insert(['issue_id' => $issue, 'user_id' => $user, 'action' => 'updated', 'changes' => json_encode($changes), 'via' => 'web', 'created_at' => $t($day)]);
+    // Inserted out of time order: the later move (day 6) has the lower id.
+    $activity(6, ['status' => ['from' => 'To Do', 'to' => 'Done']]);
+    $activity(5, ['sprint' => ['from' => 'A', 'to' => 'B'], 'story_points' => ['from' => 5, 'to' => 8]]);
+    $activity(2, ['sprint' => ['from' => null, 'to' => 'A']]);
+
+    ob_start();
+    Artisan::call('migrate', ['--force' => true]);
+    ob_end_clean();
+
+    expect(DB::table('sprint_scope_events')->where('issue_id', $issue)->orderBy('id')->get(['sprint_id', 'event', 'estimate', 'created_at'])->map(fn ($r) => (array) $r)->all())->toEqual([
+        ['sprint_id' => $a, 'event' => 'joined', 'estimate' => 5, 'created_at' => $t(2)],
+        ['sprint_id' => $a, 'event' => 'left', 'estimate' => 5, 'created_at' => $t(5)],
+        ['sprint_id' => $b, 'event' => 'joined', 'estimate' => 8, 'created_at' => $t(5)],
+    ]);
+    // Status rows: the initial row, then the move, in created_at order.
+    expect(DB::table('issue_status_history')->where('issue_id', $issue)->orderBy('id')->pluck('created_at')->all())->toEqual([$t(1), $t(6)]);
+});

@@ -87,7 +87,7 @@ return new class extends Migration
             'sprints' => DB::table('sprints')->where('project_id', $issue->project_id)->pluck('id', 'name')->all(),
         ];
         $current = DB::table('statuses')->find($issue->status_id);
-        $activities = DB::table('activities')->where('issue_id', $issue->id)->orderBy('id')->get(['action', 'changes', 'user_id', 'agent_id', 'via', 'created_at'])
+        $activities = DB::table('activities')->where('issue_id', $issue->id)->orderBy('created_at')->orderBy('id')->get(['action', 'changes', 'user_id', 'agent_id', 'via', 'created_at'])
             ->map(function ($a) {
                 $a->changes = json_decode($a->changes ?? 'null', true) ?? [];
 
@@ -120,6 +120,7 @@ return new class extends Migration
         }
 
         foreach ($activities as $a) {
+            $estimateBefore = $estimate;
             if (isset($a->changes['story_points'])) {
                 $to = $a->changes['story_points']['to'];
                 $estimateRows[] = ['issue_id' => $issue->id, 'from_estimate' => $a->changes['story_points']['from'], 'to_estimate' => $to, ...$at($a)];
@@ -135,11 +136,12 @@ return new class extends Migration
                 }
             }
             if (isset($a->changes['sprint'])) {
-                foreach (['left' => 'from', 'joined' => 'to'] as $event => $side) {
+                // Like HistoryRecorder: left keeps the estimate from before this change, joined takes the new one.
+                foreach (['left' => ['from', $estimateBefore], 'joined' => ['to', $estimate]] as $event => [$side, $points]) {
                     $name = $a->changes['sprint'][$side];
                     $id = $name === null ? null : ($names['sprints'][$name] ?? null);
                     if ($id) {
-                        $sprintRows[] = ['sprint_id' => $id, 'issue_id' => $issue->id, 'event' => $event, 'estimate' => $estimate, ...$at($a)];
+                        $sprintRows[] = ['sprint_id' => $id, 'issue_id' => $issue->id, 'event' => $event, 'estimate' => $points, ...$at($a)];
                     } elseif ($name !== null) {
                         $skipped++;
                     }
