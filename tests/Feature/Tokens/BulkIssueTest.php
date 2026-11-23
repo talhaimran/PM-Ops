@@ -58,6 +58,16 @@ test('bulk update changes several issues by key and logs each', function () {
     expect(Activity::where('action', 'updated')->count())->toBe(2);
 });
 
+test('a bulk update naming one issue twice applies both items in order', function () {
+    makeIssue($this->project, $this->me, ['title' => 'A']);
+
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'title' => 'B'], ['key' => 'WEB-1', 'title' => 'A']]])->assertOk();
+
+    expect(Issue::sole()->title)->toBe('A')
+        ->and(Activity::where('action', 'updated')->orderBy('id')->pluck('changes')->all())
+        ->toEqual([['title' => ['from' => 'A', 'to' => 'B']], ['title' => ['from' => 'B', 'to' => 'A']]]);
+});
+
 test('bulk update rolls back on any bad item', function () {
     makeIssue($this->project, $this->me);
 

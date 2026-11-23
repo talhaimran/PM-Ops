@@ -142,7 +142,8 @@ class IssueService
             // Every project row first, in id order, before any issue row: the order move and approve use, so no deadlock.
             Project::whereIn('id', $issues->pluck('project_id')->unique())->orderBy('id')->lockForUpdate()->get();
 
-            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except('key')->all())));
+            // A fresh copy: an earlier item may have changed the same issue.
+            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue->refresh(), $actor, collect($items[$i])->except('key')->all())));
         });
     }
 
