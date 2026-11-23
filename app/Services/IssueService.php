@@ -97,6 +97,10 @@ class IssueService
             // and the bump below can't interleave with another save (Review Focus 3).
             // A locking read: it sees the latest committed row even if this transaction read the issue before (REPEATABLE READ).
             $issue->setRawAttributes(Issue::withTrashed()->whereKey($issue->id)->lockForUpdate()->firstOrFail()->getAttributes(), true)->unsetRelations();
+            if ($issue->trashed()) {
+                // Deleted after the caller loaded it: the same 404 as asking for a deleted issue.
+                throw ValidationException::withMessages(['issue' => "Issue {$issue->key} was not found. Search the project's issues to find the right key."])->status(404);
+            }
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
                 throw EditConflict::issue($issue, (int) $data['version']);
             }

@@ -13,6 +13,7 @@ use App\Models\Issue;
 use App\Models\User;
 use App\Services\BoardService;
 use App\Services\IssueService;
+use Illuminate\Validation\ValidationException;
 
 /*
  * Spec 7.11 (step 1, Task 4): issues carry a version; every edit sends the version it read and a mismatch stops the
@@ -292,4 +293,14 @@ test('a conflict lists at most the newest 200 changes and says when older ones w
 
     asToken($token)->patchJson('/api/v1/issues/WEB-1', ['priority' => 'high', 'version' => 201])->assertStatus(409)
         ->assertJsonMissingPath('changes_truncated');
+});
+
+test('an edit that loaded the issue before someone deleted it is a 404 and changes nothing', function () {
+    // The race: the request resolved and authorized the issue, then a delete committed before the update's lock.
+    $loaded = app(IssueService::class)->resolve($this->admin, 'WEB-1');
+    app(IssueService::class)->delete(web1(), $this->sam);
+
+    expect(fn () => app(IssueService::class)->update($loaded, $this->admin, ['title' => 'Late', 'version' => 1]))
+        ->toThrow(ValidationException::class, "Issue WEB-1 was not found. Search the project's issues to find the right key.");
+    expect(Issue::withTrashed()->sole())->title->toBe('Original')->version->toBe(1);
 });
