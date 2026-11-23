@@ -27,11 +27,12 @@ class CommentService
     public function update(Comment $comment, string $body, int $version): Comment
     {
         return DB::transaction(function () use ($comment, $body, $version) {
-            // The row held, so the check and the write can't interleave with another save.
+            // The issue row, then the comment row, held: the check and the write can't interleave with another save or a delete.
+            $issueGone = Issue::withTrashed()->whereKey($comment->issue_id)->lockForUpdate()->first()?->trashed() ?? true;
             Comment::withTrashed()->whereKey($comment->id)->lockForUpdate()->first();
             $comment->refresh();
-            if ($comment->trashed()) {
-                // Deleted after the caller loaded it: the same 404 as asking for a deleted comment.
+            if ($issueGone || $comment->trashed()) {
+                // It or its issue was deleted after the caller loaded it: the same 404 as asking for a deleted comment.
                 throw ValidationException::withMessages(['comment' => "Comment {$comment->id} was not found. Get the issue to see its comment ids."])->status(404);
             }
             if ($comment->version !== $version) {

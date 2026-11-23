@@ -3,6 +3,7 @@
 use App\Models\Comment;
 use App\Models\User;
 use App\Services\CommentService;
+use App\Services\IssueService;
 use Illuminate\Validation\ValidationException;
 
 /* Spec 7.11: comments carry a version too; an edit sends the version it read and a stale one stops the save. */
@@ -79,6 +80,16 @@ test('an edit that loaded the comment before someone deleted it is a 404 and cha
     // The race: the request resolved the comment, then a delete committed before the update's lock.
     $loaded = app(CommentService::class)->resolve($this->admin, $comment->id);
     app(CommentService::class)->delete(Comment::find($comment->id));
+
+    expect(fn () => app(CommentService::class)->update($loaded, 'Late', 1))
+        ->toThrow(ValidationException::class, "Comment {$comment->id} was not found. Get the issue to see its comment ids.");
+    expect(Comment::withTrashed()->sole())->body->toBe('First')->version->toBe(1);
+});
+
+test('an edit that loaded the comment before someone deleted its issue is a 404 and changes nothing', function () {
+    $comment = app(CommentService::class)->add($this->issue, $this->admin, 'First');
+    $loaded = app(CommentService::class)->resolve($this->admin, $comment->id);
+    app(IssueService::class)->delete($this->issue->fresh(), $this->admin);
 
     expect(fn () => app(CommentService::class)->update($loaded, 'Late', 1))
         ->toThrow(ValidationException::class, "Comment {$comment->id} was not found. Get the issue to see its comment ids.");
