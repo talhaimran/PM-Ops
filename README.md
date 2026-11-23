@@ -193,6 +193,7 @@ The base URL is `/api/v1`, documented at `/docs/api`. Highlights:
 - Destructive calls need `"confirm": true`: deleting a project or issue, and completing a sprint.
 - **Idempotency:** send `Idempotency-Key: <uuid>` on any POST. A retry with the same key and body returns the original response (header `Idempotent-Replayed: true`). The same key with a different body gets 422.
 - **Bulk:** `POST /api/v1/projects/WEB/issues/bulk` and `PATCH /api/v1/issues/bulk`, up to 50 items, all or nothing.
+- **Edit conflicts (breaking change in step 1):** every issue and comment edit (`PATCH /issues/{key}`, each item of `PATCH /issues/bulk`, `PATCH /comments/{id}`, MCP `update_issue`, `bulk_update_issues`, `update_comment`) must send the `version` it read; issues and comments return it, and `fields` never drops it. Without it the call is a 422. If the issue or comment changed since, nothing is saved and you get 409 `{"error": "conflict", "message": "WEB-12 changed since version 3. Read it again and resend.", "current_version": 5, "changes": [{"field", "from", "to", "by", "agent", "via", "at"}], "issue": {…}}` (a stale bulk item stops the whole call and the 409 lists every stale key under `conflicts`). Moves (`POST /issues/{key}/move`, `/rank`) need no version. Existing scripts must read the issue first and send its `version`.
 - **Rate limit:** per token, the workspace's `api_per_minute` and `api_per_day` limits (or `PM_API_RATE_LIMIT` per minute when unset); a 429 says when to retry.
 
 ```bash
