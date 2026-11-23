@@ -13,7 +13,8 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { StatusCategory } from '@/types';
 import { Head, router } from '@inertiajs/react';
 import { Ellipsis, Tags } from 'lucide-react';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
+import { firstError } from './statusErrors';
 
 interface LibraryStatus {
     id: number;
@@ -50,16 +51,25 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
         setError(undefined);
         setDialog(null);
     };
-    const send = (method: 'patch' | 'post' | 'delete', url: string, data: Record<string, unknown> = {}) =>
-        router.visit(url, {
+    // Headless UI reports "closed" when the focused submit button is disabled for the request (focus leaves the dialog). A ref,
+    // not `processing`, because that report can arrive before the re-render. onSuccess closes through close(), a refusal keeps it open.
+    const sending = useRef(false);
+    const dismiss = () => !sending.current && close();
+    const send = (method: 'patch' | 'post' | 'delete', url: string, data: Record<string, unknown> = {}) => {
+        sending.current = true;
+        return router.visit(url, {
             method,
             data: data as never,
             preserveScroll: true,
             onStart: () => setProcessing(true),
-            onFinish: () => setProcessing(false),
+            onFinish: () => {
+                sending.current = false;
+                setProcessing(false);
+            },
             onSuccess: close,
-            onError: (e) => setError(e.name ?? e.status ?? e.into ?? e.color ?? e.category),
+            onError: (e) => setError(firstError(e)),
         });
+    };
 
     const status = dialog?.status;
     const mergeTargets = status ? statuses.filter((o) => o.id !== status.id && o.category === status.category) : [];
@@ -128,7 +138,7 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
                 </section>
             </div>
 
-            <Modal show={dialog?.kind === 'rename' || dialog?.kind === 'colour'} onClose={close} maxWidth="md">
+            <Modal show={dialog?.kind === 'rename' || dialog?.kind === 'colour'} onClose={dismiss} maxWidth="md">
                 <form onSubmit={submit} className="space-y-4 p-6">
                     <h2 className="text-heading-2xl text-text">{dialog?.kind === 'rename' ? `Rename ${status?.name}` : `Colour of ${status?.name}`}</h2>
                     {dialog?.kind === 'rename' ? (
@@ -147,7 +157,7 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
                     )}
                     <InputError message={error} />
                     <div className="flex justify-end gap-2">
-                        <SecondaryButton onClick={close}>Cancel</SecondaryButton>
+                        <SecondaryButton onClick={dismiss}>Cancel</SecondaryButton>
                         <PrimaryButton disabled={processing}>Save</PrimaryButton>
                     </div>
                 </form>
@@ -165,7 +175,7 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
                 }
                 confirmLabel="Merge"
                 processing={processing || !into}
-                onCancel={close}
+                onCancel={dismiss}
                 onConfirm={() => status && into && send('post', route('statuses.merge', status.id), { into })}
             >
                 {mergeTargets.length > 0 && (
@@ -189,7 +199,7 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
                 ]}
                 confirmLabel="Delete status"
                 processing={processing}
-                onCancel={close}
+                onCancel={dismiss}
                 onConfirm={() => status && send('delete', route('statuses.destroy', status.id))}
             >
                 <InputError message={error} />
