@@ -62,8 +62,9 @@ class ApprovalService
                 ->lock('for update skip locked')->first();
 
             // Asking again is the agent changing its mind: the person decides on the latest ask, so what it sent now
-            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole.
-            if ($open) {
+            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole. Only the agent
+            // that opened the request can do that; another agent's repeat just gets the existing request back (spec 8, A2).
+            if ($open?->agent_id === $agent->id) {
                 $action = [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved];
                 if ($action != $open->action) {
                     $open->update(['action' => $action]);
