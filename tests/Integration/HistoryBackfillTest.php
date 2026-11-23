@@ -12,7 +12,9 @@ test('the history migration rebuilds status, sprint and estimate history from th
         ->filter(fn ($p) => basename($p) < '2026_11_26')->sort()->values()->all();
     Artisan::call('migrate:fresh', ['--path' => $paths, '--realpath' => true, '--force' => true]);
 
-    $t = fn (int $day) => now()->startOfSecond()->subDays(30 - $day)->toDateTimeString();
+    $this->freezeTime();
+    $base = now()->startOfSecond();
+    $t = fn (int $day) => $base->copy()->subDays(30 - $day)->toDateTimeString();
     $user = DB::table('users')->insertGetId(['name' => 'demo', 'email' => 'demo@example.com', 'password' => 'x', 'created_at' => $t(0), 'updated_at' => $t(0)]);
     $ws = DB::table('workspaces')->insertGetId(['name' => 'Acme', 'slug' => 'acme', 'created_at' => $t(0), 'updated_at' => $t(0)]);
     $agent = DB::table('agents')->insertGetId(['workspace_id' => $ws, 'owner_user_id' => $user, 'name' => 'bot', 'permission_level' => 'write', 'created_at' => $t(0), 'updated_at' => $t(0)]);
@@ -33,6 +35,8 @@ test('the history migration rebuilds status, sprint and estimate history from th
     $a = $issue(1, 'Done', ['sprint_id' => $s2, 'story_points' => 8]);
     $b = $issue(2, 'In Progress', ['sprint_id' => $s1, 'story_points' => 3]);
     $c = $issue(3, 'To Do');
+    $e = $issue(5, 'Done');
+    $d = $issue(4, 'Done', ['deleted_at' => $t(9)]);
     $activity = fn (int $id, int $day, array $changes, ?int $agentId = null, string $via = 'api') => DB::table('activities')->insert([
         'issue_id' => $id, 'user_id' => $user, 'agent_id' => $agentId, 'action' => 'updated', 'changes' => json_encode($changes), 'via' => $via, 'created_at' => $t($day),
     ]);
@@ -42,6 +46,8 @@ test('the history migration rebuilds status, sprint and estimate history from th
     $activity($a, 5, ['status' => ['from' => 'In Progress', 'to' => 'Done']], via: 'web');
     $activity($a, 6, ['sprint' => ['from' => 'S1', 'to' => 'S2']]);
     $activity($a, 7, ['story_points' => ['from' => 5, 'to' => 8]]);
+    $activity($d, 3, ['status' => ['from' => 'To Do', 'to' => 'Done']]);
+    $activity($e, 3, ['status' => ['from' => 'Ghost', 'to' => 'Done']]);
     $activity($c, 2, ['status' => ['from' => 'To Do', 'to' => 'Ghost']]);
 
     ob_start();
@@ -66,14 +72,17 @@ test('the history migration rebuilds status, sprint and estimate history from th
         ['from_estimate' => 5, 'to_estimate' => 8, 'created_at' => $t(7)],
     ]);
 
+    // A soft-deleted issue gets its history too.
+    expect($rows('issue_status_history', $d, ['to_category']))->toEqual([['to_category' => 'to_do'], ['to_category' => 'done']]);
+
     // No activity at all: one initial row each, at the issue's created_at, from what it is now.
     expect($rows('issue_status_history', $b, ['from_status_id', 'to_status_id', 'to_category', 'created_at']))->toEqual([['from_status_id' => null, 'to_status_id' => $statuses['In Progress'], 'to_category' => 'in_progress', 'created_at' => $t(1)]])
         ->and($rows('sprint_scope_events', $b, ['sprint_id', 'event', 'estimate', 'created_at']))->toEqual([['sprint_id' => $s1, 'event' => 'joined', 'estimate' => 3, 'created_at' => $t(1)]])
         ->and($rows('estimate_history', $b, ['from_estimate', 'to_estimate']))->toEqual([['from_estimate' => null, 'to_estimate' => 3]]);
 
-    // A name that is no longer a status of the project is skipped and counted; the initial row it started from stays.
+    // A name that is no longer a status of the project is skipped and counted; the initial row it started from stays. An unmapped "from" drops the initial row too and counts it (issue E: 2).
     expect($rows('issue_status_history', $c, ['to_status_id']))->toEqual([['to_status_id' => $statuses['To Do']]])
-        ->and($output)->toContain('skipped 1');
+        ->and($output)->toContain('skipped 3');
 
     expect(Artisan::call('migrate:rollback', ['--force' => true]))->toBe(0)
         ->and(Schema::hasTable('issue_status_history'))->toBeFalse()->and(Schema::hasTable('sprint_scope_events'))->toBeFalse()->and(Schema::hasTable('estimate_history'))->toBeFalse();

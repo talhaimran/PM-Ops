@@ -13,6 +13,9 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // MySQL DDL isn't transactional: drop what a failed earlier run left, or a re-run would stop at "table exists". The tables are new, so nothing is lost.
+        $this->down();
+
         // 1-R9: a deleted status leaves history standing; the row keeps to_category.
         Schema::create('issue_status_history', function (Blueprint $table) {
             $table->id();
@@ -47,6 +50,7 @@ return new class extends Migration
         });
 
         $skipped = 0;
+        // shortcut: ~7 queries per issue, batch the lookups when a workspace has tens of thousands of issues.
         // Soft-deleted issues too: the query builder has no SoftDeletes scope.
         DB::table('issues')->select('id', 'project_id', 'status_id', 'sprint_id', 'story_points', 'reporter_id', 'created_at')
             ->eachById(function ($issue) use (&$skipped) {
@@ -99,7 +103,9 @@ return new class extends Migration
         // Where it started: the first change's "from", else where it is now.
         $firstStatus = $activities->first(fn ($a) => isset($a->changes['status']));
         $start = $firstStatus ? ($names['statuses'][$firstStatus->changes['status']['from']] ?? null) : $current;
-        if ($start) {
+        if (! $start) {
+            $skipped++;
+        } else {
             $statusRows[] = ['issue_id' => $issue->id, 'from_status_id' => null, 'to_status_id' => $start->id, 'to_category' => $start->category, ...$initial];
         }
         $firstEstimate = $activities->first(fn ($a) => isset($a->changes['story_points']));

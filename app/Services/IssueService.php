@@ -70,7 +70,7 @@ class IssueService
             $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original]] : null);
             $issue->load(array_slice(self::DISPLAY, 1));
             $this->history->statusChanged($issue, null, $issue->status, $actor);
-            $this->history->sprintChanged($issue, null, $issue->sprint, $actor);
+            $this->history->sprintChanged($issue, null, $issue->sprint, $actor, null);
             $this->history->estimateChanged($issue, null, $issue->story_points, $actor);
 
             return $issue;
@@ -125,8 +125,7 @@ class IssueService
                 $this->history->statusChanged($issue, $fromStatus, $issue->status, $actor);
             }
             if (isset($changes['sprint'])) {
-                // shortcut: a sprint change and a re-estimate in one update record the new estimate on both events, the old one is not kept; fine until burndown needs it exact.
-                $this->history->sprintChanged($issue, $fromSprint, $issue->sprint, $actor);
+                $this->history->sprintChanged($issue, $fromSprint, $issue->sprint, $actor, $before['story_points']);
             }
             if (isset($changes['story_points'])) {
                 $this->history->estimateChanged($issue, $changes['story_points']['from'], $changes['story_points']['to'], $actor);

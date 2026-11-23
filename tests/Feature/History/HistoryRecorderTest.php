@@ -96,17 +96,24 @@ test('completing a sprint writes left and joined for each carried-over issue, an
     expect(SprintScopeEvent::sole()->event)->toBe('left');
 });
 
-test('deleting a planned sprint writes left for each of its issues', function () {
+test('deleting a planned sprint takes its scope events with it (FK cascade; a planned sprint has no report)', function () {
     $sprint = ($this->sprint)('A');
-    $issue = makeIssue($this->project, $this->owner, ['sprint' => 'A', 'story_points' => 4]);
-    SprintScopeEvent::query()->delete();
+    makeIssue($this->project, $this->owner, ['sprint' => 'A', 'story_points' => 4]);
+    expect(SprintScopeEvent::where('sprint_id', $sprint->id)->count())->toBe(1);
 
-    // The sprint's own events go with it (FK cascade), so catch the row as it is written.
-    SprintScopeEvent::created(fn ($event) => $this->written[] = $event);
-    $this->sprints->delete($sprint, $this->owner);
+    $this->sprints->delete($sprint);
 
-    $left = collect($this->written)->sole();
-    expect($left->event)->toBe('left')->and($left->issue_id)->toBe($issue->id)->and($left->sprint_id)->toBe($sprint->id)->and($left->estimate)->toBe(4)->and($left->user_id)->toBe($this->owner->id);
+    expect(SprintScopeEvent::where('sprint_id', $sprint->id)->count())->toBe(0);
+});
+
+test('a sprint change and a re-estimate in one update: left has the old estimate, joined the new', function () {
+    [$a, $b] = [($this->sprint)('A'), ($this->sprint)('B')];
+    $issue = makeIssue($this->project, $this->owner, ['sprint' => 'A', 'story_points' => 5]);
+
+    $this->issues->update($issue, $this->owner, ['sprint' => 'B', 'story_points' => 8]);
+
+    $events = SprintScopeEvent::orderBy('id')->get()->slice(1)->values();
+    expect($events->map->only('event', 'sprint_id', 'estimate')->all())->toBe([['event' => 'left', 'sprint_id' => $a->id, 'estimate' => 5], ['event' => 'joined', 'sprint_id' => $b->id, 'estimate' => 8]]);
 });
 
 test('deleting a column writes a status row for each moved issue', function () {
@@ -164,8 +171,8 @@ test('a held agent move writes no row; the approved move has the decider as user
     addMember($this->project, $decider, ProjectRole::Admin);
     test()->flushHeaders();
     app('auth')->forgetGuards();
-    $this->actingAs($this->owner)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
+    $this->actingAs($decider)->post(w("/approvals/{$id}/approve"))->assertSessionHasNoErrors();
 
     $row = IssueStatusHistory::sole();
-    expect($row->user_id)->toBe($this->owner->id)->and($row->agent_id)->toBe($agent->id)->and($row->to_category)->toBe('done')->and($row->via)->toBe('web');
+    expect($row->user_id)->toBe($decider->id)->and($decider->id)->not->toBe($this->owner->id)->and($row->agent_id)->toBe($agent->id)->and($row->to_category)->toBe('done')->and($row->via)->toBe('web');
 });

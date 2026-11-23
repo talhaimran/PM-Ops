@@ -63,7 +63,7 @@ class SprintController extends Controller
     {
         $project = $this->projects->resolve($request->user(), $key);
         Gate::authorize('remove', $project);
-        $this->sprints->delete($this->sprints->resolve($project, $sprint), $request->user());
+        $this->sprints->delete($this->sprints->resolve($project, $sprint));
 
         return response()->noContent();
     }

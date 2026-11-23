@@ -63,7 +63,7 @@ class SprintController extends Controller
     public function destroy(Project $project, Sprint $sprint): RedirectResponse
     {
         Gate::authorize('remove', $project);
-        $this->sprints->delete($sprint->setRelation('project', $project), auth()->user());
+        $this->sprints->delete($sprint->setRelation('project', $project));
 
         return back();
     }

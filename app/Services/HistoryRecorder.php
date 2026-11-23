@@ -24,15 +24,15 @@ class HistoryRecorder
         ]);
     }
 
-    /** Left $from and/or joined $to, each with the issue's estimate now. */
-    public function sprintChanged(Issue $issue, ?Sprint $from, ?Sprint $to, ?User $actor): void
+    /** Left $from (with the estimate it had then) and/or joined $to (with the issue's estimate now). */
+    public function sprintChanged(Issue $issue, ?Sprint $from, ?Sprint $to, ?User $actor, ?int $leftEstimate): void
     {
         if ($from?->id === $to?->id) {
             return;
         }
-        foreach (['left' => $from, 'joined' => $to] as $event => $sprint) {
+        foreach (['left' => [$from, $leftEstimate], 'joined' => [$to, $issue->story_points]] as $event => [$sprint, $estimate]) {
             if ($sprint) {
-                SprintScopeEvent::create(['sprint_id' => $sprint->id, 'issue_id' => $issue->id, 'event' => $event, 'estimate' => $issue->story_points, ...ActivityLogger::attribution($actor)]);
+                SprintScopeEvent::create(['sprint_id' => $sprint->id, 'issue_id' => $issue->id, 'event' => $event, 'estimate' => $estimate, ...ActivityLogger::attribution($actor)]);
             }
         }
     }
