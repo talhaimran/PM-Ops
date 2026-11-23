@@ -226,3 +226,54 @@ test('web: a stale save flashes the conflict and keeps the input; overwrite with
     expect(web1())->description->toBe('Mine')->version->toBe(3)
         ->and(Activity::latest('id')->first())->action->toBe('overwrote')->changes->toEqual(['description' => ['from' => 'Theirs', 'to' => 'Mine']]);
 });
+
+test('M1: a description edit past character 200 is a change: it bumps, is logged, and a stale editor gets the conflict', function () {
+    $long = str_repeat('a', 250);
+    [, $token] = makeAgent($this->admin);
+    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['description' => $long, 'version' => 1])->assertOk()->assertJsonPath('data.version', 2);
+
+    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['description' => $long.'b', 'version' => 2])->assertOk()->assertJsonPath('data.version', 3);
+    expect(Activity::where('action', 'updated')->count())->toBe(2);
+
+    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['description' => 'Stale', 'version' => 2])->assertStatus(409);
+    expect(web1()->description)->toBe($long.'b');
+});
+
+test('the conflict names the author of the latest change, not of the last field first changed', function () {
+    app(IssueService::class)->update(web1(), $this->admin, ['title' => 'Ada 1']);
+    $this->travel(1)->minutes();
+    app(IssueService::class)->update(web1(), $this->sam, ['priority' => 'high']);
+    $this->travel(1)->minutes();
+    app(IssueService::class)->update(web1(), $this->admin, ['title' => 'Ada 2']);
+
+    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['description' => 'Mine', 'version' => 1])->assertSessionHasErrors('version');
+    expect(session('conflict.by'))->toBe('Ada Admin');
+});
+
+test('web: Save mine over theirs resends duplicate_of with a Duplicate resolution', function () {
+    makeIssue($this->project, $this->admin);
+    app(IssueService::class)->update(web1(), $this->sam, ['priority' => 'high']);
+
+    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2', 'version' => 1])
+        ->assertSessionHasErrors('version');
+    $conflict = session('conflict');
+    expect($conflict['yours'])->toMatchArray(['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2']);
+
+    $this->patch($conflict['url'], [...$conflict['yours'], 'version' => $conflict['version'], 'overwrite' => true])->assertSessionHasNoErrors();
+    expect(web1())->resolution->value->toBe('duplicate')->status->name->toBe('Done');
+});
+
+test('Can\'t undo names fields the way the activity log does', function () {
+    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['title' => 'Mine', 'version' => 1])->assertSessionHasNoErrors();
+    $undo = session('undo');
+
+    app(IssueService::class)->update(web1(), $this->sam, ['story_points' => 5]);
+
+    $this->patch($undo['url'], $undo['data'])->assertSessionHasErrors(['undo' => "Can't undo: Sam Member changed story points on WEB-1."]);
+});
+
+test('undo_of 0 is refused as input, not treated as an edit or an undo', function () {
+    $this->actingAs($this->admin)->patch(w('/issues/WEB-1'), ['title' => 'x', 'version' => 1, 'undo_of' => 0])->assertSessionHasErrors('undo_of');
+    $this->post(w('/issues/WEB-1/move'), ['status' => 'Done', 'undo_of' => 0])->assertSessionHasErrors('undo_of');
+    expect(web1())->title->toBe('Original')->status->name->toBe('To Do');
+});

@@ -57,7 +57,7 @@ class IssueController extends Controller
         Gate::authorize('update', $issue);
         $data = $request->validated();
         // overwrite (web only, spec 7.11): the conflict dialog's "Save mine over theirs", sent with the current version.
-        $flags = $request->validate(['undo_of' => ['nullable', 'integer'], 'overwrite' => ['sometimes', 'boolean']]);
+        $flags = $request->validate(['undo_of' => ['nullable', 'integer', 'min:1'], 'overwrite' => ['sometimes', 'boolean']]);
 
         if ($flags['undo_of'] ?? null) {
             // The undo sends the version right after the change; if the issue changed since, IssueService refuses it.

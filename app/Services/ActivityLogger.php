@@ -52,9 +52,12 @@ class ActivityLogger
             // approval_request is the link to an agent's request (A2), not a field; a person decided it, so no agent acted.
             $approval = isset($row->changes['approval_request']);
             foreach (collect($row->changes)->except('approval_request') as $field => $change) {
+                $from = isset($changes[$field]) ? $changes[$field]['from'] : $change['from'];
+                // Moved to the end, so the last entry is always the newest change (the dialog's "Changed by").
+                unset($changes[$field]);
                 $changes[$field] = [
                     'field' => $field,
-                    'from' => isset($changes[$field]) ? $changes[$field]['from'] : $change['from'],
+                    'from' => $from,
                     'to' => $change['to'],
                     'by' => $row->user?->name,
                     'agent' => $row->agent && ! $approval ? self::agentLabel($row->agent) : null,
@@ -83,7 +86,8 @@ class ActivityLogger
         return match (true) {
             ! $changes => "{$key} changed",
             $status !== null => "{$who} moved {$key} to {$status['to']}",
-            default => "{$who} changed ".collect($changes)->pluck('field')->implode(', ')." on {$key}",
+            // Field names as the activity log shows them ("story points").
+            default => "{$who} changed ".collect($changes)->pluck('field')->map(fn ($f) => str_replace('_', ' ', $f))->implode(', ')." on {$key}",
         };
     }
 

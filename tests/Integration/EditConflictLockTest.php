@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\IssueService;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Review Focus 3 (step 1, Task 4): two saves at the same moment with the same version. A second connection is the
@@ -42,19 +43,67 @@ test('two saves with the same version: one commits, the other gets EditConflict'
     expect(Issue::sole())->title->toBe('Theirs')->version->toBe(2);
 });
 
-test('the issue row is locked before its version is read', function () {
+test('the version is checked on the current row, not on what the transaction read before another save committed', function () {
     $owner = User::factory()->create();
     makeWorkspace($owner, 'acme');
     $web = makeProject($owner, 'WEB');
-    makeIssue($web, $owner);
+    makeIssue($web, $owner, ['title' => 'Original']);
     $issues = app(IssueService::class);
-    $issue = $issues->resolve($owner, 'WEB-1');
+    $ours = $issues->resolve($owner, 'WEB-1');
+    config(['database.connections.locker' => config('database.connections.'.config('database.default'))]);
 
-    DB::enableQueryLog();
-    $issues->update($issue, $owner, ['title' => 'x', 'version' => 1]);
-    $queries = collect(DB::getQueryLog())->pluck('query');
+    // REPEATABLE READ: our transaction reads first, then the other save commits. A plain read of the version would
+    // still see 1 and save over theirs; the locking read sees 2 and refuses.
+    expect(fn () => DB::transaction(function () use ($issues, $ours, $owner) {
+        Issue::find($ours->id);
+        DB::connection('locker')->table('issues')->where('id', $ours->id)->update(['title' => 'Theirs', 'version' => 2]);
+        $issues->update($ours, $owner, ['title' => 'Ours', 'version' => 1]);
+    }))->toThrow(EditConflict::class, 'WEB-1 changed since version 1.');
 
-    $lock = $queries->search(fn ($q) => str_starts_with($q, 'select * from `issues`') && str_ends_with($q, 'for update'));
-    $write = $queries->search(fn ($q) => str_starts_with($q, 'update `issues`'));
-    expect($lock)->toBeInt()->and($write)->toBeInt()->and($lock)->toBeLessThan($write);
+    expect(Issue::sole())->title->toBe('Theirs')->version->toBe(2);
+});
+
+/** Runs $commit on a second connection right after the first row lock the bulk update takes (its project lock). */
+function afterFirstLock(callable $commit): void
+{
+    config(['database.connections.locker' => config('database.connections.'.config('database.default'))]);
+    $done = false;
+    DB::listen(function ($query) use (&$done, $commit) {
+        if (! $done && $query->connectionName !== 'locker' && str_ends_with($query->sql, 'for update')) {
+            $done = true;
+            $commit(DB::connection('locker'));
+        }
+    });
+}
+
+test('S1: a bulk 409 reports the version and changes committed while it waited, not a stale read', function () {
+    $owner = User::factory()->create();
+    makeWorkspace($owner, 'acme');
+    $web = makeProject($owner, 'WEB');
+    $issue = makeIssue($web, $owner, ['title' => 'Original']);
+    afterFirstLock(function ($locker) use ($issue, $owner) {
+        $locker->table('issues')->where('id', $issue->id)->update(['title' => 'Theirs', 'version' => 2]);
+        $locker->table('activities')->insert(['issue_id' => $issue->id, 'user_id' => $owner->id, 'action' => 'updated', 'via' => 'web', 'issue_version' => 2,
+            'changes' => json_encode(['title' => ['from' => 'Original', 'to' => 'Theirs']]), 'created_at' => now()]);
+    });
+
+    try {
+        app(IssueService::class)->updateMany($owner, [['key' => 'WEB-1', 'version' => 1, 'title' => 'Ours']]);
+        $this->fail('Expected EditConflict');
+    } catch (EditConflict $e) {
+        expect($e->payload['conflicts'][0])->toMatchArray(['key' => 'WEB-1', 'current_version' => 2])
+            ->and($e->payload['conflicts'][0]['changes'][0])->toMatchArray(['field' => 'title', 'to' => 'Theirs']);
+    }
+    expect(Issue::sole()->title)->toBe('Theirs');
+});
+
+test('S1: an issue deleted while the bulk update waited is the usual not-found error, not a 500', function () {
+    $owner = User::factory()->create();
+    makeWorkspace($owner, 'acme');
+    $web = makeProject($owner, 'WEB');
+    $issue = makeIssue($web, $owner);
+    afterFirstLock(fn ($locker) => $locker->table('issues')->where('id', $issue->id)->update(['deleted_at' => now()]));
+
+    expect(fn () => app(IssueService::class)->updateMany($owner, [['key' => 'WEB-1', 'version' => 1, 'title' => 'x']]))
+        ->toThrow(ValidationException::class, 'Issue WEB-1 was not found.');
 });

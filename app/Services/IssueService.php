@@ -95,8 +95,8 @@ class IssueService
             }
             // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
             // and the bump below can't interleave with another save (Review Focus 3).
-            Issue::whereKey($issue->id)->lockForUpdate()->first();
-            $issue->refresh();
+            // A locking read: it sees the latest committed row even if this transaction read the issue before (REPEATABLE READ).
+            $issue->setRawAttributes(Issue::withTrashed()->whereKey($issue->id)->lockForUpdate()->firstOrFail()->getAttributes(), true)->unsetRelations();
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
                 throw EditConflict::issue($issue, (int) $data['version'], $this->activity->changesSince($issue, (int) $data['version']));
             }
@@ -124,7 +124,10 @@ class IssueService
             $after = $this->snapshot($issue);
             $changes = collect($before)
                 ->filter(fn ($value, $field) => $value !== $after[$field])
-                ->map(fn ($value, $field) => ['from' => $value, 'to' => $after[$field]])
+                // The full values decide what changed (1-D4); a long description is shortened only for the log.
+                ->map(fn ($value, $field) => $field === 'description'
+                    ? ['from' => $value === null ? null : Str::limit($value, 200), 'to' => $after[$field] === null ? null : Str::limit($after[$field], 200)]
+                    : ['from' => $value, 'to' => $after[$field]])
                 ->all();
 
             if ($original && $resolution) {
@@ -180,18 +183,23 @@ class IssueService
      */
     public function updateMany(User $actor, array $items): Collection
     {
-        return DB::transaction(function () use ($actor, $items) {
-            $items = collect($items)->values();
-            $issues = $items->map(function ($data, $i) use ($actor) {
-                $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
-                Gate::forUser($actor)->authorize('update', $issue);
+        $items = collect($items)->values();
+        // Found and authorized before the transaction, so its first plain read comes after the locks below and sees
+        // what other saves committed while it waited (REPEATABLE READ): the 409 then shows the real version and changes.
+        $issues = $items->map(function ($data, $i) use ($actor) {
+            $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
+            Gate::forUser($actor)->authorize('update', $issue);
 
-                return $issue;
-            });
+            return $issue;
+        });
+
+        return DB::transaction(function () use ($actor, $items, $issues) {
             // Every project row first, in id order, before any issue row: the order move and approve use, so no deadlock.
             Project::whereIn('id', $issues->pluck('project_id')->unique())->orderBy('id')->lockForUpdate()->get();
             // Then every issue row, in id order, so all stale items are found before anything changes (1-R11).
             $versions = Issue::whereIn('id', $issues->pluck('id'))->orderBy('id')->lockForUpdate()->pluck('version', 'id');
+            // Deleted meanwhile: the same not-found error as if it had been gone before the call.
+            $issues->reject(fn ($issue) => $versions->has($issue->id))->each(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $items[$i]['key']), as: 'key'));
             $stale = $issues->filter(fn ($issue, $i) => isset($items[$i]['version']) && (int) $items[$i]['version'] !== $versions[$issue->id]);
             if ($stale->isNotEmpty()) {
                 throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version'], $this->activity->changesSince($issue, (int) $items[$i]['version'])))->values()->all());
@@ -626,14 +634,14 @@ class IssueService
         return $linked;
     }
 
-    /** Human-readable values used for activity diffs. */
+    /** Human-readable values used for activity diffs; update() shortens the description when it logs one. */
     private function snapshot(Issue $issue): array
     {
         $key = fn (?Issue $i) => $i ? "{$issue->project->key}-{$i->number}" : null;
 
         return [
             'title' => $issue->title,
-            'description' => $issue->description === null ? null : Str::limit($issue->description, 200),
+            'description' => $issue->description,
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,

@@ -29,12 +29,14 @@ class EditConflict extends AuthorizationException
     /** @param  list<array>  $changes  ActivityLogger::changesSince() */
     public static function issue(Issue $issue, int $sent, array $changes): self
     {
+        $issue->loadMissing(IssueService::DISPLAY);
+
         return new self([
             'error' => 'conflict',
             'message' => "{$issue->key} changed since version {$sent}. Read it again and resend.",
             'current_version' => $issue->version,
             'changes' => $changes,
-            'issue' => (new IssueResource($issue->loadMissing(IssueService::DISPLAY)))->resolve(),
+            'issue' => (new IssueResource($issue))->resolve(),
         ], $issue, ActivityLogger::describe($changes, $issue->key));
     }
 
@@ -78,12 +80,17 @@ class EditConflict extends AuthorizationException
         $theirs = $this->subject instanceof Comment
             ? ['body' => $this->subject->body]
             : app(UndoService::class)->forUpdate($this->subject, array_keys($request->except(['version', 'overwrite'])));
+        if (array_key_exists('resolution', $theirs)) {
+            // The real resolution (forUpdate puts a Duplicate back as Done, for Undo).
+            $theirs['resolution'] = $this->subject->resolution?->value;
+        }
 
         return back()->withInput()->withErrors(['version' => $this->payload['message']])->with('conflict', [
             'key' => $issue->key,
             'version' => $this->subject->version,
             'url' => $request->url(),
-            'yours' => $request->only(array_keys($theirs)),
+            // What "Save mine over theirs" resends, so it carries what goes with a field (a Duplicate's original, a reason).
+            'yours' => $request->only([...array_keys($theirs), 'duplicate_of', 'reason']),
             'theirs' => $theirs,
             'by' => $this->subject instanceof Comment
                 ? ($this->subject->agent ? ActivityLogger::agentLabel($this->subject->agent) : $this->subject->author?->name)
