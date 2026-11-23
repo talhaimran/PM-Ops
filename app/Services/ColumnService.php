@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 class ColumnService
 {
-    public function __construct(private StatusService $statuses, private ActivityLogger $activity) {}
+    public function __construct(private StatusService $statuses, private ActivityLogger $activity, private HistoryRecorder $history) {}
 
     /**
      * 1-R4: the column maps `status` (a library status name) when given, else a status named after the column in
@@ -92,12 +92,16 @@ class ColumnService
             $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
             // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
             $moving = Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'));
-            // Issues leaving Done are logged as reopened, like any other move out of it.
-            // shortcut: one model and one activity row per reopened issue inside the lock, chunk and bulk-insert when Done columns hold thousands.
-            $reopened = $to->isDone() ? collect() : (clone $moving)->with('status')->get()->filter(fn ($i) => $i->status->isDone());
+            // Issues leaving Done are logged as reopened, like any other move out of it; every moved issue gets a history row.
+            // shortcut: one model and one activity or history row per moved issue inside the lock, chunk and bulk-insert when a column holds thousands.
+            $issues = (clone $moving)->with('status')->get();
+            $reopened = $to->isDone() ? collect() : $issues->filter(fn ($i) => $i->status->isDone());
             $moving->update(['status_id' => $to->id] + ($to->isDone()
                 ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
                 : ['resolution' => null, 'resolved_at' => null]));
+            foreach ($issues as $issue) {
+                $this->history->statusChanged($issue, $issue->status, $to, $actor);
+            }
             foreach ($reopened as $issue) {
                 $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
             }

@@ -26,7 +26,7 @@ class DeleteSprint extends Tool
     {
         [$project, $sprint] = $this->projectAndSprint($request, $projects, $sprints);
         Gate::authorize('remove', $project);
-        $sprints->delete($sprint);
+        $sprints->delete($sprint, auth()->user());
 
         return $this->result("Deleted {$sprint->name}; its issues are back in the backlog.", ['deleted' => $sprint->name]);
     }

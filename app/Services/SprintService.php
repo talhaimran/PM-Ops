@@ -15,7 +15,7 @@ class SprintService
 {
     public const DEFAULT_LENGTH_DAYS = 14;
 
-    public function __construct(private ActivityLogger $activity) {}
+    public function __construct(private ActivityLogger $activity, private HistoryRecorder $history) {}
 
     /** @param array{name?: ?string, goal?: ?string, start_date?: ?string, end_date?: ?string} $data */
     public function create(Project $project, array $data): Sprint
@@ -44,13 +44,16 @@ class SprintService
     }
 
     /** Planned sprints only; their issues go back to the backlog. */
-    public function delete(Sprint $sprint): void
+    public function delete(Sprint $sprint, User $actor): void
     {
         if ($sprint->state !== SprintState::Planned) {
             throw ValidationException::withMessages(['sprint' => "{$sprint->name} is {$sprint->state->value}; only planned sprints can be deleted."]);
         }
 
-        DB::transaction(function () use ($sprint) {
+        DB::transaction(function () use ($sprint, $actor) {
+            foreach ($sprint->issues()->get() as $issue) {
+                $this->history->sprintChanged($issue, $sprint, null, $actor);
+            }
             $sprint->issues()->update(['sprint_id' => null]);
             $sprint->delete();
         });
@@ -105,6 +108,7 @@ class SprintService
 
             foreach ($open as $issue) {
                 $issue->update(['sprint_id' => $target?->id]);
+                $this->history->sprintChanged($issue, $sprint, $target, $actor);
                 $this->activity->log($issue, $actor, 'updated', ['sprint' => ['from' => $sprint->name, 'to' => $target?->name]]);
             }
 

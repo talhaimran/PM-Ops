@@ -31,6 +31,7 @@ class IssueService
         private RankService $ranks,
         private ApprovalService $approvals,
         private StatusService $statuses,
+        private HistoryRecorder $history,
     ) {}
 
     /**
@@ -67,8 +68,12 @@ class IssueService
             $issue->labels()->sync($labelIds ?? []);
             $issue->setRelation('project', $project);
             $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original]] : null);
+            $issue->load(array_slice(self::DISPLAY, 1));
+            $this->history->statusChanged($issue, null, $issue->status, $actor);
+            $this->history->sprintChanged($issue, null, $issue->sprint, $actor);
+            $this->history->estimateChanged($issue, null, $issue->story_points, $actor);
 
-            return $issue->load(array_slice(self::DISPLAY, 1));
+            return $issue;
         });
     }
 
@@ -88,6 +93,7 @@ class IssueService
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
+            [$fromStatus, $fromSprint] = [$issue->status, $issue->sprint];
             $wasDone = $issue->status->isDone();
             [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);
             [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
@@ -114,6 +120,16 @@ class IssueService
 
             if ($original && $resolution) {
                 $changes['duplicate_of'] = ['from' => null, 'to' => $original];
+            }
+            if (isset($changes['status'])) {
+                $this->history->statusChanged($issue, $fromStatus, $issue->status, $actor);
+            }
+            if (isset($changes['sprint'])) {
+                // shortcut: a sprint change and a re-estimate in one update record the new estimate on both events, the old one is not kept; fine until burndown needs it exact.
+                $this->history->sprintChanged($issue, $fromSprint, $issue->sprint, $actor);
+            }
+            if (isset($changes['story_points'])) {
+                $this->history->estimateChanged($issue, $changes['story_points']['from'], $changes['story_points']['to'], $actor);
             }
             if ($changes) {
                 // Leaving Done is a reopen (spec 7.4); an undo or an approval keeps its own action.
