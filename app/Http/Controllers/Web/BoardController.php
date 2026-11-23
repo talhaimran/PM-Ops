@@ -18,7 +18,6 @@ use App\Services\ColumnService;
 use App\Services\IssueService;
 use App\Services\ProjectService;
 use App\Services\SprintService;
-use App\Services\StatusService;
 use App\Services\UndoService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
@@ -36,7 +35,6 @@ class BoardController extends Controller
         private ColumnService $columns,
         private SprintService $sprints,
         private UndoService $undo,
-        private StatusService $statuses,
     ) {}
 
     public function show(BoardFilterRequest $request, Project $project): Response
@@ -61,21 +59,16 @@ class BoardController extends Controller
         $issue = $this->issues->resolve($request->user(), $key);
         Gate::authorize('update', $issue);
         $undoOf = $request->validate(['undo_of' => ['nullable', 'integer']])['undo_of'] ?? null;
-        $data = $request->validated();
-        // A drop names the column: the card takes its first status (spec 7.4). Undo sends the status name back.
-        if (isset($data['status'])) {
-            $data['status'] = $this->statuses->resolveFor($issue->project, $data['status'], firstOfColumn: true)->name;
-        }
 
         if ($undoOf) {
             $this->undo->guard($issue, (int) $undoOf);
-            $this->board->move($issue, $request->user(), $data, 'undid');
+            $this->board->move($issue, $request->user(), $request->validated(), 'undid');
 
             return back();
         }
 
         $before = $this->undo->forMove($issue);
-        $issue = $this->board->move($issue, $request->user(), $data);
+        $issue = $this->board->move($issue, $request->user(), $request->validated());
 
         return back()->with('undo', [
             'message' => $before['status'] === $issue->status->name ? "{$issue->key} moved" : "{$issue->key} moved to {$issue->status->name}",

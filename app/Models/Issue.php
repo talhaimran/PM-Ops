@@ -54,12 +54,12 @@ class Issue extends Model
     /** Spec 7.4: done is the status's category, never a column's position. */
     public function scopeDone(Builder $query): void
     {
-        $query->whereIn('issues.status_id', Status::select('id')->where('category', StatusCategory::Done));
+        $query->whereHas('status', fn ($status) => $status->where('category', StatusCategory::Done));
     }
 
     public function scopeOpen(Builder $query): void
     {
-        $query->whereNotIn('issues.status_id', Status::select('id')->where('category', StatusCategory::Done));
+        $query->whereHas('status', fn ($status) => $status->where('category', '!=', StatusCategory::Done));
     }
 
     public function assignee(): BelongsTo

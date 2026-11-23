@@ -68,7 +68,8 @@ export default function Board({
         setMoved(`${key} moved to ${lane}, position ${index + 1} of ${cards.length}`);
         router.post(
             route('issues.move', key),
-            { ...(laneChanged ? { status: lane } : {}), ...placement(index, cards) },
+            // Spec 7.4: a drop takes the column's first status (lanes are keyed by column name).
+            { ...(laneChanged ? { status: board.columns.find((c) => c.name === lane)!.statuses[0].name } : {}), ...placement(index, cards) },
             { preserveScroll: true, preserveState: true, onError: reset },
         );
     });

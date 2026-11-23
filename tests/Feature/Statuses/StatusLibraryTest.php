@@ -50,6 +50,8 @@ test('1-R4: a column can map an existing status or take a category', function ()
         ->assertJsonPath('data.statuses.0.category', 'done');
 
     expect(AuditLog::where('id', '>', $audits)->where('action', 'status.created')->pluck('target_label')->all())->toBe(['Released']);
+    $this->postJson('/api/v1/projects/WEB/columns', ['name' => 'Ship', 'status' => 'In Review', 'category' => 'done'])->assertUnprocessable()
+        ->assertJsonValidationErrors('category');
     $this->postJson('/api/v1/projects/WEB/columns', ['name' => 'X', 'category' => 'nope'])->assertUnprocessable()->assertJsonValidationErrors('category');
     $this->postJson('/api/v1/projects/WEB/columns', ['name' => 'X', 'status' => 'Nope'])->assertUnprocessable()
         ->assertJsonPath('errors.status.0', fn ($m) => str_starts_with($m, 'Unknown status "Nope".') && str_contains($m, 'Done, In Progress'));
@@ -79,6 +81,23 @@ test('an issue takes a status name, or a column name when that column has one st
 
     $this->patchJson('/api/v1/issues/WEB-1', ['status' => 'Nope'])->assertUnprocessable()
         ->assertJsonPath('errors.status.0', 'Unknown status "Nope". Valid statuses for WEB: To Do, In Progress, In Review, Done.');
+});
+
+test("a web drop lands in the dropped column's first status even when another column shows a status of that name", function () {
+    makeIssue($this->web, $this->admin);
+    $this->patchJson('/api/v1/projects/WEB/columns/Done', ['name' => 'Shipped'])->assertOk();
+    $this->postJson('/api/v1/projects/WEB/columns', ['name' => 'Done'])->assertCreated();
+
+    // What Board.tsx sends on a drop: the lane's first status, from the board props.
+    $lane = collect($this->actingAs($this->admin)->get(w('/projects/WEB'))->viewData('page')['props']['board']['columns'])->firstWhere('name', 'Done');
+    $this->post(w('/issues/WEB-1/move'), ['status' => $lane['statuses'][0]['name']])->assertSessionHasNoErrors();
+
+    $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.status', 'Done (WEB)')->assertJsonPath('data.category', 'in_progress');
+
+    // Undo sends the status name back.
+    $undo = session('undo');
+    $this->post($undo['url'], $undo['data'])->assertSessionHasNoErrors();
+    $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.status', 'To Do');
 });
 
 test('1-R3: renaming a column leaves the status and the issue unchanged', function () {

@@ -39,6 +39,8 @@ class IssueService
     public function create(Project $project, User $actor, array $data): Issue
     {
         return DB::transaction(function () use ($project, $actor, $data) {
+            // The project row first (as moves and column changes do), so the status read below can't race a column delete.
+            Project::whereKey($project->id)->lockForUpdate()->first();
             [$attributes, $labelIds, $status] = $this->resolveInput($project, $data, null);
 
             // A-L6: an agent can't skip the approval by creating the issue in Done, even when Done is the default (first) status.
@@ -75,6 +77,10 @@ class IssueService
     public function update(Issue $issue, User $actor, array $data, string $action = 'updated'): Issue
     {
         return DB::transaction(function () use ($issue, $actor, $data, $action) {
+            if (isset($data['status'])) {
+                // The project row first (as moves and column changes do), so the status read can't race a column delete.
+                Project::whereKey($issue->project_id)->lockForUpdate()->first();
+            }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
             [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);

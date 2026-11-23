@@ -53,17 +53,16 @@ class StatusService
 
     /**
      * The status an issue in $project may take for $name (1-R2: only statuses mapped to its columns): a status name,
-     * or a column name when that column has exactly one status. $firstOfColumn (a web board drop) takes the
-     * column's first status however many it has.
+     * or a column name when that column has exactly one status.
      */
-    public function resolveFor(Project $project, string $name, bool $firstOfColumn = false): Status
+    public function resolveFor(Project $project, string $name): Status
     {
         $mapped = $project->statuses()->get();
         $status = $mapped->first(fn ($s) => strcasecmp($s->name, trim($name)) === 0);
 
         if (! $status) {
             $inColumn = $mapped->filter(fn ($s) => strcasecmp($s->column_name, trim($name)) === 0);
-            $status = $firstOfColumn || $inColumn->count() === 1 ? $inColumn->first() : null;
+            $status = $inColumn->count() === 1 ? $inColumn->first() : null;
         }
 
         if (! $status) {
