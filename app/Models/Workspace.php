@@ -41,6 +41,11 @@ class Workspace extends Model
         return $this->hasMany(Project::class);
     }
 
+    public function statuses(): HasMany
+    {
+        return $this->hasMany(Status::class);
+    }
+
     public function entitlements(): HasMany
     {
         return $this->hasMany(WorkspaceEntitlement::class);

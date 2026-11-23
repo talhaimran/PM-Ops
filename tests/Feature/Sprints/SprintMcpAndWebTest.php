@@ -55,7 +55,7 @@ test('backlog page renders sprints and backlog', function () {
             ->component('Projects/Backlog')
             ->where('backlog.sprints.0.name', 'WEB Sprint 1')
             ->where('backlog.backlog.issues.0.key', 'WEB-1')
-            ->has('options.columns'));
+            ->has('options.statuses'));
 });
 
 test('web start, rank and complete', function () {

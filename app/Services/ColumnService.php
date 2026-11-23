@@ -2,25 +2,42 @@
 
 namespace App\Services;
 
+use App\Enums\StatusCategory;
 use App\Models\Column;
+use App\Models\Issue;
 use App\Models\Project;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ColumnService
 {
-    /** @param array{name: string, position?: ?int} $data */
-    public function create(Project $project, array $data): Column
+    public function __construct(private StatusService $statuses) {}
+
+    /**
+     * 1-R4: the column maps `status` (a library status name) when given, else a status named after the column in
+     * `category` (default in progress), reused or created.
+     *
+     * @param  array{name: string, position?: ?int, status?: ?string, category?: ?string}  $data
+     */
+    public function create(Project $project, User $actor, array $data): Column
     {
         $this->ensureUnique($project, $data['name']);
 
-        return DB::transaction(function () use ($project, $data) {
+        return DB::transaction(function () use ($project, $actor, $data) {
+            // The project row first, the same order as moves and approvals; it also keeps a status in one column.
+            Project::whereKey($project->id)->lockForUpdate()->first();
             $columns = $project->columns()->lockForUpdate()->get();
+            $workspace = $project->workspace()->firstOrFail();
+            $status = isset($data['status'])
+                ? $this->statuses->named($workspace, $data['status'])
+                : $this->statuses->forColumn($workspace, $data['name'], StatusCategory::from($data['category'] ?? StatusCategory::InProgress->value), $project->key, $actor);
             $column = $project->columns()->create(['name' => trim($data['name']), 'position' => $columns->count()]);
+            $this->statuses->attach($column->setRelation('project', $project), $status);
             $this->resequence($columns, $column, $data['position'] ?? $columns->count());
 
-            return $column;
+            return $column->load('statuses');
         });
     }
 
@@ -42,11 +59,11 @@ class ColumnService
                 $this->resequence($others, $column, $data['position']);
             }
 
-            return $column->refresh();
+            return $column->refresh()->load('statuses');
         });
     }
 
-    /** Delete a column; its issues move to $moveTo (required when it has any). */
+    /** Delete a column; its issues move to the first status of $moveTo (required when it has any). Its statuses stay in the library. */
     public function delete(Column $column, ?string $moveTo): void
     {
         $project = $column->project;
@@ -72,7 +89,9 @@ class ColumnService
             // The project row first, the same order as moves and approvals (CLAUDE.md, ApprovalService).
             Project::whereKey($column->project_id)->lockForUpdate()->first();
             // Soft-deleted issues move too (to the first column when no target was needed), so they can still be restored.
-            $column->issues()->withTrashed()->update(['column_id' => ($target ?? $others->sortBy('position')->first())->id]);
+            $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
+            Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'))
+                ->update(['status_id' => $to->id]);
             $column->delete();
             $this->resequence($others);
         });

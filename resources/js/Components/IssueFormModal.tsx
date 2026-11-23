@@ -29,7 +29,7 @@ export default function IssueFormModal({
         description: '',
         type: 'task',
         priority: 'medium',
-        status: options.columns[0] ?? '',
+        status: options.statuses[0]?.name ?? '',
         assignee: '',
         labels: [] as string[],
         story_points: '',
@@ -116,8 +116,8 @@ export default function IssueFormModal({
                         'Status',
                         'status',
                         <select id="status" className={`${selectClass} w-full`} value={form.data.status} onChange={(e) => form.setData('status', e.target.value)}>
-                            {options.columns.map((c) => (
-                                <option key={c}>{c}</option>
+                            {options.statuses.map((s) => (
+                                <option key={s.name}>{s.name}</option>
                             ))}
                         </select>,
                         form.errors.status,

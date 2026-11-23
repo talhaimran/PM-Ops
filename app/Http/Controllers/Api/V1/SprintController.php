@@ -23,7 +23,7 @@ class SprintController extends Controller
     public function index(Request $request, string $key): AnonymousResourceCollection
     {
         $project = $this->projects->resolve($request->user(), $key);
-        $query = $this->sprints->withStats($project->sprints()->getQuery(), $project)
+        $query = $this->sprints->withStats($project->sprints()->getQuery())
             ->when($request->query('state'), fn ($q, $state) => $q->where('state', $state))
             ->orderByDesc('id');
         [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'));
@@ -46,7 +46,7 @@ class SprintController extends Controller
         $project = $this->projects->resolve($request->user(), $key);
         $sprint = $this->sprints->resolve($project, $sprint);
 
-        return new SprintResource($this->sprints->withStats($project->sprints()->getQuery(), $project)->find($sprint->id));
+        return new SprintResource($this->sprints->withStats($project->sprints()->getQuery())->find($sprint->id));
     }
 
     /** Edit a planned or active sprint's name, goal or dates. */

@@ -54,7 +54,7 @@ export default function Issues({
                     onApply={apply}
                     onClear={() => router.get(route('projects.issues.index', project.key), filters.sort ? { sort: filters.sort } : {}, { replace: true })}
                 />
-                <IssueTable peek issues={issues.data} statuses={options.columns} sort={filters.sort} onSort={(sort) => apply({ sort })} />
+                <IssueTable peek issues={issues.data} sort={filters.sort} onSort={(sort) => apply({ sort })} />
                 <Pagination page={issues} />
             </div>
 

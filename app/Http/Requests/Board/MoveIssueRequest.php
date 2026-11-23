@@ -9,7 +9,7 @@ class MoveIssueRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => ['nullable', 'string', 'max:50'],
+            'status' => ['nullable', 'string', 'max:100'],
             'position' => ['nullable', 'integer', 'min:0', 'prohibits:after'],
             'after' => ['nullable', 'string', 'max:30'],
             // A-L5: why an agent asks to move to Done, shown to the person who decides.

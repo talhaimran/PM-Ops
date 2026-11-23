@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('project_summary')]
-#[Description('Project health: issue counts per status and type, open/overdue counts, and active sprint progress.')]
+#[Description('Project health: issue counts per board column and type, open (not Done-category) and overdue counts, and active sprint progress.')]
 #[IsReadOnly]
 class ProjectSummary extends Tool
 {

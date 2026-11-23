@@ -69,7 +69,7 @@ export default function IssueView({
                                 <IssueTypeIcon type={s.type ?? 'task'} subtask={subtasks} />
                                 <span className="shrink-0 text-muted">{s.key}</span>
                                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                {s.status && <StatusLozenge status={s.status} columns={options.columns} />}
+                                {s.status && s.category && <StatusLozenge status={s.status} category={s.category} />}
                             </Link>
                         </li>
                     ))}
@@ -152,8 +152,8 @@ export default function IssueView({
                         {picker(
                             'status',
                             issue.status,
-                            plain(options.columns),
-                            `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.status, options.columns)}`,
+                            plain(options.statuses.map((s) => s.name)),
+                            `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.category)}`,
                         )}
                         {can.contribute && (
                             <div className="ms-auto">
@@ -178,7 +178,7 @@ export default function IssueView({
                     </div>
                     <InputError message={errors.status} />
 
-                    <AiBox approvals={issue.pending_approvals} columns={options.columns} />
+                    <AiBox approvals={issue.pending_approvals} />
 
                     <section className="rounded-card bg-card-2">
                         <h2 className="px-4 pt-3 text-lg text-text">Details</h2>

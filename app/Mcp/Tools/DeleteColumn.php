@@ -37,7 +37,7 @@ class DeleteColumn extends Tool
         return [
             'project' => $schema->string()->description('Project key, e.g. WEB.')->required(),
             'column' => $schema->string()->description('Column name.')->required(),
-            'move_issues_to' => $schema->string()->description('Column that receives this column\'s issues (required if it has any).'),
+            'move_issues_to' => $schema->string()->description('Column whose first status this column\'s issues take (required if it has any).'),
         ];
     }
 }

@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Board;
 
+use App\Enums\StatusCategory;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ColumnRequest extends FormRequest
 {
@@ -16,6 +18,16 @@ class ColumnRequest extends FormRequest
         return [
             'name' => [...($creating ? ['required'] : ['sometimes', 'required']), 'string', 'max:50'],
             'position' => ['nullable', 'integer', 'min:0'],
+            // 1-R4, creating only: an existing library status to map, or the category of the status named after the column.
+            ...($creating ? [
+                'status' => ['nullable', 'string', 'max:100'],
+                'category' => ['nullable', Rule::enum(StatusCategory::class)],
+            ] : []),
         ];
+    }
+
+    public function messages(): array
+    {
+        return ['category.enum' => 'The category must be one of: '.implode(', ', array_column(StatusCategory::cases(), 'value')).'.'];
     }
 }

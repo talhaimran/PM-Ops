@@ -219,7 +219,7 @@ function deletables($t): array
     $issue = Issue::firstOrFail();
     $comment = app(CommentService::class)->add($issue, $t->owner, 'Note');
     app(LabelService::class)->create($t->web, ['name' => 'ux']);
-    app(ColumnService::class)->create($t->web, ['name' => 'Blocked']);
+    app(ColumnService::class)->create($t->web, $t->owner, ['name' => 'Blocked']);
     $sprint = app(SprintService::class)->create($t->web, ['name' => 'Sprint 9']);
 
     return [

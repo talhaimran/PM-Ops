@@ -26,7 +26,7 @@ class GetIssue extends Tool
         $issue = $issues->loadFull($issues->resolve($request->user(), $request->get('issue')));
 
         return $this->result(
-            "{$issue->key} [{$issue->type->value}, {$issue->column->name}, {$issue->priority->value}]: {$issue->title}",
+            "{$issue->key} [{$issue->type->value}, {$issue->status->name}, {$issue->priority->value}]: {$issue->title}",
             (new IssueResource($issue))->fields($data['fields'] ?? null),
         );
     }

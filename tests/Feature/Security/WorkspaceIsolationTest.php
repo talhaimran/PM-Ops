@@ -24,6 +24,7 @@ use App\Services\CurrentWorkspace;
 use App\Services\InvitationService;
 use App\Services\LabelService;
 use App\Services\SprintService;
+use App\Services\StatusService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -242,7 +243,8 @@ function isolationToolCases(): array
         Tools\GetBoard::class => ['project' => '{P}'],
         Tools\MoveIssue::class => ['issue' => '{I}', 'status' => '{COLN}'],
         Tools\ListColumns::class => ['project' => '{P}'],
-        Tools\CreateColumn::class => ['project' => '{P}', 'name' => 'x'],
+        // {COLN} is also the name of B's status for that column: it must not be found from A (Review Focus 4).
+        Tools\CreateColumn::class => ['project' => '{P}', 'name' => 'x', 'status' => '{COLN}'],
         Tools\UpdateColumn::class => ['project' => '{P}', 'column' => '{COLN}', 'name' => 'x'],
         Tools\DeleteColumn::class => ['project' => '{P}', 'column' => '{COLN}', ...$confirm],
         Tools\ListSprints::class => ['project' => '{P}'],
@@ -325,6 +327,8 @@ function workspaceSnapshot(Workspace $w): string
         DB::table('agents')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('approval_requests')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('ai_providers')->where('workspace_id', $w->id)->orderBy('id')->get(),
+        DB::table('statuses')->where('workspace_id', $w->id)->orderBy('id')->get(),
+        DB::table('column_statuses')->whereIn('column_id', Column::whereIn('project_id', $projects)->select('id'))->orderBy('column_id')->get(),
     ]));
 }
 
@@ -342,12 +346,12 @@ beforeEach(function () {
     $opsIssue = makeIssue($ops, $this->bob, ['title' => 'B-SECRET ops issue']);
     $this->bComment = app(CommentService::class)->add($opsIssue, $this->bob, 'B-SECRET comment');
     $this->bLabel = app(LabelService::class)->create($ops, ['name' => 'b-secret']);
-    $this->bColumn = app(ColumnService::class)->create($ops, ['name' => 'B-SECRET col']);
+    $this->bColumn = app(ColumnService::class)->create($ops, $this->bob, ['name' => 'B-SECRET col']);
     $this->bSprint = app(SprintService::class)->create($ops, ['name' => 'B-SECRET sprint']);
     $this->bInvitation = app(InvitationService::class)->invite($this->b, $this->bob, 'carol@example.com', WorkspaceRole::Member, $ops, ProjectRole::Member);
     $this->annB = app(AgentService::class)->create($this->ann, ['name' => 'B-SECRET token', 'level' => 'delete']);
     AiProvider::create(['workspace_id' => $this->b->id, 'provider' => 'anthropic', 'model' => 'B-SECRET model', 'key' => 'B-SECRET-key', 'monthly_token_cap' => 7]);
-    $this->bApproval = app(ApprovalService::class)->requestDone($opsIssue->setRelation('project', $ops), $this->ann, $this->annB[0], $ops->columns()->where('name', 'Done')->sole(), 'B-SECRET reason');
+    $this->bApproval = app(ApprovalService::class)->requestDone($opsIssue->setRelation('project', $ops), $this->ann, $this->annB[0], app(StatusService::class)->resolveFor($ops, 'Done'), 'B-SECRET reason');
 
     // Workspace A: ann's current workspace.
     $this->a = makeWorkspace($this->ann, 'alpha');

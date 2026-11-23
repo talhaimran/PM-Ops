@@ -28,7 +28,7 @@ function sendUndo($test)
     return $test->{$undo['method']}($undo['url'], $undo['data']);
 }
 
-$order = fn (string $column) => Issue::whereHas('column', fn ($q) => $q->where('name', $column))->orderBy('rank')->pluck('number')->all();
+$order = fn (string $column) => Issue::whereHas('status', fn ($q) => $q->where('name', $column))->orderBy('rank')->pluck('number')->all();
 
 test('undo of a board move returns the issue to its column and position', function () use ($order) {
     foreach (range(1, 3) as $i) {
@@ -65,7 +65,7 @@ test('undo of a status change from the issue page', function () {
     expect(session('undo.message'))->toBe('WEB-1 moved to In Review');
 
     sendUndo($this)->assertSessionHasNoErrors();
-    expect(Issue::sole()->column->name)->toBe('To Do');
+    expect(Issue::sole()->status->name)->toBe('To Do');
 });
 
 test('undo of field edits restores the exact previous values', function () {
@@ -122,7 +122,7 @@ test('undo stops with a message when someone else changed the issue meanwhile', 
     app(IssueService::class)->update($issue->fresh(), $this->sam, ['status' => 'Done']);
 
     $this->post($undo['url'], $undo['data'])->assertSessionHasErrors(['undo' => "Can't undo: Sam Member moved WEB-1 to Done."]);
-    expect(Issue::sole()->column->name)->toBe('Done');
+    expect(Issue::sole()->status->name)->toBe('Done');
 });
 
 test('a comment by someone else does not block undo', function () {
@@ -145,7 +145,7 @@ test('undo into a column that was deleted meanwhile fails with the valid options
 
     $this->post($undo['url'], $undo['data'])->assertSessionHasErrors('status');
     expect(session('errors')->first('status'))->toContain('To Do, In Progress, Done');
-    expect(Issue::sole()->column->name)->toBe('Done');
+    expect(Issue::sole()->status->name)->toBe('Done');
 });
 
 test('the same undo cannot run twice', function () {

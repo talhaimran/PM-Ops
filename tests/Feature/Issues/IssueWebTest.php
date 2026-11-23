@@ -17,7 +17,7 @@ test('project board page includes create options', function () {
         ->assertInertia(fn (Assert $page) => $page
             ->component('Projects/Board')
             ->where('board.columns.0.issues.0.key', 'WEB-1')
-            ->has('options.columns', 4)
+            ->has('options.statuses', 4)
             ->has('options.types', 4));
 });
 

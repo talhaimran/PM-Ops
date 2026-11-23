@@ -16,7 +16,7 @@ class StoreIssueRequest extends FormRequest
             'description' => ['nullable', 'string', 'max:65535'],
             'type' => [Rule::enum(IssueType::class)],
             'priority' => [Rule::enum(IssuePriority::class)],
-            'status' => ['string', 'max:50'],
+            'status' => ['string', 'max:100'],
             'assignee' => ['nullable', 'string', 'max:255'],
             'labels' => ['nullable', 'array', 'max:20'],
             'labels.*' => ['string', 'max:50'],

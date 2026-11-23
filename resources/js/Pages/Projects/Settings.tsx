@@ -9,9 +9,10 @@ import { selectClass } from '@/Components/IssueFormModal';
 import PrimaryButton from '@/Components/PrimaryButton';
 import { ProjectHeader } from '@/Components/ProjectNav';
 import SecondaryButton from '@/Components/SecondaryButton';
+import StatusLozenge from '@/Components/StatusLozenge';
 import TextInput from '@/Components/TextInput';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Invitation, Label, Project, ProjectRole } from '@/types';
+import { Invitation, Label, Project, ProjectRole, StatusCategory } from '@/types';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { FormEventHandler, useState } from 'react';
 
@@ -29,7 +30,7 @@ export default function Settings({
     invitations: Invitation[];
     roles: ProjectRole[];
     labels: Label[];
-    columns: { id: number; name: string; position: number; issue_count: number }[];
+    columns: { id: number; name: string; position: number; statuses: { name: string; category: StatusCategory }[]; issue_count: number }[];
     deletedIssues: { key: string; title: string; deleted_at: string; deleted_by: string | null }[];
     modeC: { project: boolean; workspace: boolean; provider: boolean };
     can: { manage: boolean; contribute: boolean };
@@ -222,7 +223,7 @@ export default function Settings({
                 {can.manage && (
                     <section className={card}>
                         <h3 className={heading}>Board columns</h3>
-                        <InputError className="mt-2" message={pageErrors.move_issues_to ?? pageErrors.column} />
+                        <InputError className="mt-2" message={pageErrors.move_issues_to ?? pageErrors.column ?? pageErrors.status} />
                         <ol className="mt-4 space-y-2">
                             {columns.map((c, i) => (
                                 <li key={c.id} className="flex flex-wrap items-center gap-2 text-sm">
@@ -236,6 +237,10 @@ export default function Settings({
                                             router.patch(columnRoute('projects.columns.update', c.id), { name: e.target.value }, { preserveScroll: true })
                                         }
                                     />
+                                    {/* Renaming the column keeps these names (1-R3); workspace admins rename statuses. */}
+                                    {c.statuses.map((s) => (
+                                        <StatusLozenge key={s.name} status={s.name} category={s.category} />
+                                    ))}
                                     <SecondaryButton
                                         aria-label={`Move ${c.name} left`}
                                         disabled={i === 0}

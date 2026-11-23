@@ -7,7 +7,7 @@ import { Issue } from '@/types';
 import { Link } from '@inertiajs/react';
 import { ArrowDown, ArrowUp } from 'lucide-react';
 
-type Column = { sort?: string; label: string; className?: string; cell: (i: Issue, statuses?: string[], peek?: boolean) => React.ReactNode };
+type Column = { sort?: string; label: string; className?: string; cell: (i: Issue, peek?: boolean) => React.ReactNode };
 
 const columns: Column[] = [
     { sort: 'type', label: 'Type', className: 'w-12', cell: (i) => <IssueTypeIcon type={i.type} subtask={!!i.parent} /> },
@@ -26,13 +26,13 @@ const columns: Column[] = [
         label: 'Summary',
         className: 'min-w-48',
         // The summary peeks where the page has a drawer; the key always goes to the full page.
-        cell: (i, _statuses, peek) => (
+        cell: (i, peek) => (
             <Link href={issueUrl(i.key)} onClick={peek ? onPeekClick(i.key) : undefined} className="line-clamp-1 hover:text-primary hover:underline">
                 {i.title}
             </Link>
         ),
     },
-    { sort: 'status', label: 'Status', className: 'w-36', cell: (i, statuses) => <StatusLozenge status={i.status} columns={statuses} /> },
+    { sort: 'status', label: 'Status', className: 'w-36', cell: (i) => <StatusLozenge status={i.status} category={i.category} /> },
     {
         sort: 'assignee',
         label: 'Assignee',
@@ -69,21 +69,17 @@ const columns: Column[] = [
 
 /**
  * Compact issue list as a real table (th scope, aria-sort) with clickable sortable headers. `sort` is the current value ("-" prefix = descending).
- * Pass the project's `statuses` (column names) to colour status lozenges.
- * shortcut: cross-project search passes none, so its lozenges are gray; add a status category to IssueResource if that matters.
  */
 export default function IssueTable({
     issues,
     sort,
     onSort,
-    statuses,
     peek = false,
     empty = 'No issues match these filters.',
 }: {
     issues: Issue[];
     sort?: string;
     onSort?: (sort: string) => void;
-    statuses?: string[];
     peek?: boolean;
     empty?: string;
 }) {
@@ -132,7 +128,7 @@ export default function IssueTable({
                         <tr key={i.id} className="h-11 hover:bg-card-2">
                             {columns.map((c) => (
                                 <td key={c.label} className={`px-3 py-1.5 ${c.className ?? ''}`}>
-                                    {c.cell(i, statuses, peek)}
+                                    {c.cell(i, peek)}
                                 </td>
                             ))}
                         </tr>

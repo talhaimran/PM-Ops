@@ -54,7 +54,7 @@ test('demo seed leaves one pending approval that demo can decide', function () {
 
     expect($approval->agent->name)->toBe('Demo token')
         ->and($approval->issue->key)->toBe('WEB-5')
-        ->and($approval->action['to_column'])->toBe('Done')
+        ->and($approval->action['to_status'])->toBe('Done')
         ->and($demo->can('decide', $approval))->toBeTrue();
 });
 

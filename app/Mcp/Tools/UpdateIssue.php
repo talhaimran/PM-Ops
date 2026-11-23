@@ -43,7 +43,7 @@ class UpdateIssue extends Tool
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
             'title' => $schema->string()->max(255),
             ...$this->issueFields($schema),
-            'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),
+            'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to a Done-category status.'),
         ];
     }
 }

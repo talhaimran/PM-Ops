@@ -21,14 +21,13 @@ function expiresIn(at: string): string {
 /**
  * Design system approval card (A2): an agent's move to Done waiting for a person. Sky tile when pending; butter
  * (`is-stale`) when the issue moved since, so approving confirms the change; read-only once expired or stale.
- * `linkIssue` names the issue as a link (dashboard); `columns` colours the status pills.
+ * `linkIssue` names the issue as a link (dashboard).
  */
-export default function ApprovalCard({ approval: a, canDecide, linkIssue = false, columns }: { approval: ApprovalRequest; canDecide: boolean; linkIssue?: boolean; columns?: string[] }) {
+export default function ApprovalCard({ approval: a, canDecide, linkIssue = false }: { approval: ApprovalRequest; canDecide: boolean; linkIssue?: boolean }) {
     const [busy, setBusy] = useState(false);
     const [noting, setNoting] = useState(false);
     const [note, setNote] = useState('');
     const pending = a.status === 'pending';
-    const pills = columns ?? [a.from, a.to];
     const send = (action: 'approve' | 'reject', data: Record<string, unknown>) =>
         router.post(route(`approvals.${action}`, a.id), data as never, { preserveScroll: true, onStart: () => setBusy(true), onFinish: () => setBusy(false) });
 
@@ -51,14 +50,15 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
             </div>
             {linkIssue && <p className="truncate text-sm">{a.title}</p>}
             <div className="flex flex-wrap items-center gap-2 text-xs">
-                <StatusLozenge status={a.from} columns={pills} />
+                {a.from && a.from_category && <StatusLozenge status={a.from} category={a.from_category} />}
                 <ArrowRight className="h-4 w-4" aria-label="to" />
-                <StatusLozenge status={a.to} columns={pills} />
+                {/* Requests are only for Done-category statuses. */}
+                <StatusLozenge status={a.to} category="done" />
             </div>
             {a.reason && <p className="text-sm">{a.reason}</p>}
             {pending && a.moved && (
                 <p className="text-sm font-semibold">
-                    {a.issue} moved from {a.from} to {a.now} since this request. Review before approving.
+                    {a.issue} moved from {a.from ?? 'a deleted status'} to {a.now} since this request. Review before approving.
                 </p>
             )}
             {pending && canDecide && (

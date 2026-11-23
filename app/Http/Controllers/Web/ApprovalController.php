@@ -22,7 +22,7 @@ class ApprovalController extends Controller
         $issue = $this->approvals->approve($approval, $request->user(), $request->boolean('confirm_changed'))->issue;
 
         return back()->with('undo', [
-            'message' => "{$issue->key} moved to {$issue->column->name}",
+            'message' => "{$issue->key} moved to {$issue->status->name}",
             'method' => 'post',
             'url' => route('issues.move', $issue->key),
             'data' => [...$before, 'undo_of' => $this->undo->token($issue)],

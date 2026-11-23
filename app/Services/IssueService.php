@@ -9,6 +9,7 @@ use App\Models\Activity;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
+use App\Models\Status;
 use App\Models\User;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,36 +22,37 @@ use Illuminate\Validation\ValidationException;
 class IssueService
 {
     /** Relations needed to render an issue (IssueResource) and its activity diff. */
-    public const DISPLAY = ['project', 'column', 'assignee', 'reporter', 'epic', 'parent', 'labels', 'sprint'];
+    public const DISPLAY = ['project', 'status', 'assignee', 'reporter', 'epic', 'parent', 'labels', 'sprint'];
 
     public function __construct(
         private ProjectService $projects,
         private ActivityLogger $activity,
         private RankService $ranks,
         private ApprovalService $approvals,
+        private StatusService $statuses,
     ) {}
 
     /**
-     * Create an issue. $data uses the shared input shape: status = column name, assignee = email,
+     * Create an issue. $data uses the shared input shape: status = status name, assignee = email,
      * labels = names, epic/parent = issue keys.
      */
     public function create(Project $project, User $actor, array $data): Issue
     {
         return DB::transaction(function () use ($project, $actor, $data) {
-            [$attributes, $labelIds, $column] = $this->resolveInput($project, $data, null);
+            [$attributes, $labelIds, $status] = $this->resolveInput($project, $data, null);
 
-            // A-L6: an agent can't skip the approval by creating the issue in Done, even when Done is the only (default) column.
-            $column ??= $project->columns()->first();
-            if ($column && $this->approvals->needsApproval((new Issue)->setRelation('project', $project), $column, $actor->agent())) {
+            // A-L6: an agent can't skip the approval by creating the issue in Done, even when Done is the default (first) status.
+            $status ??= $project->statuses()->first();
+            if ($this->approvals->needsApproval(new Issue, $status, $actor->agent())) {
                 throw ValidationException::withMessages([
-                    'status' => "Agents can't create issues in {$column->name}. Create it in another column, then move it; a person approves the move.",
+                    'status' => "Agents can't create issues in {$status->name}. Create it in another status, then move it; a person approves the move.",
                 ]);
             }
 
             $issue = Issue::create([
                 'type' => IssueType::Task,
                 'priority' => IssuePriority::Medium,
-                'column_id' => $column?->id,
+                'status_id' => $status->id,
                 ...$attributes,
                 'project_id' => $project->id,
                 'number' => $this->nextNumber($project),
@@ -75,12 +77,12 @@ class IssueService
         return DB::transaction(function () use ($issue, $actor, $data, $action) {
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
-            [$attributes, $labelIds, $column] = $this->resolveInput($issue->project, $data, $issue);
+            [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);
 
             $issue->heldApproval = null;
-            if ($column && $this->approvals->needsApproval($issue, $column, $agent = $actor->agent())) {
-                unset($attributes['column_id']);
-                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $column, $data['reason'] ?? null);
+            if ($status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent())) {
+                unset($attributes['status_id']);
+                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null);
             }
 
             $issue->update($attributes);
@@ -248,8 +250,8 @@ class IssueService
     public function loadFull(Issue $issue): Issue
     {
         return $issue->loadMissing(self::DISPLAY)->load([
-            'subtasks' => fn ($q) => $q->with('column')->orderBy('number'),
-            'epicIssues' => fn ($q) => $q->with('column')->orderBy('number')->limit(100),
+            'subtasks' => fn ($q) => $q->with('status')->orderBy('number'),
+            'epicIssues' => fn ($q) => $q->with('status')->orderBy('number')->limit(100),
             'comments' => fn ($q) => $q->with(['author', 'agent.owner'])->oldest()->limit(100),
             'pendingApprovals.agent.owner',
         ]);
@@ -309,7 +311,8 @@ class IssueService
             'key' => $query->orderBy('issues.project_id', $direction)->orderBy('issues.number', $direction),
             'priority' => $query->orderByRaw('FIELD(issues.priority, '.$this->quoted(IssuePriority::values()).') '.$direction),
             'type' => $query->orderByRaw('FIELD(issues.type, '.$this->quoted(IssueType::values()).') '.$direction),
-            'status' => $query->orderBy(Column::select('position')->whereColumn('columns.id', 'issues.column_id'), $direction),
+            // Board order: the mapped column's position, then the status's place in that column.
+            'status' => $query->orderBy($this->mappedColumn('columns.position'), $direction)->orderBy($this->mappedColumn('column_statuses.position'), $direction),
             'assignee' => $query->orderBy(User::select('name')->whereColumn('users.id', 'issues.assignee_id'), $direction),
             'created' => $query->orderBy('issues.created_at', $direction),
             'updated' => $query->orderBy('issues.updated_at', $direction),
@@ -317,6 +320,13 @@ class IssueService
         };
 
         return $query->orderBy('issues.id', $direction);
+    }
+
+    /** $field of the issue's status mapping in its own project, as an order-by subquery. */
+    private function mappedColumn(string $field): Builder
+    {
+        return Column::select($field)->join('column_statuses', 'column_statuses.column_id', '=', 'columns.id')
+            ->whereColumn('column_statuses.status_id', 'issues.status_id')->whereColumn('columns.project_id', 'issues.project_id');
     }
 
     private function quoted(array $values): string
@@ -336,12 +346,12 @@ class IssueService
     /**
      * Turn the shared input shape into column values. Only keys present in $data are touched.
      *
-     * @return array{0: array<string, mixed>, 1: ?list<int>, 2: ?Column} the column when `status` was given
+     * @return array{0: array<string, mixed>, 1: ?list<int>, 2: ?Status} the status when `status` was given
      */
     private function resolveInput(Project $project, array $data, ?Issue $issue): array
     {
         $attributes = collect($data)->only(['title', 'description', 'story_points', 'due_date'])->all();
-        $labelIds = $column = null;
+        $labelIds = $status = null;
 
         if (isset($data['type'])) {
             $attributes['type'] = IssueType::from($data['type']);
@@ -350,8 +360,8 @@ class IssueService
             $attributes['priority'] = IssuePriority::from($data['priority']);
         }
         if (isset($data['status'])) {
-            $column = $this->resolveColumn($project, $data['status']);
-            $attributes['column_id'] = $column->id;
+            $status = $this->statuses->resolveFor($project, $data['status']);
+            $attributes['status_id'] = $status->id;
         }
         if (array_key_exists('assignee', $data)) {
             $attributes['assignee_id'] = $data['assignee'] === null ? null : $this->resolveAssigneeId($project, $data['assignee']);
@@ -377,7 +387,7 @@ class IssueService
             $this->validateLinks($project, $issue, $attributes, $epic, $parent);
         }
 
-        return [$attributes, $labelIds, $column];
+        return [$attributes, $labelIds, $status];
     }
 
     private function validateLinks(Project $project, ?Issue $issue, array $attributes, ?Issue $epic, ?Issue $parent): void
@@ -438,20 +448,6 @@ class IssueService
         return $sprint->id;
     }
 
-    private function resolveColumn(Project $project, string $name): Column
-    {
-        $columns = $project->columns()->get(['id', 'project_id', 'name']);
-        $column = $columns->first(fn ($c) => strcasecmp($c->name, trim($name)) === 0);
-
-        if (! $column) {
-            throw ValidationException::withMessages([
-                'status' => "Unknown status \"{$name}\". Valid statuses for {$project->key}: ".$columns->pluck('name')->implode(', ').'.',
-            ]);
-        }
-
-        return $column;
-    }
-
     private function resolveAssigneeId(Project $project, string $email): int
     {
         $id = $project->members()->where('email', strtolower(trim($email)))->value('users.id');
@@ -508,7 +504,7 @@ class IssueService
             'description' => $issue->description === null ? null : Str::limit($issue->description, 200),
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
-            'status' => $issue->column->name,
+            'status' => $issue->status->name,
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->sort()->values()->implode(', ') ?: null,
             'story_points' => $issue->story_points,

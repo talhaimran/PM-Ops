@@ -3,12 +3,12 @@
 namespace App\Services;
 
 use App\Enums\SprintState;
+use App\Enums\StatusCategory;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class DashboardService
@@ -18,7 +18,7 @@ class DashboardService
     {
         $query = Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'))
             ->where('assignee_id', $user->id)
-            ->where(fn ($q) => $this->notDone($q))
+            ->open()
             ->with(IssueService::DISPLAY);
 
         return $query
@@ -41,37 +41,37 @@ class DashboardService
     public function summaries(Collection $projects): array
     {
         $ids = $projects->pluck('id');
-        $columns = Column::whereIn('project_id', $ids)->orderBy('position')->get()->groupBy('project_id');
-        $doneIds = $columns->map(fn ($c) => $c->last()->id);
-
-        $byColumn = Issue::whereIn('project_id', $ids)
-            ->selectRaw('column_id, count(*) as total')->groupBy('column_id')->pluck('total', 'column_id');
+        $columns = Column::whereIn('project_id', $ids)->with('statuses')->orderBy('position')->get()->groupBy('project_id');
+        $byStatus = Issue::whereIn('issues.project_id', $ids)->join('statuses', 'statuses.id', '=', 'issues.status_id')
+            ->selectRaw('issues.project_id, issues.status_id, statuses.category, count(*) as total')
+            ->groupBy('issues.project_id', 'issues.status_id', 'statuses.category')->get()->groupBy('project_id');
         $byType = Issue::whereIn('project_id', $ids)
             ->selectRaw('project_id, type, count(*) as total')->groupBy('project_id', 'type')->get()->groupBy('project_id');
         $overdue = Issue::whereIn('project_id', $ids)
-            ->where(fn ($q) => $this->notDone($q))
+            ->open()
             ->whereDate('due_date', '<', today())
             ->selectRaw('project_id, count(*) as total')->groupBy('project_id')->pluck('total', 'project_id');
 
         $sprints = Sprint::whereIn('project_id', $ids)
             ->where('state', SprintState::Active->value)
-            ->withCount(['issues', 'issues as issues_done' => fn ($q) => $this->done($q)])
+            ->withCount(['issues', 'issues as issues_done' => fn ($q) => $q->done()])
             ->withSum('issues as points_total', 'story_points')
-            ->withSum(['issues as points_done' => fn ($q) => $this->done($q)], 'story_points')
+            ->withSum(['issues as points_done' => fn ($q) => $q->done()], 'story_points')
             ->get()
             ->keyBy('project_id');
 
-        return $projects->mapWithKeys(function ($project) use ($columns, $doneIds, $byColumn, $byType, $overdue, $sprints) {
+        return $projects->mapWithKeys(function ($project) use ($columns, $byStatus, $byType, $overdue, $sprints) {
+            $counts = $byStatus[$project->id] ?? collect();
+            // Per board column, as the board shows them.
             $statuses = ($columns[$project->id] ?? collect())
-                ->map(fn ($c) => ['name' => $c->name, 'count' => (int) ($byColumn[$c->id] ?? 0)])->values();
-            $done = (int) ($byColumn[$doneIds[$project->id] ?? 0] ?? 0);
+                ->map(fn ($c) => ['name' => $c->name, 'count' => (int) $counts->whereIn('status_id', $c->statuses->modelKeys())->sum('total')])->values();
             $sprint = $sprints[$project->id] ?? null;
 
             return [$project->id => [
                 'statuses' => $statuses->all(),
                 'types' => ($byType[$project->id] ?? collect())->mapWithKeys(fn ($r) => [$r->type->value => (int) $r->total])->all(),
-                'total' => $statuses->sum('count'),
-                'open' => $statuses->sum('count') - $done,
+                'total' => (int) $counts->sum('total'),
+                'open' => (int) $counts->where('category', '!=', StatusCategory::Done->value)->sum('total'),
                 'overdue' => (int) ($overdue[$project->id] ?? 0),
                 'active_sprint' => $sprint ? [
                     'name' => $sprint->name,
@@ -84,16 +84,5 @@ class DashboardService
                 ] : null,
             ]];
         })->all();
-    }
-
-    /** Issue sits in its project's last column. */
-    private function done(Builder $query): Builder
-    {
-        return $query->whereRaw('issues.column_id = (select c.id from columns c where c.project_id = issues.project_id order by c.position desc limit 1)');
-    }
-
-    private function notDone(Builder $query): Builder
-    {
-        return $query->whereRaw('issues.column_id <> (select c.id from columns c where c.project_id = issues.project_id order by c.position desc limit 1)');
     }
 }

@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Spec 8 (A2): an agent's move that needs a person. Before step 1, `action` is
- * {to_column_id, to_column, from_column_id, reason} and "Done" is the project's last column.
+ * Spec 8 (A2): an agent's move into a Done-category status that needs a person. `action` is
+ * {to_status_id, to_status, from_status_id, reason}; to_status keeps the name if the status goes.
  */
 #[Fillable(['workspace_id', 'issue_id', 'agent_id', 'owner_user_id', 'action', 'issue_version', 'status', 'decided_by', 'decided_at', 'note', 'expires_at'])]
 class ApprovalRequest extends Model

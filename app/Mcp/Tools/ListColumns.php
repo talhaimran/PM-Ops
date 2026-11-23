@@ -14,7 +14,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[Name('list_columns')]
-#[Description('List a project\'s board columns (valid issue statuses) in order, with issue counts.')]
+#[Description('List a project\'s board columns in order, each with its statuses (name, category) and issue count.')]
 #[IsReadOnly]
 class ListColumns extends Tool
 {
@@ -24,7 +24,7 @@ class ListColumns extends Tool
     {
         $request->validate(['project' => 'required|string']);
         $project = $projects->resolve($request->user(), $request->get('project'));
-        $columns = $project->columns()->withCount('issues')->get();
+        $columns = $project->columns()->with('statuses')->withCount('issues')->get();
 
         return $this->result("{$project->key} columns: ".$columns->pluck('name')->implode(', ').'.', ColumnResource::collection($columns)->resolve());
     }

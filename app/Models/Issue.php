@@ -4,7 +4,9 @@ namespace App\Models;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\StatusCategory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -13,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'project_id', 'number', 'title', 'description', 'type', 'priority', 'column_id',
+    'project_id', 'number', 'title', 'description', 'type', 'priority', 'status_id',
     'assignee_id', 'reporter_id', 'story_points', 'due_date', 'epic_id', 'parent_id', 'sprint_id', 'rank',
 ])]
 class Issue extends Model
@@ -44,9 +46,20 @@ class Issue extends Model
         return $this->belongsTo(Project::class);
     }
 
-    public function column(): BelongsTo
+    public function status(): BelongsTo
     {
-        return $this->belongsTo(Column::class);
+        return $this->belongsTo(Status::class);
+    }
+
+    /** Spec 7.4: done is the status's category, never a column's position. */
+    public function scopeDone(Builder $query): void
+    {
+        $query->whereIn('issues.status_id', Status::select('id')->where('category', StatusCategory::Done));
+    }
+
+    public function scopeOpen(Builder $query): void
+    {
+        $query->whereNotIn('issues.status_id', Status::select('id')->where('category', StatusCategory::Done));
     }
 
     public function assignee(): BelongsTo

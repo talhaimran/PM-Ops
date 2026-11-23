@@ -6,6 +6,7 @@ use App\Models\Agent;
 use App\Models\AuditLog;
 use App\Models\Issue;
 use App\Models\Project;
+use App\Models\Status;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -83,6 +84,7 @@ class AuditLogger
             $target instanceof User, $target instanceof WorkspaceInvitation => $target->email,
             $target instanceof PersonalAccessToken => $target->name,
             $target instanceof Agent => $target->label(),
+            $target instanceof Status => $target->name,
             default => null,
         };
     }

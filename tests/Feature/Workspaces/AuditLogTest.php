@@ -214,7 +214,7 @@ test('Owners and Admins read the log of this workspace only; Members cannot', fu
     $this->actingAs($member)->get('/acme/settings/audit-log/export')->assertForbidden();
     $this->actingAs($admin)->get('/acme/settings/audit-log')->assertInertia(fn (Assert $page) => $page
         ->component('Workspaces/Settings/AuditLog')
-        ->where('entries.data', fn ($rows) => collect($rows)->pluck('action')->sort()->values()->all() === ['project.created', 'workspace.created'])
+        ->where('entries.data', fn ($rows) => collect($rows)->pluck('action')->sort()->values()->all() === ['project.created', 'status.created', 'status.created', 'status.created', 'status.created', 'workspace.created'])
         ->where('entries.data.0.actor', 'Olive'));
 });
 
@@ -230,7 +230,7 @@ test('filters by actor, action group and date', function () {
     expect(collect($get(['actor' => $admin->id]))->pluck('action')->all())->toBe(['agent.created'])
         ->and(collect($get(['group' => 'workspace']))->pluck('action')->all())->toBe(['workspace.created'])
         ->and(collect($get(['from' => now()->toDateString()]))->pluck('action')->all())->toBe(['agent.created'])
-        ->and(collect($get(['to' => now()->subDays(1)->toDateString()]))->pluck('action')->sort()->values()->all())->toBe(['project.created', 'workspace.created']);
+        ->and(collect($get(['to' => now()->subDays(1)->toDateString()]))->pluck('action')->sort()->values()->all())->toBe(['project.created', 'status.created', 'status.created', 'status.created', 'status.created', 'workspace.created']);
 });
 
 test('CSV export follows the filter, newest first, logs audit_log.exported and is capped (E9)', function () {

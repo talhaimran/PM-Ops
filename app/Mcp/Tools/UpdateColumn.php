@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Tool;
 use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
 #[Name('update_column')]
-#[Description('Rename and/or reposition a board column, addressed by its current name (admins only).')]
+#[Description('Rename and/or reposition a board column, addressed by its current name (admins only). Its statuses keep their names.')]
 #[IsIdempotent]
 class UpdateColumn extends Tool
 {

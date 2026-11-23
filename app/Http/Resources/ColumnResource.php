@@ -15,6 +15,7 @@ class ColumnResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'position' => $this->position,
+            'statuses' => $this->whenLoaded('statuses', fn () => StatusResource::collection($this->statuses)->resolve()),
             'issue_count' => $this->whenCounted('issues'),
         ];
     }
