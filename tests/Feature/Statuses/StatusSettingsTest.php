@@ -6,6 +6,7 @@ use App\Enums\WorkspaceRole;
 use App\Models\AuditLog;
 use App\Models\Status;
 use App\Models\User;
+use App\Services\StatusService;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // Spec 7.4: Settings → Statuses (Owners and Admins) and the project column editor's status mapping (project Admins).
@@ -82,12 +83,12 @@ test('recolour uses the palette; null goes back to the category colour; renaming
     $this->patch(w("/settings/statuses/{$done->id}"), ['color' => null])->assertSessionHasNoErrors();
     expect($done->fresh()->color)->toBeNull();
 
-    $this->patch(w("/projects/WEB/columns/".($this->col)('Done')->id), ['name' => 'Shipped']);
+    $this->patch(w('/projects/WEB/columns/'.($this->col)('Done')->id), ['name' => 'Shipped']);
     expect($done->fresh()->name)->toBe('Done');
 });
 
 test('delete works only with no issue (soft-deleted too) and no column; it logs status.deleted', function () {
-    $qa = app(App\Services\StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::InProgress);
+    $qa = app(StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::InProgress);
     $this->actingAs($this->alex)->delete(w("/settings/statuses/{$qa->id}"))->assertSessionHasNoErrors();
     expect(Status::find($qa->id))->toBeNull()
         ->and(AuditLog::where('action', 'status.deleted')->sole()->metadata)->toEqual(['name' => 'QA', 'category' => 'in_progress']);
@@ -107,7 +108,7 @@ test('delete works only with no issue (soft-deleted too) and no column; it logs 
 });
 
 test('a project Admin attaches a library status, or creates one with a name and category', function () {
-    $qa = app(App\Services\StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::InProgress);
+    $qa = app(StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::InProgress);
     $col = ($this->col)('In Review');
     $audits = AuditLog::where('action', 'status.created')->count();
 
@@ -134,7 +135,7 @@ test('a status in another column of the project is refused naming that column', 
 
 test('detaching refuses a status its issues use, and the last status of a column', function () {
     $col = ($this->col)('To Do');
-    $qa = app(App\Services\StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::ToDo);
+    $qa = app(StatusService::class)->create($this->ws, $this->owner, 'QA', StatusCategory::ToDo);
     $this->actingAs($this->owner)->post(w("/projects/WEB/columns/{$col->id}/statuses"), ['status' => 'QA']);
     makeIssue($this->web, $this->owner, ['status' => 'QA']);
 

@@ -99,6 +99,7 @@ class StatusService
 
         $column->statuses()->syncWithoutDetaching([$status->id => ['position' => $column->statuses()->count()]]);
     }
+
     /** The column editor's "Create": a new library status. An existing name is a 422 that says to pick it instead. Call inside the workspace lock. */
     public function create(Workspace $workspace, User $actor, string $name, StatusCategory $category): Status
     {

@@ -10,7 +10,8 @@ import PriorityIcon from '@/Components/PriorityIcon';
 import PrimaryButton from '@/Components/PrimaryButton';
 import ResolutionChip, { DuplicateOfModal, resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import SecondaryButton from '@/Components/SecondaryButton';
-import StatusLozenge, { lozengeClass } from '@/Components/StatusLozenge';
+import StatusLozenge from '@/Components/StatusLozenge';
+import StatusMenu from '@/Components/StatusMenu';
 import TextInput from '@/Components/TextInput';
 import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
@@ -194,12 +195,14 @@ export default function IssueView({
 
             <aside className={`space-y-4 ${full ? 'lg:col-start-2 lg:row-span-2 lg:row-start-1' : ''}`}>
                     <div className="flex items-center gap-2">
-                        {picker(
-                            'status',
-                            issue.status,
-                            plain(options.statuses.map((s) => s.name)),
-                            `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.category)}`,
-                        )}
+                        <StatusMenu
+                            value={issue.status}
+                            category={issue.category}
+                            color={options.statuses.find((s) => s.name === issue.status)?.color}
+                            statuses={options.statuses}
+                            disabled={!can.contribute}
+                            onChange={(status) => save({ status })}
+                        />
                         {issue.resolution && <ResolutionChip issueKey={issue.key} version={issue.version} resolution={issue.resolution} editable={can.contribute} />}
                         {can.contribute && (
                             <div className="ms-auto">

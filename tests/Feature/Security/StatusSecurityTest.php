@@ -2,11 +2,13 @@
 
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
+use App\Enums\StatusCategory;
 use App\Models\AuditLog;
 use App\Models\Issue;
 use App\Models\Status;
 use App\Models\User;
 use App\Policies\ProjectPolicy;
+use App\Services\StatusService;
 use Illuminate\Support\Facades\DB;
 
 // Review Focus 4: another workspace's status is never accepted, and errors don't reveal that it exists.
@@ -95,7 +97,7 @@ test("B's status can't be a merge target, renamed, recoloured, deleted or attach
 
 test('Review Focus 5: a merge never leaves an issue on a missing status or a project with one status in two columns', function () {
     $issue = Issue::sole();
-    $review = app(App\Services\StatusService::class)->create($this->a, $this->ann, 'Review', App\Enums\StatusCategory::InProgress);
+    $review = app(StatusService::class)->create($this->a, $this->ann, 'Review', StatusCategory::InProgress);
     $this->web->columns()->where('name', 'In Review')->sole()->statuses()->attach($review->id, ['position' => 1]);
     $this->actingAs(User::find($this->ann->id))->patch(w('/issues/WEB-1'), ['version' => 1, 'status' => 'Review'])->assertSessionHasNoErrors();
 

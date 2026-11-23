@@ -1,4 +1,5 @@
 import { Trash2, X } from 'lucide-react';
+import ColumnStatusAdder from '@/Components/ColumnStatusAdder';
 import Checkbox from '@/Components/Checkbox';
 import DangerButton from '@/Components/DangerButton';
 import InputError from '@/Components/InputError';
@@ -22,6 +23,7 @@ export default function Settings({
     roles,
     labels,
     columns,
+    library,
     deletedIssues,
     modeC,
     can,
@@ -30,7 +32,8 @@ export default function Settings({
     invitations: Invitation[];
     roles: ProjectRole[];
     labels: Label[];
-    columns: { id: number; name: string; position: number; statuses: { name: string; category: StatusCategory }[]; issue_count: number }[];
+    columns: { id: number; name: string; position: number; statuses: { id: number; name: string; category: StatusCategory; color: string | null }[]; issue_count: number }[];
+    library: { id: number; name: string; category: StatusCategory; color: string | null }[];
     deletedIssues: { key: string; title: string; deleted_at: string; deleted_by: string | null }[];
     modeC: { project: boolean; workspace: boolean; provider: boolean };
     can: { manage: boolean; contribute: boolean };
@@ -237,10 +240,24 @@ export default function Settings({
                                             router.patch(columnRoute('projects.columns.update', c.id), { name: e.target.value }, { preserveScroll: true })
                                         }
                                     />
-                                    {/* Renaming the column keeps these names (1-R3); workspace admins rename statuses. */}
+                                    {/* Renaming the column keeps these names (1-R3); workspace admins rename statuses. The first is where a dropped card lands (1-R13). */}
                                     {c.statuses.map((s) => (
-                                        <StatusLozenge key={s.name} status={s.name} category={s.category} />
+                                        <span key={s.id} className="inline-flex items-center gap-0.5">
+                                            <StatusLozenge status={s.name} category={s.category} color={s.color} />
+                                            <button
+                                                type="button"
+                                                aria-label={`Remove ${s.name} from ${c.name}`}
+                                                className="flex h-5 w-5 items-center justify-center rounded-ctl text-muted hover:bg-card-2"
+                                                onClick={() => router.delete(route('projects.columns.statuses.destroy', [project.key, c.id, s.id]), { preserveScroll: true })}
+                                            >
+                                                <X className="h-3 w-3" aria-hidden="true" />
+                                            </button>
+                                        </span>
                                     ))}
+                                    <ColumnStatusAdder
+                                        url={route('projects.columns.statuses.store', [project.key, c.id])}
+                                        available={library.filter((l) => !columns.some((o) => o.statuses.some((s) => s.id === l.id)))}
+                                    />
                                     <SecondaryButton
                                         aria-label={`Move ${c.name} left`}
                                         disabled={i === 0}

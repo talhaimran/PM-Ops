@@ -164,7 +164,7 @@ export interface ActivityEntry {
 
 export interface IssueOptions {
     /** The project's statuses in board order. */
-    statuses: { name: string; category: StatusCategory }[];
+    statuses: { name: string; category: StatusCategory; color: string | null }[];
     members: { name: string; email: string }[];
     labels: Label[];
     types: string[];

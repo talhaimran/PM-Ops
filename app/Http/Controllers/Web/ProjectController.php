@@ -11,6 +11,7 @@ use App\Http\Resources\ColumnResource;
 use App\Http\Resources\LabelResource;
 use App\Http\Resources\ProjectInvitationResource;
 use App\Http\Resources\ProjectResource;
+use App\Http\Resources\StatusResource;
 use App\Models\Project;
 use App\Models\WorkspaceInvitation;
 use App\Services\AiSettingsService;
@@ -80,7 +81,12 @@ class ProjectController extends Controller
                 'provider' => app(AiSettingsService::class)->for($workspace) !== null,
             ],
             'labels' => LabelResource::collection($project->labels()->get())->resolve(),
-            'columns' => ColumnResource::collection($project->columns()->with('statuses')->withCount('issues')->get())->resolve(),
+            // Each column's statuses carry their id (the column editor removes by id); the library is what can be added.
+            'columns' => $project->columns()->with('statuses')->withCount('issues')->get()->map(fn ($c) => [
+                ...(new ColumnResource($c))->resolve(),
+                'statuses' => $c->statuses->map(fn ($s) => ['id' => $s->id, ...(new StatusResource($s))->resolve()])->all(),
+            ])->all(),
+            'library' => $canManage ? $workspace->statuses()->orderBy('name')->get()->map(fn ($s) => ['id' => $s->id, ...(new StatusResource($s))->resolve()])->all() : [],
             // Admin-only (spec 5.1): restore from here until issues:purge removes them after 30 days.
             'deletedIssues' => $canManage ? app(IssueService::class)->deleted($project) : [],
             'can' => ['manage' => $canManage, 'contribute' => $request->user()->can('contribute', $project)],
