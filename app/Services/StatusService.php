@@ -173,8 +173,9 @@ class StatusService
 
     /**
      * 1-D5: moves everything on $from to $into (same category) and deletes $from; returns the issues moved. Locks the
-     * workspace, then every project in it (id order), so a move or column change racing it waits and then resolves against
-     * the merged library.
+     * workspace, then the projects that map either status (id order), so a move or column change racing it waits and then
+     * resolves against the merged library. Other projects aren't held: their issues can't take either status (1-R2), and
+     * mapping one needs the workspace lock this holds.
      */
     public function merge(Status $from, string $intoName, User $actor): int
     {
@@ -188,17 +189,22 @@ class StatusService
             }
 
             // Lock order: workspace, pending requests (id order), projects, like ApprovalService::approve (request, then project).
+            // shortcut: this locking read holds every pending request of the workspace it scans (and blocks new ones), so approvals
+            // wait for a merge; fine while pending requests are few and merges rare, narrow it if approvals queue up behind merges.
             $requests = ApprovalRequest::where('workspace_id', $workspace->id)->where('status', 'pending')
                 ->where(fn ($q) => $q->where('action->to_status_id', $from->id)->orWhere('action->from_status_id', $from->id))
                 ->orderBy('id')->lockForUpdate()->get();
-            // Explicit like the rest of the codebase; the column_statuses join read below would also lock these project rows.
-            Project::where('workspace_id', $workspace->id)->orderBy('id')->lockForUpdate()->get(['id']);
-            $rows = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')->join('projects', 'projects.id', '=', 'columns.project_id')
-                ->whereIn('column_statuses.status_id', [$from->id, $into->id])->lockForUpdate()->get(['projects.key', 'projects.id as project_id', 'columns.id as column_id', 'column_statuses.status_id', 'column_statuses.position']);
+            // Locked explicitly; the mapping read below joins no projects, so it holds only the mapping and column rows it finds.
+            // The ids are read first and locked by primary key: a locking read through workspace_id would hold every project it scans.
+            $projectIds = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')
+                ->whereIn('column_statuses.status_id', [$from->id, $into->id])->distinct()->pluck('columns.project_id');
+            $keys = Project::whereKey($projectIds)->orderBy('id')->lockForUpdate()->pluck('key', 'id');
+            $rows = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')
+                ->whereIn('column_statuses.status_id', [$from->id, $into->id])->lockForUpdate()->get(['columns.project_id', 'columns.id as column_id', 'column_statuses.status_id', 'column_statuses.position']);
             $apart = $rows->groupBy('project_id')->filter(fn ($r) => $r->pluck('status_id')->unique()->count() === 2 && $r->pluck('column_id')->unique()->count() > 1);
             if ($apart->isNotEmpty()) {
-                $keys = $apart->map(fn ($r) => $r->first()->key)->sort()->implode(', ');
-                throw ValidationException::withMessages(['status' => "{$from->name} and {$into->name} are in different columns of {$keys}. Put them in one column there first."]);
+                $apartKeys = $apart->keys()->map(fn ($id) => $keys[$id])->sort()->implode(', ');
+                throw ValidationException::withMessages(['status' => "{$from->name} and {$into->name} are in different columns of {$apartKeys}. Put them in one column there first."]);
             }
 
             foreach ($rows->where('status_id', $from->id) as $row) {

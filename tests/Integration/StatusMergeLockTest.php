@@ -71,3 +71,12 @@ test('a column attach waits for a merge, and a merge waits for an attach, so no 
     expect($merge)->toThrow(ValidationException::class, 'Review 2 and In Review are in different columns of WEB');
     expect(Status::find($other->id))->not->toBeNull();
 });
+
+test('a merge does not wait on projects that use neither status', function () {
+    // OPS maps neither Review nor In Review: an edit holding its row must not hold up a merge in WEB.
+    $ops = makeProject($this->owner, 'OPS');
+    $ops->columns()->where('name', 'In Review')->sole()->statuses()->detach();
+    $ops->columns()->where('name', 'In Review')->sole()->delete();
+    $this->locker->table('projects')->where('id', $ops->id)->lockForUpdate()->first();
+    expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0);
+});
