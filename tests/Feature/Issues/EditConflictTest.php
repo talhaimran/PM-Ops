@@ -277,3 +277,19 @@ test('undo_of 0 is refused as input, not treated as an edit or an undo', functio
     $this->post(w('/issues/WEB-1/move'), ['status' => 'Done', 'undo_of' => 0])->assertSessionHasErrors('undo_of');
     expect(web1())->title->toBe('Original')->status->name->toBe('To Do');
 });
+
+test('a conflict lists at most the newest 200 changes and says when older ones were left out', function () {
+    [, $token] = makeAgent($this->admin);
+    foreach (range(1, 201) as $n) {
+        app(IssueService::class)->update(web1(), $this->sam, ['title' => "T{$n}"]);
+    }
+
+    $response = asToken($token)->patchJson('/api/v1/issues/WEB-1', ['priority' => 'high', 'version' => 1])->assertStatus(409)
+        ->assertJsonPath('current_version', 202)->assertJsonPath('changes_truncated', true)
+        ->assertJsonPath('changes.0.to', 'T201');
+    // From the oldest change shown: the newest 200 rows start at T2.
+    expect($response->json('changes.0.from'))->toBe('T1');
+
+    asToken($token)->patchJson('/api/v1/issues/WEB-1', ['priority' => 'high', 'version' => 201])->assertStatus(409)
+        ->assertJsonMissingPath('changes_truncated');
+});

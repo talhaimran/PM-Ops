@@ -12,12 +12,17 @@ use Illuminate\Support\Facades\Schema;
  */
 return new class extends Migration
 {
+    /** [table, column, after, nullable] */
+    private const COLUMNS = [['issues', 'version', 'rank', false], ['comments', 'version', 'body', false], ['activities', 'issue_version', 'action', true]];
+
     public function up(): void
     {
-        // shortcut: not re-runnable after a partial failure, drop the new columns by hand first (MySQL DDL isn't transactional); move to a guarded migration if installs need it.
-        Schema::table('issues', fn (Blueprint $table) => $table->unsignedInteger('version')->default(1)->after('rank'));
-        Schema::table('comments', fn (Blueprint $table) => $table->unsignedInteger('version')->default(1)->after('body'));
-        Schema::table('activities', fn (Blueprint $table) => $table->unsignedInteger('issue_version')->nullable()->after('action'));
+        // MySQL DDL isn't transactional: each column is checked, so a run that failed part-way can simply be re-run.
+        foreach (self::COLUMNS as [$table, $column, $after, $nullable]) {
+            if (! Schema::hasColumn($table, $column)) {
+                Schema::table($table, fn (Blueprint $t) => $nullable ? $t->unsignedInteger($column)->nullable()->after($after) : $t->unsignedInteger($column)->default(1)->after($after));
+            }
+        }
 
         DB::table('approval_requests')->where('status', 'pending')->update(['action' => DB::raw("JSON_SET(action, '$.issue_version', 1)")]);
     }
@@ -25,8 +30,10 @@ return new class extends Migration
     public function down(): void
     {
         DB::table('approval_requests')->where('status', 'pending')->update(['action' => DB::raw("JSON_REMOVE(action, '$.issue_version')")]);
-        Schema::table('activities', fn (Blueprint $table) => $table->dropColumn('issue_version'));
-        Schema::table('comments', fn (Blueprint $table) => $table->dropColumn('version'));
-        Schema::table('issues', fn (Blueprint $table) => $table->dropColumn('version'));
+        foreach (array_reverse(self::COLUMNS) as [$table, $column]) {
+            if (Schema::hasColumn($table, $column)) {
+                Schema::table($table, fn (Blueprint $t) => $t->dropColumn($column));
+            }
+        }
     }
 };

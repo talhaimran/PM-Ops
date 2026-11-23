@@ -82,13 +82,16 @@ export default function IssueView({
         setBases((b) => ({ ...b, description: issue.version }));
         setEditingDescription(true);
     };
-    // The conflict dialog settled this issue (kept theirs, or saved mine): close the editors it was about.
+    // The conflict dialog settled this issue (kept theirs, or saved mine): close the editors it was about, and remount the
+    // blur-saved inputs, which keep the typed value otherwise when theirs equals what the page already had.
+    const [settled, setSettled] = useState(0);
     useEffect(() => {
         const settle = (e: Event) => {
             const conflict = (e as CustomEvent<ConflictFlash>).detail;
             if (conflict.key !== issue.key) return;
             if ('title' in conflict.yours) setEditingTitle(false);
             if ('description' in conflict.yours) setEditingDescription(false);
+            setSettled((n) => n + 1);
         };
         window.addEventListener(CONFLICT_SETTLED, settle);
         return () => window.removeEventListener(CONFLICT_SETTLED, settle);
@@ -303,7 +306,7 @@ export default function IssueView({
                                     aria-label="Story points"
                                     className={`${inlineField} py-1.5`}
                                     placeholder="None"
-                                    key={issue.story_points ?? ''}
+                                    key={`${settled}-${issue.story_points ?? ''}`}
                                     defaultValue={issue.story_points ?? ''}
                                     disabled={!can.contribute}
                                     onBlur={(e) => {
@@ -327,7 +330,7 @@ export default function IssueView({
                                     type="date"
                                     aria-label="Due date"
                                     className={`${inlineField} py-1.5`}
-                                    key={issue.due_date ?? ''}
+                                    key={`${settled}-${issue.due_date ?? ''}`}
                                     defaultValue={issue.due_date ?? ''}
                                     disabled={!can.contribute}
                                     onBlur={(e) => {
@@ -349,7 +352,7 @@ export default function IssueView({
                                             aria-label="Epic key"
                                             className={`${inlineField} py-1.5`}
                                             placeholder={`None (e.g. ${issue.project}-1)`}
-                                            key={issue.epic?.key ?? ''}
+                                            key={`${settled}-${issue.epic?.key ?? ''}`}
                                             defaultValue={issue.epic?.key ?? ''}
                                             disabled={!can.contribute}
                                             onBlur={(e) => {

@@ -26,16 +26,18 @@ class EditConflict extends AuthorizationException
         parent::__construct($payload['message']."\n\n".json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
-    /** @param  list<array>  $changes  ActivityLogger::changesSince() */
-    public static function issue(Issue $issue, int $sent, array $changes): self
+    /** What changed on $issue since $sent (ActivityLogger::changesSince); `changes_truncated` only when older changes were left out. */
+    public static function issue(Issue $issue, int $sent): self
     {
         $issue->loadMissing(IssueService::DISPLAY);
+        $changes = app(ActivityLogger::class)->changesSince($issue, $sent, $truncated);
 
         return new self([
             'error' => 'conflict',
             'message' => "{$issue->key} changed since version {$sent}. Read it again and resend.",
             'current_version' => $issue->version,
             'changes' => $changes,
+            ...($truncated ? ['changes_truncated' => true] : []),
             'issue' => (new IssueResource($issue))->resolve(),
         ], $issue, ActivityLogger::describe($changes, $issue->key));
     }
@@ -58,7 +60,7 @@ class EditConflict extends AuthorizationException
         return new self([
             'error' => 'conflict',
             'message' => $keys->implode(', ').' changed since the version you sent. Read '.($keys->count() > 1 ? 'them' : 'it').' again and resend.',
-            'conflicts' => collect($conflicts)->map(fn (self $c) => ['key' => $c->subject->key, ...collect($c->payload)->only(['current_version', 'changes'])])->all(),
+            'conflicts' => collect($conflicts)->map(fn (self $c) => ['key' => $c->subject->key, ...collect($c->payload)->only(['current_version', 'changes', 'changes_truncated'])])->all(),
         ]);
     }
 

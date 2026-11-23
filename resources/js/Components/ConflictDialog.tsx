@@ -18,25 +18,40 @@ export default function ConflictDialog() {
     const { flash } = usePage().props as { flash?: { conflict?: ConflictFlash | null } };
     const [shown, setShown] = useState<ConflictFlash | null>(null);
     const [copied, setCopied] = useState(false);
+    const [copyFailed, setCopyFailed] = useState(false);
     const keep = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
         if (!flash?.conflict) return;
         setShown(flash.conflict);
         setCopied(false);
+        setCopyFailed(false);
     }, [flash?.conflict]);
 
     const fields = Object.keys(shown?.yours ?? {});
     const mine = () => (fields.length === 1 ? show(shown!.yours[fields[0]]) : fields.map((f) => `${fieldLabel(f)}: ${show(shown!.yours[f])}`).join('\n'));
-    const copy = () => navigator.clipboard?.writeText(mine()).then(() => setCopied(true), () => {});
+    // Resolves true only once the clipboard holds yours; a refusal (or no clipboard on plain http) keeps the dialog open.
+    const copy = async () => {
+        try {
+            await navigator.clipboard.writeText(mine());
+            setCopied(true);
+            setCopyFailed(false);
+            return true;
+        } catch {
+            setCopyFailed(true);
+            return false;
+        }
+    };
     // Only the editor the conflict was about closes; drafts and other open editors on the page stay as they are.
     const settle = (conflict: ConflictFlash) => {
         setShown(null);
         window.dispatchEvent(new CustomEvent(CONFLICT_SETTLED, { detail: conflict }));
     };
-    const keepTheirs = () => {
-        copy();
-        settle(shown!);
+    // Yours is copied before the editor closes; after a failed copy the second click is "without copying", on purpose.
+    const keepTheirs = async () => {
+        const conflict = shown!;
+        if (!copyFailed && !(await copy())) return;
+        settle(conflict);
         router.reload();
     };
     const saveMine = () => {
@@ -90,9 +105,14 @@ export default function ConflictDialog() {
                             {side(true)}
                         </section>
                     </div>
+                    {copyFailed && (
+                        <p role="alert" className="text-md text-t-bad">
+                            Couldn't copy your version. Select it above and copy it by hand before you keep theirs.
+                        </p>
+                    )}
                     <div className="flex flex-wrap justify-end gap-2">
                         <button ref={keep} type="button" className={ghost} onClick={keepTheirs}>
-                            Keep theirs
+                            {copyFailed ? 'Keep theirs without copying' : 'Keep theirs'}
                         </button>
                         <button type="button" className={ghost} onClick={copy}>
                             {copied ? 'Copied' : 'Copy mine'}

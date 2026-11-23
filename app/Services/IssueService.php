@@ -98,7 +98,7 @@ class IssueService
             // A locking read: it sees the latest committed row even if this transaction read the issue before (REPEATABLE READ).
             $issue->setRawAttributes(Issue::withTrashed()->whereKey($issue->id)->lockForUpdate()->firstOrFail()->getAttributes(), true)->unsetRelations();
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
-                throw EditConflict::issue($issue, (int) $data['version'], $this->activity->changesSince($issue, (int) $data['version']));
+                throw EditConflict::issue($issue, (int) $data['version']);
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
@@ -202,7 +202,7 @@ class IssueService
             $issues->reject(fn ($issue) => $versions->has($issue->id))->each(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $items[$i]['key']), as: 'key'));
             $stale = $issues->filter(fn ($issue, $i) => isset($items[$i]['version']) && (int) $items[$i]['version'] !== $versions[$issue->id]);
             if ($stale->isNotEmpty()) {
-                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version'], $this->activity->changesSince($issue, (int) $items[$i]['version'])))->values()->all());
+                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version']))->values()->all());
             }
 
             // Checked once above, against the versions the call was sent with: two items for one issue both carry the

@@ -11,6 +11,8 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class ActivityLogger
 {
+    public const CHANGES_CAP = 200;
+
     /** Container key set by the MCP server so activity records "mcp" instead of "api". */
     public const VIA_BINDING = 'pm.via';
 
@@ -43,11 +45,15 @@ class ActivityLogger
      *
      * @return list<array{field: string, from: mixed, to: mixed, by: ?string, agent: ?string, via: string, at: string}>
      */
-    public function changesSince(Issue $issue, int $version): array
+    public function changesSince(Issue $issue, int $version, ?bool &$truncated = null): array
     {
         $changes = [];
-        // shortcut: reads every row after $version (only callers who may edit the issue get here); cap it if issues collect thousands of changes.
-        $rows = $issue->activities()->with(['user', 'agent.owner'])->where('issue_version', '>', $version)->whereNotNull('changes')->orderBy('id')->get();
+        // Only the newest CHANGES_CAP rows are read; $truncated says older ones were left out, so a field's `from` is then
+        // its value before the oldest row read. The conflict itself is decided by the version, never by this list.
+        $rows = $issue->activities()->with(['user', 'agent.owner'])->where('issue_version', '>', $version)->whereNotNull('changes')
+            ->orderByDesc('id')->limit(self::CHANGES_CAP + 1)->get();
+        $truncated = $rows->count() > self::CHANGES_CAP;
+        $rows = $rows->take(self::CHANGES_CAP)->reverse();
         foreach ($rows as $row) {
             // approval_request is the link to an agent's request (A2), not a field; a person decided it, so no agent acted.
             $approval = isset($row->changes['approval_request']);
