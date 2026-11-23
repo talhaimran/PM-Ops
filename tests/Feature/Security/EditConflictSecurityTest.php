@@ -3,11 +3,15 @@
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
 use App\Models\Activity;
+use App\Models\ApprovalRequest;
 use App\Models\Comment;
 use App\Models\Issue;
 use App\Models\User;
+use App\Services\ApprovalService;
+use App\Services\BoardService;
 use App\Services\CommentService;
 use App\Services\IssueService;
+use Illuminate\Validation\ValidationException;
 
 // Spec 7.11: a conflict tells what changed, so it must never tell it to someone who couldn't read or write the issue.
 
@@ -88,4 +92,17 @@ test('overwrite is web-only: REST and MCP ignore it', function () {
     // With the current version it saves as a plain update, never logged as an overwrite.
     asToken($token)->patchJson('/api/v1/issues/WEB-1', ['title' => 'Saved', 'version' => 2, 'overwrite' => true])->assertOk();
     expect(Activity::latest('id')->first()->action)->toBe('updated');
+});
+
+test('an agent asking for Done again keeps the first version, so a person\'s change since still needs the second confirm', function () {
+    [, $token] = makeAgent($this->ann, AgentLevel::Write);
+    $ask = fn () => asToken($token)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertStatus(202);
+    $ask();
+    // A person reopens the work; the agent then asks again (scan finding F1, PR 34).
+    app(BoardService::class)->move($this->issue->fresh(), $this->ann, ['status' => 'In Progress']);
+    $ask();
+
+    expect(fn () => app(ApprovalService::class)->approve(ApprovalRequest::sole(), $this->ann))
+        ->toThrow(ValidationException::class, 'Ann Owner moved WEB-1');
+    expect($this->issue->fresh()->status->name)->toBe('In Progress');
 });
