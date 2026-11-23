@@ -11,7 +11,7 @@ import WarningConfirm from '@/Components/WarningConfirm';
 import WorkspaceSettingsHeader from '@/Components/WorkspaceSettingsHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { StatusCategory } from '@/types';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, router } from '@inertiajs/react';
 import { Ellipsis, Tags } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 
@@ -31,23 +31,35 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** Spec 7.4: the workspace's status library. Statuses are created from a project's column editor (1-R12), so there is no Create here. */
 export default function Statuses({ statuses, palette }: { statuses: LibraryStatus[]; palette: string[] }) {
-    const { errors } = usePage().props as { errors: Record<string, string> };
     const [dialog, setDialog] = useState<Dialog>(null);
     const [name, setName] = useState('');
     const [into, setInto] = useState('');
     const [color, setColor] = useState<string | null>(null);
     const [processing, setProcessing] = useState(false);
-    const error = errors.name ?? errors.status ?? errors.into ?? errors.color ?? errors.category;
+    // The last refusal, cleared whenever a dialog opens or closes so it never shows in another one.
+    const [error, setError] = useState<string | undefined>();
 
     const open = (kind: NonNullable<Dialog>['kind'], status: LibraryStatus) => {
         setName(status.name);
         setColor(status.color);
         setInto(statuses.find((o) => o.id !== status.id && o.category === status.category)?.name ?? '');
+        setError(undefined);
         setDialog({ kind, status });
     };
-    const close = () => setDialog(null);
+    const close = () => {
+        setError(undefined);
+        setDialog(null);
+    };
     const send = (method: 'patch' | 'post' | 'delete', url: string, data: Record<string, unknown> = {}) =>
-        router[method](url, data as never, { preserveScroll: true, onStart: () => setProcessing(true), onFinish: () => setProcessing(false), onSuccess: close });
+        router.visit(url, {
+            method,
+            data: data as never,
+            preserveScroll: true,
+            onStart: () => setProcessing(true),
+            onFinish: () => setProcessing(false),
+            onSuccess: close,
+            onError: (e) => setError(e.name ?? e.status ?? e.into ?? e.color ?? e.category),
+        });
 
     const status = dialog?.status;
     const mergeTargets = status ? statuses.filter((o) => o.id !== status.id && o.category === status.category) : [];
@@ -75,14 +87,17 @@ export default function Statuses({ statuses, palette }: { statuses: LibraryStatu
                     ) : (
                         <ul className="mt-3 divide-y divide-line">
                             {statuses.map((s) => (
-                                <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
-                                    <div className="min-w-0 flex-1 basis-48">
-                                        <StatusLozenge status={s.name} category={s.category} color={s.color} />
+                                <li key={s.id} className="flex items-start gap-x-4 py-3">
+                                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
+                                        <div className="min-w-0 flex-1 basis-48">
+                                            <StatusLozenge status={s.name} category={s.category} color={s.color} />
+                                        </div>
+                                        <span className="w-24 text-sm text-muted">{categoryLabel[s.category]}</span>
+                                        <span className="w-52 text-sm text-muted">
+                                            Used by {plural(s.projects_count, 'project')}, {plural(s.issues_count, 'issue')}
+                                        </span>
                                     </div>
-                                    <span className="w-24 text-sm text-muted">{categoryLabel[s.category]}</span>
-                                    <span className="w-52 text-sm text-muted">
-                                        Used by {plural(s.projects_count, 'project')}, {plural(s.issues_count, 'issue')}
-                                    </span>
+                                    {/* Outside the wrapping group, so the right-aligned menu always opens on screen. */}
                                     <Dropdown>
                                         <Dropdown.Trigger>
                                             <button type="button" aria-label={`Actions for ${s.name}`} className="flex h-8 w-8 items-center justify-center rounded-ctl text-muted hover:bg-card-2">

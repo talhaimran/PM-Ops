@@ -133,3 +133,11 @@ test('board, list and issue responses carry status and category', function () {
     $this->getJson('/api/v1/projects/WEB/issues')->assertJsonPath('data.0.category', 'done');
     $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.category', 'done');
 });
+
+test('issue JSON carries status_color: null for the category colour, the palette name once recoloured', function () {
+    makeIssue($this->web, $this->admin);
+    $this->getJson('/api/v1/issues/WEB-1')->assertOk()->assertJsonPath('data.status_color', null);
+    Status::where('name', 'To Do')->update(['color' => 'coral']);
+    $this->getJson('/api/v1/issues/WEB-1')->assertJsonPath('data.status_color', 'coral');
+    $this->getJson('/api/v1/issues?q=')->assertOk()->assertJsonPath('data.0.status_color', 'coral');
+});

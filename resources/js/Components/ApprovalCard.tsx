@@ -51,7 +51,7 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
             </div>
             {linkIssue && <p className="truncate text-sm">{a.title}</p>}
             <div className="flex flex-wrap items-center gap-2 text-xs">
-                {a.from && a.from_category && <StatusLozenge status={a.from} category={a.from_category} />}
+                {a.from && a.from_category && <StatusLozenge status={a.from} category={a.from_category} color={a.from_color} />}
                 <ArrowRight className="h-4 w-4" aria-label="to" />
                 {/* Requests are only for Done-category statuses. */}
                 <StatusLozenge status={a.to} category="done" />

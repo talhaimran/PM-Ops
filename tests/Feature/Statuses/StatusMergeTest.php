@@ -10,6 +10,7 @@ use App\Models\IssueStatusHistory;
 use App\Models\Status;
 use App\Models\User;
 use App\Services\ApprovalService;
+use App\Services\IssueService;
 use App\Services\StatusService;
 use Illuminate\Support\Facades\DB;
 
@@ -100,4 +101,28 @@ test('a Member cannot merge', function () {
     $this->ws->addMember($sam, WorkspaceRole::Member);
     $this->actingAs($sam)->post(w("/settings/statuses/{$this->review->id}/merge"), ['into' => 'In Review'])->assertForbidden();
     expect(Status::find($this->review->id))->not->toBeNull();
+});
+
+test('history keeps the leaving status: an issue moved Review to Done ends with the survivor as "from"', function () {
+    $issue = makeIssue($this->web, $this->owner, ['status' => 'Review']);
+    app(IssueService::class)->update($issue, $this->owner, ['status' => 'In Progress', 'version' => $issue->version]);
+    expect(IssueStatusHistory::where('from_status_id', $this->review->id)->count())->toBe(1);
+
+    ($this->merge)($this->review, 'In Review')->assertSessionHasNoErrors();
+
+    expect(IssueStatusHistory::where('issue_id', $issue->id)->whereNotNull('from_status_id')->sole()->from_status_id)->toBe($this->into->id);
+});
+
+test('S1: pending requests are locked before any project row, the order ApprovalService::approve takes', function () {
+    $issue = makeIssue($this->web, $this->owner, ['status' => 'Review']);
+    [$agent] = makeAgent($this->owner, AgentLevel::Write);
+    app(ApprovalService::class)->requestDone($issue->load('project'), $this->owner, $agent, ($this->st)('Done'), 'x');
+
+    DB::enableQueryLog();
+    $this->statuses->merge($this->review, 'In Review', $this->owner);
+    $queries = collect(DB::getQueryLog())->pluck('query');
+
+    $request = $queries->search(fn ($q) => str_contains($q, 'from `approval_requests`') && str_ends_with($q, 'for update'));
+    $project = $queries->search(fn ($q) => str_contains($q, 'from `projects`') && str_ends_with($q, 'for update'));
+    expect($request)->toBeInt()->and($project)->toBeInt()->and($request)->toBeLessThan($project);
 });

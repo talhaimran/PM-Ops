@@ -115,7 +115,7 @@ export default function IssueView({
                                 <IssueTypeIcon type={s.type ?? 'task'} subtask={subtasks} />
                                 <span className="shrink-0 text-muted">{s.key}</span>
                                 <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                                {s.status && s.category && <StatusLozenge status={s.status} category={s.category} />}
+                                {s.status && s.category && <StatusLozenge status={s.status} category={s.category} color={s.status_color} />}
                             </Link>
                         </li>
                     ))}

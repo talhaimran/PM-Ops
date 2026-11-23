@@ -29,7 +29,7 @@ export default function StatusMenu({
         <Listbox value={value} onChange={onChange} disabled={disabled}>
             <div className="relative">
                 <ListboxButton
-                    aria-label="status"
+                    aria-label={`Status: ${value}`}
                     className={`inline-flex h-control-h-sm items-center gap-1.5 rounded-pill px-3 text-xs ${lozengeClass(category, color)} ${disabled ? '' : 'hover:brightness-95'}`}
                 >
                     <span className="truncate">{value}</span>

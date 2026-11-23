@@ -29,8 +29,8 @@ export function lozengeClass(category: StatusCategory, color?: string | null) {
 }
 
 /** The category's dot colour, e.g. a board column's status square. */
-export function categoryDot(category: StatusCategory) {
-    return styles[category][1];
+export function categoryDot(category: StatusCategory, color?: string | null) {
+    return (color && palette[color]?.[1]) || styles[category][1];
 }
 
 /** Design system Pill: a dot plus the status's own name, coloured by its category (or its custom colour). Colour is never the only signal. */

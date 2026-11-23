@@ -187,6 +187,11 @@ class StatusService
                 throw ValidationException::withMessages(['status' => "{$from->name} is {$from->category->label()} and {$into->name} is {$into->category->label()}. Statuses merge only within the same category."]);
             }
 
+            // Lock order: workspace, pending requests (id order), projects, like ApprovalService::approve (request, then project).
+            $requests = ApprovalRequest::where('workspace_id', $workspace->id)->where('status', 'pending')
+                ->where(fn ($q) => $q->where('action->to_status_id', $from->id)->orWhere('action->from_status_id', $from->id))
+                ->orderBy('id')->lockForUpdate()->get();
+            // Explicit like the rest of the codebase; the column_statuses join read below would also lock these project rows.
             Project::where('workspace_id', $workspace->id)->orderBy('id')->lockForUpdate()->get(['id']);
             $rows = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')->join('projects', 'projects.id', '=', 'columns.project_id')
                 ->whereIn('column_statuses.status_id', [$from->id, $into->id])->lockForUpdate()->get(['projects.key', 'projects.id as project_id', 'columns.id as column_id', 'column_statuses.status_id', 'column_statuses.position']);
@@ -214,18 +219,16 @@ class StatusService
             IssueStatusHistory::where('from_status_id', $from->id)->update(['from_status_id' => $into->id]);
             // Pending requests only; decided ones keep what they said (to_status names it even after the status goes).
             // shortcut: one update per pending request, fine while a workspace has few; bulk it past a few thousand.
-            ApprovalRequest::where('workspace_id', $workspace->id)->where('status', 'pending')
-                ->where(fn ($q) => $q->where('action->to_status_id', $from->id)->orWhere('action->from_status_id', $from->id))
-                ->each(function ($request) use ($from, $into) {
-                    $action = $request->action;
-                    foreach (['to_status_id', 'from_status_id'] as $key) {
-                        if (($action[$key] ?? null) === $from->id) {
-                            $action[$key] = $into->id;
-                            $key === 'to_status_id' && $action['to_status'] = $into->name;
-                        }
+            $requests->each(function ($request) use ($from, $into) {
+                $action = $request->action;
+                foreach (['to_status_id', 'from_status_id'] as $key) {
+                    if (($action[$key] ?? null) === $from->id) {
+                        $action[$key] = $into->id;
+                        $key === 'to_status_id' && $action['to_status'] = $into->name;
                     }
-                    $request->update(['action' => $action]);
-                });
+                }
+                $request->update(['action' => $action]);
+            });
 
             $from->delete();
             $this->audit->log('status.merged', $into, ['from' => $from->name, 'into' => $into->name, 'issues' => $moved], $workspace, $actor);

@@ -33,6 +33,7 @@ export interface Card {
     priority: string;
     status: string;
     category: StatusCategory;
+    status_color: string | null;
     resolution: Resolution | null;
     assignee: { name: string; email: string } | null;
     labels: string[];
@@ -159,7 +160,7 @@ export default function Board({
                     <DndContext sensors={sensors} collisionDetection={closestCorners} {...handlers}>
                         <div className="flex snap-x items-start gap-2.5 overflow-x-auto pb-4">
                             {board.columns.map(({ name, statuses }) => (
-                                <Lane key={name} name={name} category={statuses[0].category} cards={lanes[name] ?? []} draggable={can.contribute} fresh={fresh} busy={busy} onBusy={setBusy} />
+                                <Lane key={name} name={name} category={statuses[0].category} color={statuses[0].color} cards={lanes[name] ?? []} draggable={can.contribute} fresh={fresh} busy={busy} onBusy={setBusy} />
                             ))}
                         </div>
                         <DragOverlay dropAnimation={css('drop')}>
@@ -205,7 +206,7 @@ const css = (moment: 'lift' | 'drop') => {
 };
 
 /** Design system BoardColumn: status square (its first status's category), name, count; the points total; the cards; a dashed target when empty. */
-function Lane({ name, category, cards, draggable, fresh, busy, onBusy }: { name: string; category: StatusCategory; cards: Card[]; draggable: boolean; fresh: string | null; busy: string | null; onBusy: (key: string | null) => void }) {
+function Lane({ name, category, color, cards, draggable, fresh, busy, onBusy }: { name: string; category: StatusCategory; color: string | null; cards: Card[]; draggable: boolean; fresh: string | null; busy: string | null; onBusy: (key: string | null) => void }) {
     const { setNodeRef, isOver } = useLaneDroppable(name);
     // shortcut: totals cover the cards on screen, so a board cut off at 500 issues (the notice above says so) or a filtered
     // board shows partial sums; move the sum to BoardService when estimates get a unit (step 10).
@@ -220,7 +221,7 @@ function Lane({ name, category, cards, draggable, fresh, busy, onBusy }: { name:
             }`}
         >
             <h3 className="flex items-center gap-2 px-1.5 pt-1 text-md text-text">
-                <span aria-hidden="true" className={`h-[9px] w-[9px] shrink-0 rounded-[3px] ${categoryDot(category)}`} />
+                <span aria-hidden="true" className={`h-[9px] w-[9px] shrink-0 rounded-[3px] ${categoryDot(category, color)}`} />
                 <span className="truncate">{name}</span>
                 <span className="rounded-pill bg-well px-2 text-xs text-muted">{cards.length}</span>
             </h3>
