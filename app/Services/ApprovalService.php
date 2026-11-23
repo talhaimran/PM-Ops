@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AgentStatus;
 use App\Enums\ApprovalStatus;
 use App\Enums\ProjectRole;
+use App\Enums\Resolution;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
@@ -12,6 +13,7 @@ use App\Models\Project;
 use App\Models\Status;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -44,22 +46,36 @@ class ApprovalService
         return "{$agent->label()} was revoked.";
     }
 
-    /** Open a request for $agent's move of $issue to $to, or return the open one for the same issue and target. */
-    public function requestDone(Issue $issue, User $owner, Agent $agent, Status $to, ?string $reason): ApprovalRequest
+    /**
+     * Open a request for $agent's move of $issue to $to, or return the open one for the same issue and target.
+     * The resolution and the original's key (spec 7.4) ride along in the action, only when the agent sent them;
+     * asking again replaces them with what the new ask sent.
+     */
+    public function requestDone(Issue $issue, User $owner, Agent $agent, Status $to, ?string $reason, ?Resolution $resolution = null, ?string $duplicateOf = null): ApprovalRequest
     {
-        return DB::transaction(function () use ($issue, $owner, $agent, $to, $reason) {
+        return DB::transaction(function () use ($issue, $owner, $agent, $to, $reason, $resolution, $duplicateOf) {
+            $resolved = array_filter(['resolution' => $resolution?->value, 'duplicate_of' => $duplicateOf]);
             Issue::whereKey($issue->id)->lockForUpdate()->first();
             // A locking read sees requests committed after this transaction's snapshot; SKIP LOCKED never waits on a
             // request a person is deciding (they hold it and then wait for the project row this move may hold).
             $open = ApprovalRequest::open()->where('issue_id', $issue->id)->where('action->to_status_id', $to->id)
                 ->lock('for update skip locked')->first();
 
+            // Asking again is the agent changing its mind: the person decides on the latest ask, so what it sent now
+            // (maybe nothing, which approves as Done) replaces the old resolution and duplicate_of whole. Only the agent
+            // that opened the request can do that; another agent's repeat just gets the existing request back (spec 8, A2).
+            if ($open?->agent_id === $agent->id) {
+                $action = [...Arr::except($open->action, ['resolution', 'duplicate_of']), ...$resolved];
+                if ($action != $open->action) {
+                    $open->update(['action' => $action]);
+                }
+            }
             $approval = $open ?? ApprovalRequest::create([
                 'workspace_id' => $issue->project->workspace_id,
                 'issue_id' => $issue->id,
                 'agent_id' => $agent->id,
                 'owner_user_id' => $owner->id,
-                'action' => ['to_status_id' => $to->id, 'to_status' => $to->name, 'from_status_id' => $issue->status_id, 'reason' => $reason],
+                'action' => ['to_status_id' => $to->id, 'to_status' => $to->name, 'from_status_id' => $issue->status_id, 'reason' => $reason, ...$resolved],
                 'status' => ApprovalStatus::Pending,
                 'expires_at' => now()->addDays(ApprovalRequest::DAYS),
             ]);
@@ -108,7 +124,7 @@ class ApprovalService
                 ])->status(409);
             }
 
-            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $status->name], 'approved'));
+            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $status->name, ...Arr::only($approval->action, ['resolution', 'duplicate_of'])], 'approved'));
             $approval->update(['status' => ApprovalStatus::Approved, 'decided_by' => $decider->id, 'decided_at' => now()]);
 
             return $approval;

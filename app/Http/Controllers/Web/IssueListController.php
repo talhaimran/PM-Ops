@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\PresentsIssue;
+use App\Http\Requests\Board\BoardFilterRequest;
 use App\Http\Requests\Lists\IssueListRequest;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
@@ -16,6 +17,7 @@ use App\Services\IssueService;
 use App\Services\ProjectService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -64,14 +66,16 @@ class IssueListController extends Controller
         ]);
     }
 
-    public function dashboard(Request $request): Response
+    public function dashboard(BoardFilterRequest $request): Response
     {
         $user = $request->user();
+        $filters = Arr::only($request->validated(), ['category', 'resolution']);
         $projects = $user->accessibleProjects()->orderBy('key')->limit(50)->get();
         $summaries = $this->dashboard->summaries($projects);
 
         return Inertia::render('Dashboard', [
-            'myIssues' => IssueResource::collection($this->dashboard->myIssues($user, 50))->resolve(),
+            'myIssues' => IssueResource::collection($this->dashboard->myIssues($user, 50, $filters))->resolve(),
+            'filters' => (object) array_filter($filters),
             // A2: what this person can decide here (their agents' requests, and every request in projects they administer).
             'pendingApprovals' => ApprovalRequestResource::collection(app(ApprovalService::class)->decidableBy($user, app(CurrentWorkspace::class)->get()))->resolve(),
             'projects' => $projects->map(fn ($p) => [

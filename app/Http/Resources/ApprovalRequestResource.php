@@ -35,6 +35,9 @@ class ApprovalRequestResource extends JsonResource
             'now' => $issue->status->name,
             'moved' => $moved,
             'reason' => $this->action['reason'] ?? null,
+            // Spec 7.4: how the agent says it ended; the person approving applies it with the move.
+            'resolution' => $this->action['resolution'] ?? null,
+            'duplicate_of' => $this->action['duplicate_of'] ?? null,
             'agent' => IssueResource::agent($this->agent),
             'expires_at' => $this->expires_at,
             'created_at' => $this->created_at,

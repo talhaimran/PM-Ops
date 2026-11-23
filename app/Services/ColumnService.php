@@ -13,7 +13,7 @@ use Illuminate\Validation\ValidationException;
 
 class ColumnService
 {
-    public function __construct(private StatusService $statuses) {}
+    public function __construct(private StatusService $statuses, private ActivityLogger $activity) {}
 
     /**
      * 1-R4: the column maps `status` (a library status name) when given, else a status named after the column in
@@ -64,7 +64,7 @@ class ColumnService
     }
 
     /** Delete a column; its issues move to the first status of $moveTo (required when it has any). Its statuses stay in the library. */
-    public function delete(Column $column, ?string $moveTo): void
+    public function delete(Column $column, ?string $moveTo, ?User $actor = null): void
     {
         $project = $column->project;
         $others = $project->columns()->get()->reject(fn ($c) => $c->is($column))->values();
@@ -85,13 +85,22 @@ class ColumnService
             }
         }
 
-        DB::transaction(function () use ($column, $target, $others) {
+        DB::transaction(function () use ($column, $target, $others, $actor) {
             // The project row first, the same order as moves and approvals (CLAUDE.md, ApprovalService).
             Project::whereKey($column->project_id)->lockForUpdate()->first();
             // Soft-deleted issues move too (to the first column when no target was needed), so they can still be restored.
             $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
-            Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'))
-                ->update(['status_id' => $to->id]);
+            // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
+            $moving = Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'));
+            // Issues leaving Done are logged as reopened, like any other move out of it.
+            // shortcut: one model and one activity row per reopened issue inside the lock, chunk and bulk-insert when Done columns hold thousands.
+            $reopened = $to->isDone() ? collect() : (clone $moving)->with('status')->get()->filter(fn ($i) => $i->status->isDone());
+            $moving->update(['status_id' => $to->id] + ($to->isDone()
+                ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
+                : ['resolution' => null, 'resolved_at' => null]));
+            foreach ($reopened as $issue) {
+                $this->activity->log($issue, $actor, 'reopened', ['status' => ['from' => $issue->status->name, 'to' => $to->name], 'resolution' => ['from' => $issue->resolution?->value, 'to' => null]]);
+            }
             $column->delete();
             $this->resequence($others);
         });

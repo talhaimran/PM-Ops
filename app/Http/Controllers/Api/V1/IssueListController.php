@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Board\BoardFilterRequest;
 use App\Http\Requests\Lists\IssueListRequest;
 use App\Http\Resources\IssueResource;
 use App\Services\DashboardService;
@@ -13,6 +14,7 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Arr;
 
 class IssueListController extends Controller
 {
@@ -21,7 +23,7 @@ class IssueListController extends Controller
     /**
      * List a project's issues (epics included), paginated.
      *
-     * Filters: assignee (email or "unassigned"), type, priority, label, sprint (name, "active" or "backlog"), q.
+     * Filters: assignee (email or "unassigned"), type, priority, label, sprint (name, "active" or "backlog"), category (`to_do`, `in_progress`, `done`), resolution, q.
      * Pass `cursor` (the previous `meta.next_cursor`) instead of `page` to walk the list; `fields` (comma-separated keys) trims each issue, `key` stays.
      * `sort`: key, title, type, priority, status, assignee, story_points, due_date, created, updated; prefix "-" for descending (default -key).
      */
@@ -40,10 +42,13 @@ class IssueListController extends Controller
         return $this->listed($request, $this->issues->list($request->user(), $project, $request->validated()));
     }
 
-    /** Open issues assigned to you across projects, by priority then due date (max 100). */
+    /** Issues assigned to you across projects, by priority then due date (max 100). Not done unless you filter by `category` or `resolution`. */
     public function mine(Request $request): AnonymousResourceCollection
     {
-        return IssueResource::collectionWith($this->dashboard->myIssues($request->user(), 100), $request->validate(['fields' => ['nullable', 'string', 'max:500']])['fields'] ?? null);
+        $filters = new BoardFilterRequest;
+        $data = $request->validate(['fields' => ['nullable', 'string', 'max:500'], ...Arr::only($filters->rules(), ['category', 'resolution'])], $filters->messages());
+
+        return IssueResource::collectionWith($this->dashboard->myIssues($request->user(), 100, $data), $data['fields'] ?? null);
     }
 
     private function listed(IssueListRequest $request, LengthAwarePaginator $page): AnonymousResourceCollection

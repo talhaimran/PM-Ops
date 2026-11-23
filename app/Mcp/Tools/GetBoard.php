@@ -2,6 +2,8 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\Resolution;
+use App\Enums\StatusCategory;
 use App\Http\Requests\Board\BoardFilterRequest;
 use App\Http\Resources\BoardResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
@@ -42,6 +44,8 @@ class GetBoard extends Tool
             'type' => $schema->string()->enum(['task', 'bug', 'story']),
             'priority' => $schema->string()->enum(['lowest', 'low', 'medium', 'high', 'highest']),
             'label' => $schema->string()->description('Label name.'),
+            'category' => $schema->string()->enum(StatusCategory::class)->description('Status category: to_do, in_progress or done.'),
+            'resolution' => $schema->string()->enum(Resolution::class),
             'q' => $schema->string()->description('Text in the title, or an issue key.'),
             'sprint' => $schema->string()->description('Sprint name, "active" or "backlog".'),
         ];

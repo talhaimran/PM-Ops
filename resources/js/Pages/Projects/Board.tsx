@@ -12,17 +12,19 @@ import { placement, useLaneDroppable, useSortableLanes } from '@/Components/useS
 import { issueUrl, onPeekClick } from '@/issueUrl';
 import EmptyState from '@/Components/EmptyState';
 import IssueDrawer from '@/Components/IssueDrawer';
+import ResolutionChip, { resolutionLabels } from '@/Components/ResolutionChip';
 import { categoryDot } from '@/Components/StatusLozenge';
 import { transition } from '@/motion';
 import { Calendar, CircleAlert, Inbox } from 'lucide-react';
 import { motion } from 'motion/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { IssueOptions, Project, StatusCategory } from '@/types';
+import { UNDO_LIFETIME } from '@/undo';
+import { IssueOptions, Project, Resolution, StatusCategory } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Head, Link, router } from '@inertiajs/react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export interface Card {
     key: string;
@@ -31,6 +33,7 @@ export interface Card {
     priority: string;
     status: string;
     category: StatusCategory;
+    resolution: Resolution | null;
     assignee: { name: string; email: string } | null;
     labels: string[];
     story_points: number | null;
@@ -64,8 +67,18 @@ export default function Board({
 }) {
     const source = useMemo(() => toLanes(board), [board]);
     const [moved, setMoved] = useState('');
+    // The card just resolved by a drop shows its "Resolved" chip for as long as the Undo toast.
+    const [fresh, setFresh] = useState<string | null>(null);
+    const [busy, setBusy] = useState<string | null>(null);
+    const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+    useEffect(() => () => clearTimeout(timer.current), []);
     const { lanes, active, sensors, reset, handlers } = useSortableLanes(source, (key, lane, laneChanged, index, cards) => {
         setMoved(`${key} moved to ${lane}, position ${index + 1} of ${cards.length}`);
+        if (laneChanged && board.columns.find((c) => c.name === lane)!.statuses[0].category === 'done') {
+            setFresh(key);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setFresh((now) => (now === key ? null : now)), UNDO_LIFETIME);
+        }
         router.post(
             route('issues.move', key),
             // Spec 7.4: a drop takes the column's first status (lanes are keyed by column name).
@@ -144,7 +157,7 @@ export default function Board({
                     <DndContext sensors={sensors} collisionDetection={closestCorners} {...handlers}>
                         <div className="flex snap-x items-start gap-2.5 overflow-x-auto pb-4">
                             {board.columns.map(({ name, statuses }) => (
-                                <Lane key={name} name={name} category={statuses[0].category} cards={lanes[name] ?? []} draggable={can.contribute} />
+                                <Lane key={name} name={name} category={statuses[0].category} cards={lanes[name] ?? []} draggable={can.contribute} fresh={fresh} busy={busy} onBusy={setBusy} />
                             ))}
                         </div>
                         <DragOverlay dropAnimation={css('drop')}>
@@ -190,7 +203,7 @@ const css = (moment: 'lift' | 'drop') => {
 };
 
 /** Design system BoardColumn: status square (its first status's category), name, count; the points total; the cards; a dashed target when empty. */
-function Lane({ name, category, cards, draggable }: { name: string; category: StatusCategory; cards: Card[]; draggable: boolean }) {
+function Lane({ name, category, cards, draggable, fresh, busy, onBusy }: { name: string; category: StatusCategory; cards: Card[]; draggable: boolean; fresh: string | null; busy: string | null; onBusy: (key: string | null) => void }) {
     const { setNodeRef, isOver } = useLaneDroppable(name);
     // shortcut: totals cover the cards on screen, so a board cut off at 500 issues (the notice above says so) or a filtered
     // board shows partial sums; move the sum to BoardService when estimates get a unit (step 10).
@@ -215,7 +228,7 @@ function Lane({ name, category, cards, draggable }: { name: string; category: St
             <SortableContext items={cards.map((c) => c.key)} strategy={verticalListSortingStrategy}>
                 <ul className="flex min-h-16 flex-1 flex-col gap-2">
                     {cards.map((card) => (
-                        <SortableCard key={card.key} card={card} disabled={!draggable} />
+                        <SortableCard key={card.key} card={card} disabled={!draggable} chip={fresh === card.key || busy === card.key} onBusy={(b) => onBusy(b ? card.key : null)} />
                     ))}
                     {cards.length === 0 && (
                         <li>
@@ -228,13 +241,13 @@ function Lane({ name, category, cards, draggable }: { name: string; category: St
     );
 }
 
-function SortableCard({ card, disabled }: { card: Card; disabled: boolean }) {
+function SortableCard({ card, disabled, chip, onBusy }: { card: Card; disabled: boolean; chip: boolean; onBusy: (busy: boolean) => void }) {
     const { attributes, listeners, setNodeRef, transform, transition: sliding, isDragging } = useSortable({ id: card.key, disabled, transition: css('drop') });
 
     return (
         <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition: sliding }} {...attributes} {...listeners} className="rounded-item">
             {/* The dashed ghost marks where the card will land. */}
-            {isDragging ? <div className="h-[88px] rounded-item border border-dashed border-line-2" /> : <CardView card={card} />}
+            {isDragging ? <div className="h-[88px] rounded-item border border-dashed border-line-2" /> : <CardView card={card} chip={chip ? { editable: !disabled, onBusy } : undefined} />}
         </li>
     );
 }
@@ -245,11 +258,13 @@ const dueState = (date: string) => {
 };
 
 /** Design system IssueCard: type chip and key, two-line title, labels, then estimate, priority, due date and assignee. */
-function CardView({ card, dragging = false }: { card: Card; dragging?: boolean }) {
+function CardView({ card, dragging = false, chip }: { card: Card; dragging?: boolean; chip?: { editable: boolean; onBusy: (busy: boolean) => void } }) {
     const due = card.due_date ? dueState(card.due_date) : null;
+    // Closed without being done (Won't do, Duplicate…): stays on the board dimmed, with the resolution named in text.
+    const dimmed = !!card.resolution && card.resolution !== 'done';
 
     return (
-        <div className={`rounded-item border bg-card p-3 text-text ${dragging ? 'border-line-2 shadow-lift' : 'border-transparent shadow-xs hover:border-line-2'}`}>
+        <div className={`rounded-item border bg-card p-3 text-text ${dimmed ? 'opacity-60' : ''} ${dragging ? 'border-line-2 shadow-lift' : 'border-transparent shadow-xs hover:border-line-2'}`}>
             <div className="flex items-center gap-2">
                 <IssueTypeIcon type={card.type} subtask={!!card.parent} />
                 <span className="text-2xs text-muted" title={card.parent ? `Sub-task of ${card.parent}` : undefined}>
@@ -259,6 +274,12 @@ function CardView({ card, dragging = false }: { card: Card; dragging?: boolean }
             <Link href={issueUrl(card.key)} onClick={onPeekClick(card.key)} title={card.title} className="mt-1.5 line-clamp-2 break-words text-md text-text hover:underline">
                 {card.title}
             </Link>
+            {dimmed && <p className="mt-1 text-sm text-muted">{resolutionLabels[card.resolution!]}</p>}
+            {chip && card.resolution && (
+                <div className="mt-2">
+                    <ResolutionChip issueKey={card.key} resolution={card.resolution} editable={chip.editable} onBusy={chip.onBusy} />
+                </div>
+            )}
             {card.labels.length > 0 && <p className="mt-1 truncate text-sm text-muted">{card.labels.join(' · ')}</p>}
             <div className="mt-2 flex items-center gap-2 text-sm text-muted">
                 {card.story_points !== null && <span>{card.story_points} pts</span>}

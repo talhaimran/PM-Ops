@@ -192,7 +192,7 @@ test("the agent's owner approves: the issue moves as the owner, with the agent a
         ->and($request->decided_at)->not->toBeNull()
         ->and(Activity::where('action', '!=', 'created')->count())->toBe(1)
         ->and($activity->only(['action', 'user_id', 'agent_id', 'via']))->toEqual(['action' => 'approved', 'user_id' => $this->owner->id, 'agent_id' => $this->agent->id, 'via' => 'web'])
-        ->and($activity->changes)->toEqual(['status' => ['from' => 'In Review', 'to' => 'Done'], 'approval_request' => ['id' => $id, 'to' => 'Done']])
+        ->and($activity->changes)->toEqual(['status' => ['from' => 'In Review', 'to' => 'Done'], 'resolution' => ['from' => null, 'to' => 'done'], 'approval_request' => ['id' => $id, 'to' => 'Done']])
         ->and(AuditLog::count())->toBe($audits)
         ->and(session('undo.message'))->toBe('WEB-1 moved to Done');
 
@@ -201,7 +201,7 @@ test("the agent's owner approves: the issue moves as the owner, with the agent a
         ->where('activity.0.user.name', 'Talha Imran')
         ->where('activity.0.agent', ['name' => "Talha's agent", 'owner' => 'Talha Imran'])
         ->where('activity.0.approval_request', ['id' => $id, 'to' => 'Done'])
-        ->where('activity.0.changes', ['status' => ['from' => 'In Review', 'to' => 'Done']]));
+        ->where('activity.0.changes.status', ['from' => 'In Review', 'to' => 'Done']));
 });
 
 test('REST and MCP activity lists show the agent behind an approved move', function () {

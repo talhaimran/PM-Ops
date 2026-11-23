@@ -13,9 +13,12 @@ export function push(toasts: Toast[], toast: Omit<Toast, 'id'>): Toast[] {
     return [...toasts, { ...toast, id: nextId++ }].slice(-MAX_STACKED);
 }
 
+/** How long a toast with Undo shows, in ms; the board's "Resolved" chip lasts as long. */
+export const UNDO_LIFETIME = 6000;
+
 /** How long a toast shows, in ms: 6s with Undo, 4.2s without. */
 export function lifetime(toast: Toast): number {
-    return toast.undo ? 6000 : 4200;
+    return toast.undo ? UNDO_LIFETIME : 4200;
 }
 
 /** The toast ⌘Z / Ctrl+Z acts on: the newest one that offers Undo. */

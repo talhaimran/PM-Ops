@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\Resolution;
 use App\Http\Requests\Board\MoveIssueRequest;
 use App\Http\Resources\IssueResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
@@ -40,6 +41,8 @@ class MoveIssue extends Tool
         return [
             'issue' => $schema->string()->description('Issue key, e.g. WEB-12.')->required(),
             'status' => $schema->string()->description('Destination status name (a column name works when the column has one status); omit to reorder within the current column.'),
+            'resolution' => $schema->string()->enum(Resolution::class)->description('With a Done-category status: how it ended (default done). duplicate needs duplicate_of.'),
+            'duplicate_of' => $schema->string()->description('Key of the original issue, required with resolution duplicate, e.g. WEB-3.'),
             'position' => $schema->integer()->min(0)->description('0-based index in the destination column; default bottom. Do not combine with after.'),
             'after' => $schema->string()->description('Place directly after this issue key (must be in the destination column).'),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),

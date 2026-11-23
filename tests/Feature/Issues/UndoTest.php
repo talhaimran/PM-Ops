@@ -43,7 +43,7 @@ test('undo of a board move returns the issue to its column and position', functi
 
     expect($order('To Do'))->toBe([1, 2, 3])
         ->and(session('undo'))->toBeNull()
-        ->and(Activity::latest('id')->first())->action->toBe('undid')->changes->toEqual(['status' => ['from' => 'Done', 'to' => 'To Do']]);
+        ->and(Activity::latest('id')->first())->action->toBe('undid')->changes->toEqual(['status' => ['from' => 'Done', 'to' => 'To Do'], 'resolution' => ['from' => 'done', 'to' => null]]);
 });
 
 test('undo of a reorder inside a column puts the issue back first', function () use ($order) {
