@@ -2,12 +2,13 @@ import { Search, UserRound } from 'lucide-react';
 import { selectClass } from '@/Components/IssueFormModal';
 import Avatar from '@/Components/Avatar';
 import TextInput from '@/Components/TextInput';
+import { resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import { IssueOptions } from '@/types';
 import { useEffect, useState } from 'react';
 
-export type Filters = Partial<Record<'assignee' | 'type' | 'priority' | 'label' | 'q' | 'sprint' | 'sort', string>>;
+export type Filters = Partial<Record<'assignee' | 'type' | 'priority' | 'label' | 'category' | 'resolution' | 'q' | 'sprint' | 'sort', string>>;
 
-/** Search box plus assignee/type/priority/label/sprint selects. Calls onApply with changed keys; '' clears one. */
+/** Search box plus assignee/type/priority/category/resolution/label/sprint selects. Calls onApply with changed keys; '' clears one. */
 export default function IssueFilters({
     filters,
     options,
@@ -45,6 +46,11 @@ export default function IssueFilters({
             ))}
         </select>
     );
+    const categories = [
+        { value: 'to_do', label: 'To do' },
+        { value: 'in_progress', label: 'In progress' },
+        { value: 'done', label: 'Done' },
+    ];
     const plain = (values: string[]) => values.map((v) => ({ value: v, label: v }));
     const active = Object.entries(filters).some(([k, v]) => k !== 'sort' && v);
     const toggle = (assignee: string) => onApply({ assignee: filters.assignee === assignee ? '' : assignee });
@@ -92,6 +98,8 @@ export default function IssueFilters({
             {select('type', 'Type', plain(types))}
             {options.labels.length > 0 && select('label', 'Label', plain(options.labels.map((l) => l.name)))}
             {select('priority', 'Priority', plain(options.priorities))}
+            {select('category', 'Status category', categories)}
+            {select('resolution', 'Resolution', resolutions.map((r) => ({ value: r, label: resolutionLabels[r] })))}
             {options.sprints.length > 0 &&
                 select('sprint', 'Sprint', [
                     { value: 'active', label: 'Active sprint' },

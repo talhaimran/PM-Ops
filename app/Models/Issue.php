@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
 use App\Enums\StatusCategory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
-    'project_id', 'number', 'title', 'description', 'type', 'priority', 'status_id',
+    'project_id', 'number', 'title', 'description', 'type', 'priority', 'status_id', 'resolution', 'resolved_at',
     'assignee_id', 'reporter_id', 'story_points', 'due_date', 'epic_id', 'parent_id', 'sprint_id', 'rank',
 ])]
 class Issue extends Model
@@ -32,6 +33,8 @@ class Issue extends Model
             'priority' => IssuePriority::class,
             'due_date' => 'date:Y-m-d',
             'story_points' => 'integer',
+            'resolution' => Resolution::class,
+            'resolved_at' => 'datetime',
         ];
     }
 
@@ -55,6 +58,12 @@ class Issue extends Model
     public function scopeDone(Builder $query): void
     {
         $query->whereHas('status', fn ($status) => $status->where('category', StatusCategory::Done));
+    }
+
+    /** Completed work: only resolution Done counts (sprint progress); Won't do and the rest are Done-category but not completed. */
+    public function scopeCompleted(Builder $query): void
+    {
+        $query->where('resolution', Resolution::Done->value);
     }
 
     public function scopeOpen(Builder $query): void

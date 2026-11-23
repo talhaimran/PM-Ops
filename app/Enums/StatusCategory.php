@@ -17,4 +17,10 @@ enum StatusCategory: string
             self::Done => 'Done',
         };
     }
+
+    /** @return list<string> */
+    public static function values(): array
+    {
+        return array_column(self::cases(), 'value');
+    }
 }

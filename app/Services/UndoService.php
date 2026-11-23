@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\Resolution;
 use App\Models\Activity;
 use App\Models\Issue;
 use Illuminate\Validation\ValidationException;
@@ -13,7 +14,7 @@ use Illuminate\Validation\ValidationException;
 class UndoService
 {
     // Activity actions that change an issue. Comments don't, so a new comment never blocks an undo.
-    private const CHANGES = ['updated', 'undid', 'approved', 'deleted', 'restored'];
+    private const CHANGES = ['updated', 'reopened', 'undid', 'approved', 'deleted', 'restored'];
 
     /** The marker an undo carries: the newest activity on the issue right after the change. */
     public function token(Issue $issue): int
@@ -56,6 +57,7 @@ class UndoService
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,
+            'resolution' => $this->resolution($issue),
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->values()->all(),
             'story_points' => $issue->story_points,
@@ -83,7 +85,7 @@ class UndoService
             ->orderByDesc('rank')
             ->first();
 
-        return ['status' => $issue->status->name] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
+        return ['status' => $issue->status->name, ...($issue->resolution ? ['resolution' => $this->resolution($issue)] : [])] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
     }
 
     /**
@@ -107,6 +109,12 @@ class UndoService
             ->first();
 
         return ['sprint' => $issue->sprint?->name ?? 'backlog'] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
+    }
+
+    /** shortcut: a Duplicate is put back as Done, because the original's key isn't stored until duplicate links (step 2); the activity keeps it. */
+    private function resolution(Issue $issue): ?string
+    {
+        return ($issue->resolution === Resolution::Duplicate ? Resolution::Done : $issue->resolution)?->value;
     }
 
     private function describe(Activity $activity, Issue $issue): string

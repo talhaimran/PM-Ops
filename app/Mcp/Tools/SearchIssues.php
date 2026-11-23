@@ -4,6 +4,8 @@ namespace App\Mcp\Tools;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
+use App\Enums\StatusCategory;
 use App\Http\Requests\Lists\IssueListRequest;
 use App\Http\Resources\IssueCardResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
@@ -42,6 +44,8 @@ class SearchIssues extends Tool
             'type' => $schema->string()->enum(IssueType::class),
             'priority' => $schema->string()->enum(IssuePriority::class),
             'label' => $schema->string()->description('Label name.'),
+            'category' => $schema->string()->enum(StatusCategory::class)->description('Status category: to_do, in_progress or done.'),
+            'resolution' => $schema->string()->enum(Resolution::class),
             'sprint' => $schema->string()->description('Sprint name, "active" or "backlog".'),
             'sort' => $schema->string()->enum(IssueListRequest::sorts())->description('Default -key (newest first). "-" means descending.'),
             'page' => $schema->integer()->min(1)->max(10000),

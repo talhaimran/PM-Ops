@@ -67,6 +67,8 @@ export interface Label {
 
 export type StatusCategory = 'to_do' | 'in_progress' | 'done';
 
+export type Resolution = 'done' | 'wont_do' | 'duplicate' | 'cannot_reproduce';
+
 export interface IssueLink {
     key: string;
     title: string;
@@ -102,6 +104,9 @@ export interface Issue {
     priority: string;
     status: string;
     category: StatusCategory;
+    /** Null while the issue isn't in a Done-category status. */
+    resolution: Resolution | null;
+    resolved_at: string | null;
     assignee: UserSummary | null;
     reporter: UserSummary | null;
     labels: string[];
@@ -131,6 +136,8 @@ export interface ApprovalRequest {
     now: string;
     moved: boolean;
     reason: string | null;
+    resolution: Resolution | null;
+    duplicate_of: string | null;
     agent: AgentRef;
     expires_at: string;
     created_at: string;

@@ -7,6 +7,7 @@ use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -42,7 +43,7 @@ class BoardService
     }
 
     /**
-     * Move an issue to a status and/or a place in its column. $input: status?, position?, after?
+     * Move an issue to a status and/or a place in its column. $input: status?, resolution?, duplicate_of?, position?, after?
      * Status changes are logged through IssueService::update; reordering alone isn't logged.
      */
     public function move(Issue $issue, User $actor, array $input, string $action = 'updated'): Issue
@@ -50,8 +51,8 @@ class BoardService
         return DB::transaction(function () use ($issue, $actor, $input, $action) {
             Project::whereKey($issue->project_id)->lockForUpdate()->first();
 
-            if (isset($input['status'])) {
-                $issue = $this->issues->update($issue, $actor, ['status' => $input['status'], 'reason' => $input['reason'] ?? null], $action);
+            if (isset($input['status']) || isset($input['resolution'])) {
+                $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of']), $action);
             }
             // An agent's move to Done waits for a person (A2): the issue stays where it was.
             if ($issue->heldApproval) {

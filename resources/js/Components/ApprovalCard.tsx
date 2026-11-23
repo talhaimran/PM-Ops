@@ -1,5 +1,6 @@
 import AgentLabel from '@/Components/AgentLabel';
 import { selectClass } from '@/Components/IssueFormModal';
+import { resolutionLabels } from '@/Components/ResolutionChip';
 import StatusLozenge from '@/Components/StatusLozenge';
 import { issueUrl } from '@/issueUrl';
 import { ApprovalRequest } from '@/types';
@@ -55,6 +56,12 @@ export default function ApprovalCard({ approval: a, canDecide, linkIssue = false
                 {/* Requests are only for Done-category statuses. */}
                 <StatusLozenge status={a.to} category="done" />
             </div>
+            {a.resolution && (
+                <p className="text-sm">
+                    Resolution: {resolutionLabels[a.resolution]}
+                    {a.duplicate_of && ` of ${a.duplicate_of}`}
+                </p>
+            )}
             {a.reason && <p className="text-sm">{a.reason}</p>}
             {pending && a.moved && (
                 <p className="text-sm font-semibold">

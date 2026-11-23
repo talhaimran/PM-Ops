@@ -8,6 +8,7 @@ import IssueFormModal, { selectClass } from '@/Components/IssueFormModal';
 import IssueTypeIcon from '@/Components/IssueTypeIcon';
 import PriorityIcon from '@/Components/PriorityIcon';
 import PrimaryButton from '@/Components/PrimaryButton';
+import ResolutionChip, { DuplicateOfModal, resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge, { lozengeClass } from '@/Components/StatusLozenge';
 import TextInput from '@/Components/TextInput';
@@ -52,11 +53,18 @@ export default function IssueView({
     const [editingDescription, setEditingDescription] = useState(false);
     const [description, setDescription] = useState(issue.description ?? '');
     const [addingSubtask, setAddingSubtask] = useState(false);
+    const [duplicating, setDuplicating] = useState(false);
     const [tab, setTab] = useState<'comments' | 'history'>('comments');
     const comment = useForm({ body: '' });
 
     const save = (data: Record<string, unknown>, onSuccess?: () => void) =>
         router.patch(route('issues.update', issue.key), data as never, { preserveScroll: true, onSuccess });
+
+    // "Close as…" (1-R8): the project's first Done status in board order, unless the issue is already Done. With none, the server explains.
+    const closeAs = (data: Record<string, unknown>, onSuccess?: () => void) => {
+        const done = options.statuses.find((s) => s.category === 'done');
+        save({ ...(issue.category !== 'done' && done ? { status: done.name } : {}), ...data }, onSuccess);
+    };
 
     const linkList = (heading: string, items: IssueLink[] | undefined, subtasks = false) =>
         items && items.length > 0 ? (
@@ -155,6 +163,7 @@ export default function IssueView({
                             plain(options.statuses.map((s) => s.name)),
                             `h-control-h-sm rounded-pill border-0 py-0 pe-8 ps-3 text-xs disabled:opacity-100 ${lozengeClass(issue.category)}`,
                         )}
+                        {issue.resolution && <ResolutionChip issueKey={issue.key} resolution={issue.resolution} editable={can.contribute} />}
                         {can.contribute && (
                             <div className="ms-auto">
                                 <Dropdown>
@@ -164,6 +173,19 @@ export default function IssueView({
                                         </button>
                                     </Dropdown.Trigger>
                                     <Dropdown.Content>
+                                        <p className="px-4 pt-2 text-xs font-semibold text-muted">Close as…</p>
+                                        {resolutions.map((r) => (
+                                            <button
+                                                key={r}
+                                                type="button"
+                                                className="block w-full px-4 py-2 text-start hover:bg-card-2"
+                                                onClick={() => (r === 'duplicate' ? setDuplicating(true) : closeAs({ resolution: r }))}
+                                            >
+                                                {resolutionLabels[r]}
+                                                {r === 'duplicate' && '…'}
+                                            </button>
+                                        ))}
+                                        <div className="my-1 border-t border-line" />
                                         <button
                                             type="button"
                                             className="block w-full border-l-2 border-transparent px-4 py-2 text-start text-t-bad hover:border-c-bad hover:bg-card-2"
@@ -177,6 +199,8 @@ export default function IssueView({
                         )}
                     </div>
                     <InputError message={errors.status} />
+                    <InputError message={errors.resolution} />
+                    <DuplicateOfModal show={duplicating} projectKey={issue.project} onClose={() => setDuplicating(false)} onSubmit={(original) => closeAs({ resolution: 'duplicate', duplicate_of: original }, () => setDuplicating(false))} />
 
                     <AiBox approvals={issue.pending_approvals} />
 

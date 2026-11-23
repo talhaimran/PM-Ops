@@ -90,8 +90,11 @@ class ColumnService
             Project::whereKey($column->project_id)->lockForUpdate()->first();
             // Soft-deleted issues move too (to the first column when no target was needed), so they can still be restored.
             $to = ($target ?? $others->sortBy('position')->first())->statuses()->firstOrFail();
+            // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
             Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'))
-                ->update(['status_id' => $to->id]);
+                ->update(['status_id' => $to->id] + ($to->isDone()
+                    ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw('coalesce(resolved_at, now())')]
+                    : ['resolution' => null, 'resolved_at' => null]));
             $column->delete();
             $this->resequence($others);
         });

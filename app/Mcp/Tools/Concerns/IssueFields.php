@@ -4,6 +4,7 @@ namespace App\Mcp\Tools\Concerns;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 
 trait IssueFields
@@ -16,6 +17,8 @@ trait IssueFields
             'type' => $schema->string()->enum(IssueType::class)->description('Default task.'),
             'priority' => $schema->string()->enum(IssuePriority::class)->description('Default medium.'),
             'status' => $schema->string()->description('Status name, e.g. "To Do", "In Progress" (a column name works when the column has one status). Case-insensitive.'),
+            'resolution' => $schema->string()->enum(Resolution::class)->description('How a Done-category issue ended; only with a Done status (or on an issue already Done). Default done when moving into one. duplicate needs duplicate_of.'),
+            'duplicate_of' => $schema->string()->description('Key of the original issue, required with resolution duplicate, e.g. WEB-3.'),
             'assignee' => $schema->string()->nullable()->description('Assignee email (must be a project member); null to unassign.'),
             'labels' => $schema->array()->items($schema->string())->description('Label names; replaces the current labels. Labels must exist.'),
             'story_points' => $schema->integer()->min(0)->max(1000)->nullable(),

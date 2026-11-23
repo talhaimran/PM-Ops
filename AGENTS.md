@@ -56,17 +56,17 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `create_project` | People only: agents get "Only people can change project settings. Do this in the web app." | key, name | description |
 | `update_project` | People only (as above) | project | name, description |
 | `delete_project` | People only (as above) | project, confirm | |
-| `create_issue` | Create an issue, sub-task (`parent`) or epic | project, title | description, type, priority, status, assignee, labels, story_points, due_date, epic, parent, sprint |
+| `create_issue` | Create an issue, sub-task (`parent`) or epic | project, title | description, type, priority, status, resolution, duplicate_of, assignee, labels, story_points, due_date, epic, parent, sprint |
 | `get_issue` | Issue with sub-tasks, epic issues, comments and `pending_approvals` | issue | fields |
-| `update_issue` | Change only the fields you send; `null` clears. A Done-category status waits for a person's approval | issue | title, description, type, priority, status, assignee, labels, story_points, due_date, epic, parent, sprint, reason |
+| `update_issue` | Change only the fields you send; `null` clears. A Done-category status waits for a person's approval. `resolution` (and `duplicate_of`) go with a Done status, or change an issue that is already Done | issue | title, description, type, priority, status, resolution, duplicate_of, assignee, labels, story_points, due_date, epic, parent, sprint, reason |
 | `delete_issue` | Delete an issue and its sub-tasks. Soft: they disappear from every tool and response; a person can restore them in the web app for 30 days | issue, confirm | |
 | `get_issue_activity` | Change history, newest first | issue | page, per_page, cursor |
 | `add_comment` | Markdown comment | issue, body | |
 | `update_comment` | Edit your own comment | comment_id, body | |
 | `delete_comment` | Delete your comment (admins: any). Soft, like issues | comment_id | |
 | `list_labels` / `create_label` / `update_label` / `delete_label` | Manage labels (by name) | project (+ name or label) | color, name |
-| `get_board` | Columns with their statuses and issue cards in rank order (epics hidden) | project | assignee, type, priority, label, q, sprint |
-| `move_issue` | Change status and/or position on the board. Moving to a Done-category status waits for a person's approval | issue | status, position, after, reason |
+| `get_board` | Columns with their statuses and issue cards in rank order (epics hidden); cards carry `category`, `resolution`, `resolved_at` | project | assignee, type, priority, label, category, resolution, q, sprint |
+| `move_issue` | Change status and/or position on the board. Moving to a Done-category status waits for a person's approval; `resolution` says how it ended (default `done`) | issue | status, resolution, duplicate_of, position, after, reason |
 | `list_columns` | Columns with their statuses (name, category) and issue counts | project | |
 | `create_column` / `update_column` / `delete_column` | People only (as above) | project (+ name or column) | position, name, status, category, move_issues_to |
 | `list_sprints` | Sprints with dates and points | project | state, page, per_page, cursor |
@@ -77,13 +77,15 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `complete_sprint` | Close the active sprint and move unfinished issues | project, sprint, move_open_issues_to, confirm | |
 | `get_backlog` | Open sprints and backlog in rank order | project | |
 | `rank_backlog` | Reorder within, or move between, backlog and sprints | issue | sprint, position, after |
-| `search_issues` | Filter and sort issues across projects | | q, project, assignee, type, priority, label, sprint, sort, page, per_page, cursor, fields |
-| `my_issues` | Your open assigned issues, by priority then due date | | limit, fields |
+| `search_issues` | Filter and sort issues across projects | | q, project, assignee, type, priority, label, category, resolution, sprint, sort, page, per_page, cursor, fields |
+| `my_issues` | Your assigned issues that aren't done (pass `category` or `resolution` to see others), by priority then due date | | limit, category, resolution, fields |
 | `project_summary` | Counts per column and type, open (not done)/overdue, sprint progress | project | |
 | `bulk_create_issues` | Up to 50 creates, all or nothing | project, issues[] | |
 | `bulk_update_issues` | Up to 50 updates by key, all or nothing (Done waits for approval, as above) | updates[] | |
 
 **Filters:** `assignee` is an email or `"unassigned"`, and `sprint` is a name, `"active"` or `"backlog"`. `q` matches title text or an exact key. **Sort** (`search_issues`) takes one of `key, title, type, priority, status, assignee, story_points, due_date, created, updated`; prefix with `-` for descending (default `-key`, newest first).
+
+**Resolution:** every issue in a Done-category status has a `resolution`: `done`, `wont_do`, `duplicate` or `cannot_reproduce` (responses also carry `resolved_at`; both are `null` while the issue is open). Moving into a Done-category status without one resolves it as `done`. `resolution` only goes with a Done status, or on an issue that is already Done (changing it needs no approval); sent alone on an open issue it is a 422 listing the Done statuses. `duplicate` needs `duplicate_of` with the original's key (an issue you can open, else the same "not found" error). A waiting approval request carries the resolution, and the person approving applies status and resolution together. Only `done` counts as completed in sprint points. `category` (`to_do`, `in_progress`, `done`) and `resolution` filter `search_issues`, `get_board`, `my_issues` and the REST lists.
 
 **Placement** (`move_issue`, `rank_backlog`): `position` is a 0-based index in the destination (default: bottom), or use `after: "WEB-7"` to sit directly below that issue. Send one or the other, not both.
 

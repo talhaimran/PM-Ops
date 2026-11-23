@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
 use App\Enums\SprintState;
 use App\Models\Activity;
 use App\Models\Column;
@@ -51,11 +52,13 @@ class IssueService
                 ]);
             }
 
+            [$resolution, $original] = $this->resolution($project, null, $status, $data, $actor);
             $issue = Issue::create([
                 'type' => IssueType::Task,
                 'priority' => IssuePriority::Medium,
                 'status_id' => $status->id,
                 ...$attributes,
+                ...$resolution,
                 'project_id' => $project->id,
                 'number' => $this->nextNumber($project),
                 'rank' => $this->ranks->bottom($project),
@@ -63,7 +66,7 @@ class IssueService
             ]);
             $issue->labels()->sync($labelIds ?? []);
             $issue->setRelation('project', $project);
-            $this->activity->log($issue, $actor, 'created');
+            $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original]] : null);
 
             return $issue->load(array_slice(self::DISPLAY, 1));
         });
@@ -83,15 +86,19 @@ class IssueService
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
+            $wasDone = $issue->status->isDone();
             [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);
+            [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
 
             $issue->heldApproval = null;
             if ($status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent())) {
                 unset($attributes['status_id']);
-                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null);
+                // The issue stays where it is, so its resolution does too; the request carries the new one.
+                $resolution = [];
+                $issue->heldApproval = $this->approvals->requestDone($issue, $actor, $agent, $status, $data['reason'] ?? null, isset($data['resolution']) ? Resolution::from($data['resolution']) : null, $data['duplicate_of'] ?? null);
             }
 
-            $issue->update($attributes);
+            $issue->update([...$attributes, ...$resolution]);
             if ($labelIds !== null) {
                 $issue->labels()->sync($labelIds);
             }
@@ -103,8 +110,13 @@ class IssueService
                 ->map(fn ($value, $field) => ['from' => $value, 'to' => $after[$field]])
                 ->all();
 
+            if ($original && $resolution) {
+                $changes['duplicate_of'] = ['from' => null, 'to' => $original];
+            }
             if ($changes) {
-                $this->activity->log($issue, $actor, $action, $changes);
+                // Leaving Done is a reopen (spec 7.4); an undo or an approval keeps its own action.
+                $reopened = $action === 'updated' && $wasDone && ! $issue->status->isDone();
+                $this->activity->log($issue, $actor, $reopened ? 'reopened' : $action, $changes);
             }
 
             return $issue;
@@ -276,7 +288,7 @@ class IssueService
 
     /**
      * Apply board/list/search filters: assignee (email or "unassigned"), type, priority, label (name),
-     * sprint (name, "active" or "backlog"), q (title text, or an issue key such as WEB-12).
+     * sprint (name, "active" or "backlog"), category (to_do, in_progress, done), resolution, q (title text, or an issue key such as WEB-12).
      */
     public function filter(Builder $query, array $filters): Builder
     {
@@ -286,6 +298,8 @@ class IssueService
                 : $q->whereHas('assignee', fn ($u) => $u->where('email', $assignee)))
             ->when($filters['type'] ?? null, fn ($q, $type) => $q->where('type', $type))
             ->when($filters['priority'] ?? null, fn ($q, $priority) => $q->where('priority', $priority))
+            ->when($filters['category'] ?? null, fn ($q, $category) => $q->whereHas('status', fn ($s) => $s->where('category', $category)))
+            ->when($filters['resolution'] ?? null, fn ($q, $resolution) => $q->where('resolution', $resolution))
             ->when($filters['sprint'] ?? null, fn ($q, $sprint) => match (strtolower($sprint)) {
                 'backlog' => $q->whereNull('sprint_id'),
                 'active' => $q->whereHas('sprint', fn ($s) => $s->where('state', SprintState::Active->value)),
@@ -404,6 +418,66 @@ class IssueService
         return [$attributes, $labelIds, $status];
     }
 
+    /**
+     * Spec 7.4, the one place the resolution rule lives (web, REST, MCP, bulk and approvals all come through update):
+     * entering a Done-category status sets a resolution (default Done) and resolved_at, leaving clears both, and a
+     * resolution only goes with a Done status. $to is the status asked for, or null to stay where the issue is.
+     *
+     * @return array{0: array<string, mixed>, 1: ?string} the columns to save, and the original's key for a Duplicate
+     */
+    private function resolution(Project $project, ?Issue $issue, ?Status $to, array $data, User $actor): array
+    {
+        $target = $to ?? $issue?->status;
+        $wasDone = $issue?->status?->isDone() ?? false;
+        $given = ($data['resolution'] ?? null) ? Resolution::from($data['resolution']) : null;
+        $duplicateOf = $data['duplicate_of'] ?? null;
+
+        if (! $target?->isDone()) {
+            if ($given || $duplicateOf) {
+                $done = $project->statuses()->get()->filter->isDone()->pluck('name');
+                throw ValidationException::withMessages(['resolution' => $done->isEmpty()
+                    ? "{$project->key} has no Done status. A project Admin must add a column with a Done status before issues can be closed."
+                    : 'Resolution applies to Done statuses. Move the issue to one of: '.$done->implode(', ').'.']);
+            }
+
+            return [$wasDone ? ['resolution' => null, 'resolved_at' => null] : [], null];
+        }
+
+        $original = null;
+        if ($given === Resolution::Duplicate) {
+            $original = $this->original($project, $issue, $actor, $duplicateOf);
+        } elseif ($duplicateOf) {
+            throw ValidationException::withMessages(['duplicate_of' => 'duplicate_of goes with the Duplicate resolution.']);
+        }
+
+        return match (true) {
+            ! $wasDone => [['resolution' => ($given ?? Resolution::Done)->value, 'resolved_at' => now()], $original],
+            // Still Done: only a new resolution changes, resolved_at stays.
+            $given !== null => [['resolution' => $given->value], $original],
+            default => [[], null],
+        };
+    }
+
+    /** The key of the issue a Duplicate points at, found only among what $actor can open; unknown and inaccessible read the same. */
+    private function original(Project $project, ?Issue $issue, User $actor, mixed $key): string
+    {
+        $hint = "Send duplicate_of with the original issue's key, e.g. {$project->key}-3.";
+        if (! is_string($key) || trim($key) === '') {
+            throw ValidationException::withMessages(['duplicate_of' => $hint]);
+        }
+
+        try {
+            $original = $this->resolve($actor, $key);
+        } catch (ValidationException) {
+            throw ValidationException::withMessages(['duplicate_of' => "Issue \"{$key}\" was not found. {$hint}"]);
+        }
+        if ($issue?->is($original)) {
+            throw ValidationException::withMessages(['duplicate_of' => "An issue can't be a duplicate of itself."]);
+        }
+
+        return $original->key;
+    }
+
     private function validateLinks(Project $project, ?Issue $issue, array $attributes, ?Issue $epic, ?Issue $parent): void
     {
         $type = $attributes['type'] ?? $issue?->type ?? IssueType::Task;
@@ -519,6 +593,7 @@ class IssueService
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,
+            'resolution' => $issue->resolution?->value,
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->sort()->values()->implode(', ') ?: null,
             'story_points' => $issue->story_points,

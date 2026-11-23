@@ -4,6 +4,7 @@ namespace App\Http\Requests\Issues;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -17,6 +18,9 @@ class StoreIssueRequest extends FormRequest
             'type' => [Rule::enum(IssueType::class)],
             'priority' => [Rule::enum(IssuePriority::class)],
             'status' => ['string', 'max:100'],
+            // Spec 7.4: only with a Done status; Duplicate needs the original's key.
+            'resolution' => ['nullable', Rule::enum(Resolution::class)],
+            'duplicate_of' => ['nullable', 'string', 'max:30'],
             'assignee' => ['nullable', 'string', 'max:255'],
             'labels' => ['nullable', 'array', 'max:20'],
             'labels.*' => ['string', 'max:50'],
@@ -33,6 +37,7 @@ class StoreIssueRequest extends FormRequest
         return [
             'type.enum' => 'The type must be one of: '.implode(', ', IssueType::values()).'.',
             'priority.enum' => 'The priority must be one of: '.implode(', ', IssuePriority::values()).'.',
+            'resolution.enum' => 'The resolution must be one of: '.implode(', ', Resolution::values()).'.',
             'due_date.date_format' => 'The due date must be a date like 2026-12-31.',
         ];
     }

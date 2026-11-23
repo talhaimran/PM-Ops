@@ -9,16 +9,26 @@ use App\Models\Issue;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
 class DashboardService
 {
-    /** Open issues assigned to the user across their projects: priority desc, due date (nulls last), key. */
-    public function myIssues(User $user, int $limit = 50): Collection
+    public function __construct(private IssueService $issues) {}
+
+    /**
+     * Issues assigned to the user across their projects: priority desc, due date (nulls last), key. Not done unless
+     * $filters (category, resolution) say what to show instead.
+     */
+    public function myIssues(User $user, int $limit = 50, array $filters = []): Collection
     {
         $query = Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'))
             ->where('assignee_id', $user->id)
-            ->open()
+            ->when(
+                $filters['category'] ?? $filters['resolution'] ?? null,
+                fn ($q) => $this->issues->filter($q, Arr::only($filters, ['category', 'resolution'])),
+                fn ($q) => $q->open(),
+            )
             ->with(IssueService::DISPLAY);
 
         return $query
@@ -54,9 +64,9 @@ class DashboardService
 
         $sprints = Sprint::whereIn('project_id', $ids)
             ->where('state', SprintState::Active->value)
-            ->withCount(['issues', 'issues as issues_done' => fn ($q) => $q->done()])
+            ->withCount(['issues', 'issues as issues_done' => fn ($q) => $q->completed()])
             ->withSum('issues as points_total', 'story_points')
-            ->withSum(['issues as points_done' => fn ($q) => $q->done()], 'story_points')
+            ->withSum(['issues as points_done' => fn ($q) => $q->completed()], 'story_points')
             ->get()
             ->keyBy('project_id');
 

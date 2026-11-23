@@ -136,13 +136,13 @@ class SprintService
         return $sprint->setRelation('project', $project);
     }
 
-    /** Adds issue_count, points_total and points_done to a sprint query. */
+    /** Adds issue_count, points_total and points_done (resolution Done only) to a sprint query. */
     public function withStats(Builder $query): Builder
     {
         return $query
             ->withCount('issues')
             ->withSum('issues as points_total', 'story_points')
-            ->withSum(['issues as points_done' => fn ($q) => $q->done()], 'story_points');
+            ->withSum(['issues as points_done' => fn ($q) => $q->completed()], 'story_points');
     }
 
     private function resolveCompletionTarget(Sprint $sprint, string $moveTo): ?Sprint

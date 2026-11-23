@@ -31,6 +31,8 @@ class IssueResource extends JsonResource
             'priority' => $this->priority->value,
             'status' => $this->status->name,
             'category' => $this->status->category->value,
+            'resolution' => $this->resolution?->value,
+            'resolved_at' => $this->resolved_at?->toIso8601String(),
             'assignee' => self::user($this->assignee),
             'reporter' => self::user($this->reporter),
             'labels' => $this->labels->pluck('name')->all(),

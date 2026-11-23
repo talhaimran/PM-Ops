@@ -1,6 +1,7 @@
 import Avatar from '@/Components/Avatar';
 import IssueTypeIcon from '@/Components/IssueTypeIcon';
 import PriorityIcon from '@/Components/PriorityIcon';
+import { resolutionLabels } from '@/Components/ResolutionChip';
 import StatusLozenge from '@/Components/StatusLozenge';
 import { issueUrl, onPeekClick } from '@/issueUrl';
 import { Issue } from '@/types';
@@ -32,7 +33,17 @@ const columns: Column[] = [
             </Link>
         ),
     },
-    { sort: 'status', label: 'Status', className: 'w-36', cell: (i) => <StatusLozenge status={i.status} category={i.category} /> },
+    {
+        sort: 'status',
+        label: 'Status',
+        className: 'w-36',
+        cell: (i) => (
+            <span className="flex flex-col items-start gap-0.5">
+                <StatusLozenge status={i.status} category={i.category} />
+                {i.resolution && i.resolution !== 'done' && <span className="text-xs text-muted">{resolutionLabels[i.resolution]}</span>}
+            </span>
+        ),
+    },
     {
         sort: 'assignee',
         label: 'Assignee',
