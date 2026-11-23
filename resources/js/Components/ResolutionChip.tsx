@@ -8,7 +8,7 @@ import { Resolution } from '@/types';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { router, usePage } from '@inertiajs/react';
 import { Check, ChevronDown } from 'lucide-react';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 
 export const resolutionLabels: Record<Resolution, string> = {
     done: 'Done',
@@ -61,6 +61,10 @@ export default function ResolutionChip({ issueKey, resolution, editable, onBusy 
     const [menuOpen, setMenuOpen] = useState(false);
     // Tells the board to keep this chip while the menu or the dialog is open, however long that takes.
     useEffect(() => onBusy?.(menuOpen || asking), [menuOpen, asking, onBusy]);
+    // Unmounted while open (the card left the board): let go, or the board keeps the chip next time.
+    const release = useRef(onBusy);
+    release.current = onBusy;
+    useEffect(() => () => release.current?.(false), []);
     const label = `Resolved: ${resolutionLabels[resolution]}`;
     const chip = `inline-flex h-pill-h items-center gap-1 rounded-pill px-2.5 text-xs ${lozengeClass('done')}`;
 

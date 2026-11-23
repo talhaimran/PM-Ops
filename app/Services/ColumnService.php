@@ -93,6 +93,7 @@ class ColumnService
             // Spec 7.4: the moved issues keep the rule too. Into Done they are resolved (a resolution they have stays); out of it they are reopened.
             $moving = Issue::withTrashed()->where('project_id', $column->project_id)->whereIn('status_id', $column->statuses()->pluck('statuses.id'));
             // Issues leaving Done are logged as reopened, like any other move out of it.
+            // shortcut: one model and one activity row per reopened issue inside the lock, chunk and bulk-insert when Done columns hold thousands.
             $reopened = $to->isDone() ? collect() : (clone $moving)->with('status')->get()->filter(fn ($i) => $i->status->isDone());
             $moving->update(['status_id' => $to->id] + ($to->isDone()
                 ? ['resolution' => DB::raw("coalesce(resolution, 'done')"), 'resolved_at' => DB::raw("coalesce(resolved_at, '".now()->toDateTimeString()."')")]
