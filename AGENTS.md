@@ -82,7 +82,7 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `get_backlog` | Open sprints and backlog in rank order | project | |
 | `rank_backlog` | Reorder within, or move between, backlog and sprints | issue | sprint, position, after |
 | `search_issues` | Filter and sort issues across projects; each issue carries `blocked`. `blocked: true` = has an unresolved blocker, `blocked_by: "WEB-12"` = the issues WEB-12 blocks | | q, project, assignee, type, priority, label, category, resolution, sprint, blocked, blocked_by, sort, page, per_page, cursor, fields |
-| `my_issues` | Your assigned issues that aren't done (pass `category` or `resolution` to see others), by priority then due date | | limit, category, resolution, fields |
+| `my_issues` | Your assigned issues that aren't done (pass `category` or `resolution` to see others), by priority then due date. Each row has `focus`: `waiting_on_you` (an approval request from your agents), `blocking_others`, `urgent_or_overdue`, `due_soon` (next 3 days), `in_progress`, `to_do`; null for done ones. REST `GET /me/issues` has it too. | | limit, category, resolution, fields |
 | `project_summary` | Counts per column and type, open (not done)/overdue, sprint progress | project | |
 | `bulk_create_issues` | Up to 50 creates, all or nothing | project, issues[] | |
 | `bulk_update_issues` | Up to 50 updates by key, each with the `version` you read; all or nothing, so one stale item saves nothing and the error names every stale key (Done waits for approval, as above); likewise every item that needs `confirm` (blocked, as above) is named and nothing is saved | updates[] | |

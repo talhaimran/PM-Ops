@@ -49,6 +49,8 @@ class IssueResource extends JsonResource
             'sprint' => $this->sprint ? ['id' => $this->sprint->id, 'name' => $this->sprint->name, 'state' => $this->sprint->state->value] : null,
             // Spec 7.5: an unresolved blocker the viewer can see; set on lists (Issue::withBlocked) and the single issue.
             'blocked' => $this->when(array_key_exists('blocked', $this->resource->getAttributes()), fn () => (bool) $this->resource->getAttributes()['blocked']),
+            // Spec 5.1: the Focus group on My issues rows (null for done ones); only there.
+            'focus' => $this->when(array_key_exists('focus', $this->resource->getAttributes()), fn () => $this->resource->getAttributes()['focus']),
             // Grouped by type name as read from this issue ("is blocked by"); only on the single issue (IssueService::loadFull).
             'links' => $this->when($this->resource->links !== null, fn () => (object) $this->resource->links),
             // Spec 7.5: a successor starting before its predecessor's due date, on both issues; only on the single issue (IssueService::loadFull).

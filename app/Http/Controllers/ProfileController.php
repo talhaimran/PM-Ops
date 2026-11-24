@@ -55,6 +55,9 @@ class ProfileController extends Controller
     public function update(ProfileUpdateRequest $request, SocialSignInService $social): RedirectResponse
     {
         $request->user()->fill($request->validated());
+        if ($request->user()->my_issues_group === 'focus') {
+            $request->user()->my_issues_group = null;
+        }
 
         if ($request->user()->isDirty('email')) {
             $social->ensureSessionAllowed($request->user(), $request->session()->get('auth.method', 'password'), 'change your email', 'email');
@@ -63,7 +66,8 @@ class ProfileController extends Controller
 
         $request->user()->save();
 
-        return Redirect::route('profile.edit');
+        // back(): the dashboard remembers its grouping with this same route.
+        return Redirect::back(fallback: route('profile.edit'));
     }
 
     /**

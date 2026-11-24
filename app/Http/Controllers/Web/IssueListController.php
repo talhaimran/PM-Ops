@@ -75,6 +75,7 @@ class IssueListController extends Controller
 
         return Inertia::render('Dashboard', [
             'myIssues' => IssueResource::collection($this->dashboard->myIssues($user, 50, $filters))->resolve(),
+            'group' => $user->my_issues_group ?? 'focus',
             'assignedOpen' => $this->dashboard->openAssignedCount($user),
             'filters' => (object) array_filter($filters),
             // A2: what this person can decide here (their agents' requests, and every request in projects they administer).
