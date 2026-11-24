@@ -126,6 +126,10 @@ export interface Issue {
     epic_issues?: IssueLink[];
     comments?: Comment[];
     pending_approvals?: ApprovalRequest[];
+    /** Spec 7.5: an unresolved blocker you can see. On lists and the single issue. */
+    blocked?: boolean;
+    /** Only on the single issue: linked issues you can see, by type name as read from this issue ("is blocked by"). */
+    links?: Record<string, IssueLink[]>;
     created_at: string;
     updated_at: string;
 }

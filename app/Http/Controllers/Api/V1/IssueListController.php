@@ -23,7 +23,8 @@ class IssueListController extends Controller
     /**
      * List a project's issues (epics included), paginated.
      *
-     * Filters: assignee (email or "unassigned"), type, priority, label, sprint (name, "active" or "backlog"), category (`to_do`, `in_progress`, `done`), resolution, q.
+     * Filters: assignee (email or "unassigned"), type, priority, label, sprint (name, "active" or "backlog"), category (`to_do`, `in_progress`, `done`), resolution, q,
+     * `blocked` (true: has an unresolved blocker you can see; false: hasn't), `blocked_by` (an issue key: the issues it blocks). Each issue carries `blocked`.
      * Pass `cursor` (the previous `meta.next_cursor`) instead of `page` to walk the list; `fields` (comma-separated keys) trims each issue, `key` stays.
      * `sort`: key, title, type, priority, status, assignee, story_points, due_date, created, updated; prefix "-" for descending (default -key).
      */

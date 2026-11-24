@@ -21,7 +21,8 @@ class BoardController extends Controller
     /**
      * The project's board: columns in order with issue cards sorted by rank (epics hidden).
      *
-     * Filters: `assignee` (email or "unassigned"), `type`, `priority`, `label` (name), `q` (title text or key).
+     * Filters: `assignee` (email or "unassigned"), `type`, `priority`, `label` (name), `q` (title text or key),
+     * `blocked` (true/false), `blocked_by` (an issue key). Cards carry `blocked`.
      */
     public function show(BoardFilterRequest $request, string $key): BoardResource
     {
@@ -38,6 +39,8 @@ class BoardController extends Controller
      *
      * An agent moving to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...}, "issue": {...}}`
      * and the issue stays where it is until a person approves. `reason` (optional, max 200) says why.
+     * A blocked issue (or one whose predecessor isn't resolved) entering an In Progress-category status is a 422 with
+     * `errors.confirm`; resend with `confirm: true` to move it anyway.
      */
     public function move(MoveIssueRequest $request, string $key): IssueResource|JsonResponse
     {

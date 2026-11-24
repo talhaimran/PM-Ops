@@ -60,6 +60,7 @@ class IssueController extends Controller
      * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
      * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
      * An agent's moves to a Done-category status wait for a person: 202 with `status: pending_approval` and `approval_requests`.
+     * Items that need `confirm` (a blocked issue entering In Progress) are all named as `updates.{index}.confirm`, and nothing is saved.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse
     {
@@ -72,7 +73,7 @@ class IssueController extends Controller
             ->response()->setStatusCode(202);
     }
 
-    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues and comments. `fields` (comma-separated keys) trims the answer; `key` always stays. */
+    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues, comments, `links` (by type, as read from this issue) and `blocked`. `fields` (comma-separated keys) trims the answer; `key` always stays. */
     public function show(Request $request, string $key): IssueResource
     {
         $fields = $request->validate(['fields' => ['nullable', 'string', 'max:500']])['fields'] ?? null;
@@ -89,6 +90,9 @@ class IssueController extends Controller
      *
      * An agent moving the issue to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...},
      * "issue": {...}}`: a person must approve the move; the other fields are applied. `reason` (optional) says why.
+     *
+     * Moving into an In Progress-category status while the issue is blocked, or before an issue it follows is resolved,
+     * is a 422 with `errors.confirm` saying why, and nothing is saved; resend with `confirm: true` to go ahead.
      */
     public function update(UpdateIssueRequest $request, string $key): IssueResource|JsonResponse
     {

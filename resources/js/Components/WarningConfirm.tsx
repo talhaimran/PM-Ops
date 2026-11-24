@@ -64,7 +64,7 @@ export default function WarningConfirm({
     );
 }
 
-export type Confirmation = { title: string; warnings: { text: string; reason?: string }[]; confirmLabel: string; run: () => void };
+export type Confirmation = { title: string; warnings: { text: string; reason?: string }[]; confirmLabel: string; run: () => void; cancel?: () => void };
 
 /**
  * One warning confirm for a page with several destructive actions: `ask({...})` opens it, `dialog` goes in the page.
@@ -84,7 +84,10 @@ export function useWarningConfirm(): [(confirmation: Confirmation) => void, Reac
             title={pending?.title ?? ''}
             warnings={pending?.warnings ?? []}
             confirmLabel={pending?.confirmLabel ?? ''}
-            onCancel={() => setOpen(false)}
+            onCancel={() => {
+                pending?.cancel?.();
+                setOpen(false);
+            }}
             onConfirm={() => {
                 pending?.run();
                 setOpen(false);

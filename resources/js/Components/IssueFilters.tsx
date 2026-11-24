@@ -6,7 +6,7 @@ import { resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import { IssueOptions } from '@/types';
 import { useEffect, useState } from 'react';
 
-export type Filters = Partial<Record<'assignee' | 'type' | 'priority' | 'label' | 'category' | 'resolution' | 'q' | 'sprint' | 'sort', string>>;
+export type Filters = Partial<Record<'assignee' | 'type' | 'priority' | 'label' | 'category' | 'resolution' | 'q' | 'sprint' | 'sort' | 'blocked' | 'blocked_by', string>>;
 
 export const categories = [
     { value: 'to_do', label: 'To do' },
@@ -14,7 +14,7 @@ export const categories = [
     { value: 'done', label: 'Done' },
 ];
 
-/** Search box plus assignee/type/priority/category/resolution/label/sprint selects. Calls onApply with changed keys; '' clears one. */
+/** Search box plus assignee/type/priority/category/resolution/label/sprint/blocked selects. Calls onApply with changed keys; '' clears one. */
 export default function IssueFilters({
     filters,
     options,
@@ -101,6 +101,7 @@ export default function IssueFilters({
             {select('priority', 'Priority', plain(options.priorities))}
             {select('category', 'Status category', categories)}
             {select('resolution', 'Resolution', resolutions.map((r) => ({ value: r, label: resolutionLabels[r] })))}
+            {select('blocked', 'Blocked', [{ value: '1', label: 'Blocked' }])}
             {options.sprints.length > 0 &&
                 select('sprint', 'Sprint', [
                     { value: 'active', label: 'Active sprint' },
