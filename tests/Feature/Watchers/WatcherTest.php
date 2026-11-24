@@ -165,3 +165,21 @@ test('auto_watch is a profile setting', function () {
     expect($this->bob->fresh()->auto_watch)->toBeFalse();
     $this->actingAs($this->bob)->patch(route('profile.update'), ['auto_watch' => 'maybe'])->assertSessionHasErrors('auto_watch');
 });
+
+test('a watcher who left the project disappears from the list and count; a non-member workspace admin who watches still shows', function () {
+    $this->watchers->watch($this->issue, $this->cat, $this->cat);
+    $admin = User::factory()->create(['email' => 'wsadmin@example.com']);
+    $this->project->workspace->addMember($admin, WorkspaceRole::Admin);
+    $this->watchers->watch($this->issue, $admin, $admin);
+    expect(watcherEmails($this->issue))->toBe(['ann@example.com', 'cat@example.com', 'wsadmin@example.com']);
+
+    $this->project->members()->detach($this->cat->id);
+
+    expect(watcherEmails($this->issue))->toBe(['ann@example.com', 'wsadmin@example.com'])
+        ->and($this->watchers->isWatching($this->issue, $this->cat))->toBeFalse()
+        ->and($this->watchers->isWatching($this->issue, $admin))->toBeTrue();
+    apiAsPerson($this->bob);
+    $this->getJson('/api/v1/issues/WEB-1')->assertOk()->assertJsonPath('data.watchers_count', 2)->assertJsonCount(2, 'data.watchers')
+        ->assertDontSee('cat@example.com');
+    expect(mcpJson(makeAgent($this->bob, AgentLevel::Read)[1], 'get_issue', ['issue' => 'WEB-1'])['watchers_count'])->toBe(2);
+});

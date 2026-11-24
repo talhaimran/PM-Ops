@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\WorkspaceRole;
 use App\Models\Issue;
 use App\Models\IssueWatcher;
 use App\Models\User;
@@ -11,8 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Spec 7.10: who watches an issue. Authorization is the caller's (IssuePolicy::watch / unwatch); this only writes.
- * shortcut: a person removed from the project keeps their row (and shows in the list) until they unwatch; whoever notifies
- * filters by what the watcher can still see. Delete the rows on removal if the list should not show them.
+ * A watcher counts (list, count, `watching`) only while they can still see the issue's project: a member of it, or an
+ * Owner or Admin of its workspace. Rows of people who lost access stay in the table but are never counted or shown.
  */
 class WatcherService
 {
@@ -38,12 +39,16 @@ class WatcherService
     /** @return Collection<int, User> */
     public function watchers(Issue $issue): Collection
     {
-        return User::whereIn('id', IssueWatcher::where('issue_id', $issue->id)->select('user_id'))->orderBy('name')->orderBy('id')->get(['id', 'name', 'email']);
+        $seeing = fn ($q) => $q->whereIn('id', DB::table('project_user')->where('project_id', $issue->project_id)->select('user_id'))
+            ->orWhereIn('id', DB::table('workspace_user')->whereIn('role', [WorkspaceRole::Owner->value, WorkspaceRole::Admin->value])
+                ->where('workspace_id', DB::table('projects')->where('id', $issue->project_id)->select('workspace_id'))->select('user_id'));
+
+        return User::whereIn('id', IssueWatcher::where('issue_id', $issue->id)->select('user_id'))->where($seeing)->orderBy('name')->orderBy('id')->get(['id', 'name', 'email']);
     }
 
     public function isWatching(Issue $issue, User $user): bool
     {
-        return IssueWatcher::where('issue_id', $issue->id)->where('user_id', $user->id)->exists();
+        return $this->watchers($issue)->contains('id', $user->id);
     }
 
     /** What IssueResource shows on the single issue. @return array{watchers_count: int, watching: bool, watchers: list<array{id: int, name: string, email: string}>} */
