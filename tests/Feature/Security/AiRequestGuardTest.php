@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
 
 // CLAUDE.md "Agents and AI": every outbound AI request resolves DNS, refuses non-public answers, pins the checked IP and
-// doesn't follow redirects. Resolution is faked through the guard's seam, except one .invalid lookup.
+// doesn't follow redirects. Resolution is faked through the guard's seam; no test touches the network.
 
 beforeEach(fn () => config(['pm.edition' => 'self_hosted']));
 afterEach(fn () => AiRequestGuard::resolveUsing(null));
@@ -66,8 +66,28 @@ test('a host that resolves to nothing is refused', function () {
     expect(guardRefusal('https://api.example.com'))->toContain("couldn't be resolved");
 });
 
-test('the real resolver reads A and AAAA records and refuses a name with none', function () {
-    expect(guardRefusal('https://nothing-here.invalid'))->toContain("couldn't be resolved");
+test('DNS records map to their A and AAAA addresses; other record types are dropped', function () {
+    expect(AiRequestGuard::ipsFrom([
+        ['host' => 'api.example.com', 'type' => 'CNAME', 'target' => 'edge.example.net'],
+        ['host' => 'edge.example.net', 'type' => 'A', 'ip' => '93.184.216.34'],
+        ['host' => 'edge.example.net', 'type' => 'AAAA', 'ipv6' => '2606:4700::1'],
+    ]))->toBe(['93.184.216.34', '2606:4700::1'])
+        ->and(AiRequestGuard::ipsFrom([]))->toBe([]);
+});
+
+test('a non-ASCII or percent-encoded host is refused at save time and at request time, since curl would rewrite it and miss the pin', function (string $endpoint) {
+    resolvesTo(['93.184.216.34']);
+    $message = 'Use the host name in plain ASCII (punycode for international names, e.g. xn--…).';
+
+    expect(AiEndpoint::problem($endpoint))->toBe($message)
+        ->and(guardRefusal($endpoint))->toBe($message);
+})->with(['https://bücher.example', 'https://a.com%2eevil', 'https://BÜCHER.example/v1']);
+
+test('a punycode host passes and is pinned under that name', function () {
+    resolvesTo(['93.184.216.34']);
+
+    expect(AiEndpoint::problem('https://xn--bcher-kva.example'))->toBeNull()
+        ->and(AiRequestGuard::options('https://xn--bcher-kva.example')['curl'][CURLOPT_RESOLVE])->toBe(['xn--bcher-kva.example:443:93.184.216.34']);
 });
 
 test('localhost is allowed self-hosted, pinned to 127.0.0.1, and refused on Cloud', function () {
@@ -97,7 +117,8 @@ test('an IPv6 answer is pinned in brackets, and the first answer is pinned once 
 test('the port comes from the address, or the scheme default', function () {
     resolvesTo(['93.184.216.34']);
 
-    expect(AiRequestGuard::options('https://api.example.com:8443/v1')['curl'][CURLOPT_RESOLVE])->toBe(['api.example.com:8443:93.184.216.34']);
+    expect(AiRequestGuard::options('https://api.example.com:8443/v1')['curl'][CURLOPT_RESOLVE])->toBe(['api.example.com:8443:93.184.216.34'])
+        ->and(AiRequestGuard::options('https://api.example.com:443')['curl'][CURLOPT_RESOLVE])->toBe(AiRequestGuard::options('https://api.example.com')['curl'][CURLOPT_RESOLVE]);
 });
 
 test('a trailing dot is looked up without it and pinned with it, since curl keys its pin by the host as written', function () {
@@ -133,8 +154,18 @@ test('http() refuses a request to a host other than the checked one, so it never
     Http::fake();
 
     expect(fn () => AiRequestGuard::http('https://api.example.com')->get('https://other.example.com/x'))->toThrow(ValidationException::class)
-        ->and(fn () => AiRequestGuard::http('https://api.example.com')->get('https://api.example.com:8443/x'))->toThrow(ValidationException::class);
+        ->and(fn () => AiRequestGuard::http('https://api.example.com')->get('https://api.example.com:8443/x'))->toThrow(ValidationException::class)
+        ->and(fn () => AiRequestGuard::http('https://api.example.com')->get('http://api.example.com:443/x'))->toThrow(ValidationException::class);
     Http::assertNothingSent();
+});
+
+test('http() accepts the endpoint\'s host with the default port written or not', function () {
+    resolvesTo(['93.184.216.34']);
+    Http::fake();
+
+    AiRequestGuard::http('https://api.example.com')->get('https://api.example.com:443/x');
+    AiRequestGuard::http('https://api.example.com:443')->get('https://api.example.com/x');
+    Http::assertSentCount(2);
 });
 
 test('an endpoint from the server environment (PM_AI_*) goes through the same checks', function () {

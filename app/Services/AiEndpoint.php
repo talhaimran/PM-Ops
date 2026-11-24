@@ -33,6 +33,8 @@ class AiEndpoint
             ! $host || ! ($scheme === 'https' || ($scheme === 'http' && $local)) => 'Use an https:// address, or http://localhost for a model on this machine.',
             isset($url['user']) || isset($url['pass']) || isset($url['query']) || isset($url['fragment']) => 'Leave the login, query and fragment out of the address. The key goes in the API key field.',
             $local => config('pm.edition') === 'cloud' ? 'A local model address is only allowed on a self-hosted install.' : null,
+            // curl rewrites a non-ASCII or %-encoded host before connecting, so AiRequestGuard's pin (keyed by the host as written) would miss.
+            ! str_starts_with($host, '[') && ! preg_match('/^[a-z0-9.-]+$/D', $host) => 'Use the host name in plain ASCII (punycode for international names, e.g. xn--…).',
             ! self::isPublicHost($host) => 'Use a public host name or IP address. Private, loopback, link-local, reserved, shared (100.64.0.0/10), multicast and cloud-metadata addresses are not allowed.',
             default => null,
         };
