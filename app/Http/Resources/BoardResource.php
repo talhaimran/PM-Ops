@@ -42,6 +42,8 @@ class BoardResource extends JsonResource
             // Spec 7.11: what an edit from a list sends back (the board's resolution chip, an agent's update_issue).
             'version' => $issue->version,
             // Spec 7.5: only where the query asked for it (Issue::withBlocked).
+            // Spec 5.1: the Focus group, on My issues rows only.
+            ...(array_key_exists('focus', $issue->getAttributes()) ? ['focus' => $issue->getAttributes()['focus']] : []),
             ...(array_key_exists('blocked', $issue->getAttributes()) ? ['blocked' => (bool) $issue->getAttributes()['blocked']] : []),
         ];
     }

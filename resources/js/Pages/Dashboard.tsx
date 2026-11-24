@@ -26,16 +26,46 @@ interface Summary {
     } | null;
 }
 
+const focusGroups: [string, string][] = [
+    ['waiting_on_you', 'Waiting on you'],
+    ['blocking_others', 'Blocking others'],
+    ['urgent_or_overdue', 'Urgent or overdue'],
+    ['due_soon', 'Due in the next 3 days'],
+    ['in_progress', 'In progress'],
+    ['to_do', 'To do'],
+];
+const groupings = [
+    { value: 'focus', label: 'Focus' },
+    { value: 'status', label: 'Status' },
+    { value: 'priority', label: 'Priority' },
+    { value: 'project', label: 'Project' },
+    { value: 'sprint', label: 'Sprint' },
+];
+const priorities = ['highest', 'high', 'medium', 'low', 'lowest'];
+
+/** Sections with a heading, in a fixed order for focus and priority, else as the rows come; empty ones never appear. */
+function sections(issues: Issue[], group: string): { name: string; issues: Issue[] }[] {
+    const keyOf = (i: Issue) =>
+        group === 'status' ? i.status : group === 'priority' ? i.priority : group === 'project' ? i.project : group === 'sprint' ? (i.sprint?.name ?? 'No sprint') : (i.focus ?? 'to_do');
+    const by = new Map<string, Issue[]>();
+    issues.forEach((i) => by.set(keyOf(i), [...(by.get(keyOf(i)) ?? []), i]));
+    const order = group === 'focus' ? focusGroups.map(([k]) => k) : group === 'priority' ? priorities : [...by.keys()].sort((a, b) => (a === 'No sprint' ? 1 : b === 'No sprint' ? -1 : 0));
+    const labels = Object.fromEntries(focusGroups);
+    return order.filter((k) => by.has(k)).map((k) => ({ name: group === 'focus' ? labels[k] : group === 'priority' ? k.charAt(0).toUpperCase() + k.slice(1) : k, issues: by.get(k)! }));
+}
+
 export default function Dashboard({
     myIssues,
     assignedOpen,
     pendingApprovals,
     projects,
     filters,
+    group,
 }: {
     myIssues: Issue[];
     assignedOpen: number;
     filters: { category?: string; resolution?: string };
+    group: string;
     pendingApprovals: ApprovalRequest[];
     projects: { key: string; name: string; my_role: ProjectRole; summary: Summary }[];
 }) {
@@ -96,6 +126,18 @@ export default function Dashboard({
                                 ))}
                             </select>
                         ))}
+                        <select
+                            aria-label="Group by"
+                            className={`${selectClass} !h-control-h w-auto`}
+                            value={group}
+                            onChange={(e) => router.patch(route('profile.update'), { my_issues_group: e.target.value }, { preserveState: true, preserveScroll: true })}
+                        >
+                            {groupings.map((g) => (
+                                <option key={g.value} value={g.value}>
+                                    Group by {g.label.toLowerCase()}
+                                </option>
+                            ))}
+                        </select>
                     </div>
                     {myIssues.length === 0 ? (
                         <EmptyState
@@ -103,8 +145,20 @@ export default function Dashboard({
                             title={filters.category || filters.resolution ? 'No issues match these filters.' : "You're all caught up."}
                             hint={filters.category || filters.resolution ? 'Try removing a filter.' : 'Nothing open is assigned to you.'}
                         />
-                    ) : (
+                    ) : group === 'focus' && (filters.category || filters.resolution) ? (
+                        // Done issues have no focus group: the filtered list stays flat.
                         <IssueTable issues={myIssues} />
+                    ) : (
+                        <div className="space-y-5">
+                            {sections(myIssues, group).map((s) => (
+                                <div key={s.name}>
+                                    <h3 className="mb-2 text-sm font-semibold text-text">
+                                        {s.name} <span className="font-normal text-muted">{s.issues.length}</span>
+                                    </h3>
+                                    <IssueTable issues={s.issues} />
+                                </div>
+                            ))}
+                        </div>
                     )}
                 </section>
 

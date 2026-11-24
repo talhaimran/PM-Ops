@@ -5,6 +5,7 @@ export interface User {
     email_verified_at?: string;
     /** Spec 7.5: what to do with successors when a due date moves. */
     date_shift: 'ask' | 'always' | 'never';
+    my_issues_group?: string | null;
 }
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
@@ -133,6 +134,8 @@ export interface Issue {
     pending_approvals?: ApprovalRequest[];
     /** Spec 7.5: an unresolved blocker you can see. On lists and the single issue. */
     blocked?: boolean;
+    /** Spec 5.1: the Focus group; only on My issues, null for done ones. */
+    focus?: string | null;
     /** Only on the single issue: linked issues you can see, by type name as read from this issue ("is blocked by"). */
     links?: Record<string, IssueLink[]>;
     created_at: string;

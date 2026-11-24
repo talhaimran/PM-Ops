@@ -2,10 +2,14 @@
 
 namespace App\Services;
 
+use App\Enums\IssuePriority;
+use App\Enums\LinkType;
 use App\Enums\SprintState;
 use App\Enums\StatusCategory;
+use App\Models\ApprovalRequest;
 use App\Models\Column;
 use App\Models\Issue;
+use App\Models\IssueLink;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
@@ -14,6 +18,9 @@ use Illuminate\Support\Collection;
 
 class DashboardService
 {
+    /** How a person can group My issues (spec 5.1); "focus" is the default and is stored as null. */
+    public const GROUPS = ['focus', 'status', 'priority', 'project', 'sprint'];
+
     public function __construct(private IssueService $issues) {}
 
     /**
@@ -32,14 +39,41 @@ class DashboardService
             ->withBlocked($user)
             ->with(IssueService::DISPLAY);
 
-        return $query
+        // shortcut: the grouping is applied to these rows only, so a group can be cut by the limit; upgrade when people have more open issues than the limit.
+        return $this->withFocus($user, $query
             ->orderByRaw("FIELD(priority, 'lowest', 'low', 'medium', 'high', 'highest') desc")
             ->orderByRaw('due_date is null')
             ->orderBy('due_date')
             ->orderBy('project_id')
             ->orderBy('number')
             ->limit($limit)
-            ->get();
+            ->get());
+    }
+
+    /**
+     * Spec 5.1 (2-R8): sets `focus` on each open issue, the first group it qualifies for (null when done). Two queries
+     * for the whole page. "Blocking others" counts only unresolved targets $user can see (2-D2).
+     */
+    private function withFocus(User $user, Collection $issues): Collection
+    {
+        $ids = $issues->modelKeys();
+        $waiting = ApprovalRequest::open()->where('owner_user_id', $user->id)->whereIn('issue_id', $ids)->pluck('issue_id')->flip();
+        $blocking = IssueLink::where('type', LinkType::Blocks->value)->whereIn('source_issue_id', $ids)
+            ->whereIn('target_issue_id', Issue::visibleTo($user)->open()->select('issues.id'))->pluck('source_issue_id')->flip();
+
+        foreach ($issues as $issue) {
+            $issue->setAttribute('focus', match (true) {
+                $issue->status->category === StatusCategory::Done => null,
+                $waiting->has($issue->id) => 'waiting_on_you',
+                $blocking->has($issue->id) => 'blocking_others',
+                $issue->priority === IssuePriority::Highest || $issue->due_date?->lt(today()) => 'urgent_or_overdue',
+                $issue->due_date?->lte(today()->addDays(3)) => 'due_soon',
+                $issue->status->category === StatusCategory::InProgress => 'in_progress',
+                default => 'to_do',
+            });
+        }
+
+        return $issues;
     }
 
     /** The dashboard tile: open issues assigned to the user, whatever filter the list below it has. */
