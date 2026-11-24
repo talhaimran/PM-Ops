@@ -6,6 +6,7 @@ use App\Enums\DateShift;
 use App\Enums\LinkType;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\PresentsIssue;
+use App\Http\Requests\Issues\CloneIssueRequest;
 use App\Http\Requests\Issues\CommentRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
 use App\Http\Requests\Issues\LinkRequest;
@@ -136,6 +137,21 @@ class IssueController extends Controller
             'method' => 'delete',
             'url' => route('issues.links.destroy', $from->key),
             'data' => [...$request->validated(), 'undo_of' => $from->version, ...($replaced ? ['restore' => $replaced] : [])],
+        ]);
+    }
+
+    /** Spec 7.9; Undo deletes the clone (and its sub-tasks), as any delete. */
+    public function clone(CloneIssueRequest $request, string $key): RedirectResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        Gate::authorize('update', $issue);
+        $clone = $this->issues->clone($issue, $request->user(), $request->boolean('subtasks'), $request->boolean('links'));
+
+        return redirect()->route('issues.show', $clone->key)->with('undo', [
+            'message' => "{$clone->key} cloned from {$issue->key}",
+            'method' => 'delete',
+            'url' => route('issues.destroy', $clone->key),
+            'data' => ['confirm' => true],
         ]);
     }
 

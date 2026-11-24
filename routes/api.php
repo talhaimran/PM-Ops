@@ -64,6 +64,7 @@ Route::prefix('v1')->middleware(['auth:sanctum', ResolveTokenWorkspace::class, '
     Route::get('issues/{key}/activity', [IssueController::class, 'activity']);
     Route::post('issues/{key}/move', [BoardController::class, 'move']);
     Route::post('issues/{key}/rank', [BacklogController::class, 'rank']);
+    Route::post('issues/{key}/clone', [IssueController::class, 'clone']);
     Route::post('issues/{key}/links', [IssueController::class, 'link']);
     Route::delete('issues/{key}/links', [IssueController::class, 'unlink']);
 

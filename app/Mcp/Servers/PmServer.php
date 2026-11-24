@@ -7,6 +7,7 @@ use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Tools\AddComment;
 use App\Mcp\Tools\BulkCreateIssues;
 use App\Mcp\Tools\BulkUpdateIssues;
+use App\Mcp\Tools\CloneIssue;
 use App\Mcp\Tools\CompleteSprint;
 use App\Mcp\Tools\CreateColumn;
 use App\Mcp\Tools\CreateIssue;
@@ -86,6 +87,7 @@ class PmServer extends Server
         UpdateIssue::class,
         DeleteIssue::class,
         GetIssueActivity::class,
+        CloneIssue::class,
         LinkIssues::class,
         UnlinkIssues::class,
         AddComment::class,

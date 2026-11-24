@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\DateShift;
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\LinkType;
 use App\Enums\Resolution;
 use App\Enums\SprintState;
 use App\Enums\StatusCategory;
@@ -12,6 +13,7 @@ use App\Exceptions\EditConflict;
 use App\Models\Activity;
 use App\Models\Column;
 use App\Models\Issue;
+use App\Models\IssueLink;
 use App\Models\Project;
 use App\Models\Status;
 use App\Models\User;
@@ -42,9 +44,9 @@ class IssueService
      * Create an issue. $data uses the shared input shape: status = status name, assignee = email,
      * labels = names, epic/parent = issue keys.
      */
-    public function create(Project $project, User $actor, array $data): Issue
+    public function create(Project $project, User $actor, array $data, ?Issue $clonedFrom = null): Issue
     {
-        return DB::transaction(function () use ($project, $actor, $data) {
+        return DB::transaction(function () use ($project, $actor, $data, $clonedFrom) {
             // The project row first (as moves and column changes do), so the status read below can't race a column delete.
             Project::whereKey($project->id)->lockForUpdate()->first();
             [$attributes, $labelIds, $status] = $this->resolveInput($project, $data, null);
@@ -72,7 +74,11 @@ class IssueService
             ]);
             $issue->labels()->sync($labelIds ?? []);
             $issue->setRelation('project', $project);
-            $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original->key]] : null);
+            $this->activity->log($issue, $actor, 'created', match (true) {
+                (bool) $original => ['duplicate_of' => ['from' => null, 'to' => $original->key]],
+                (bool) $clonedFrom => ['cloned_from' => ['from' => null, 'to' => $clonedFrom->key]],
+                default => null,
+            });
             $this->linkDuplicate($issue, $original, $actor);
             $issue->load(array_slice(self::DISPLAY, 1));
             $this->history->statusChanged($issue, null, $issue->status, $actor);
@@ -81,6 +87,77 @@ class IssueService
 
             return $issue;
         });
+    }
+
+    /**
+     * Spec 7.9 (2-R7): a copy of $issue in its project: title, description, type, labels and story points, in the first To Do
+     * status, unassigned, with no sprint, epic or dates, linked "copy clones original". $subtasks clones each sub-task under
+     * it by the same rules; $links copies the blocks, precedes and relates to links whose other end $actor can see (2-D2),
+     * through LinkService::link so its checks and activity apply. All in one transaction: a failure leaves nothing behind.
+     * shortcut: a sub-task's own links and sub-tasks are not copied, and a sub-task cloned alone becomes a top-level issue;
+     * add them when asked.
+     */
+    public function clone(Issue $issue, User $actor, bool $subtasks = false, bool $links = false): Issue
+    {
+        // A bounded unit (owner review): a fast refusal counted before any lock or write, then the clone itself reads at most
+        // limit + 1 of each inside its transaction and refuses (rolling back) if more arrived meanwhile, so the work under the
+        // project row and the workspace link lock never exceeds the cap. pm.clone_limit (PM_CLONE_LIMIT) caps each option.
+        $limit = (int) config('pm.clone_limit');
+        $tooMany = fn (string $option, int|string $count) => ValidationException::withMessages([$option => $option === 'subtasks'
+            ? "{$issue->key} has {$count} sub-tasks; a clone copies at most {$limit}. Clone it without sub-tasks."
+            : "{$issue->key} has {$count} links to copy; a clone copies at most {$limit}. Clone it without links."]);
+        if ($subtasks && ($count = Issue::where('parent_id', $issue->id)->count()) > $limit) {
+            throw $tooMany('subtasks', $count);
+        }
+        if ($links && ($count = $this->copyableLinks($issue, $actor)->count()) > $limit) {
+            throw $tooMany('links', $count);
+        }
+
+        $run = fn () => DB::transaction(function () use ($issue, $actor, $subtasks, $links, $limit, $tooMany) {
+            // Own copy of each sub-task's labels, loaded once.
+            $subs = $subtasks ? Issue::where('parent_id', $issue->id)->with('labels')->orderBy('number')->limit($limit + 1)->get() : collect();
+            $copies = $links ? $this->copyableLinks($issue, $actor)->with(['source.project', 'target.project'])->orderBy('id')->limit($limit + 1)->get() : collect();
+            foreach (['subtasks' => $subs, 'links' => $copies] as $option => $rows) {
+                if ($rows->count() > $limit) {
+                    throw $tooMany($option, "more than {$limit}");
+                }
+            }
+
+            $clone = $this->copy($issue, $actor);
+            $subs->each(fn (Issue $sub) => $this->copy($sub->setRelation('project', $issue->project), $actor, $clone->key));
+            $copies->each(fn (IssueLink $l) => $l->source_issue_id === $issue->id
+                ? $this->links->link($clone, $l->type->value, $l->target, $actor)
+                : $this->links->link($l->source, $l->type->value, $clone, $actor));
+
+            return $clone;
+        });
+
+        // The named lock first, before any transaction or row lock (a date shift takes it, then project rows; waiting for it
+        // while holding a row would stall that shift). It is re-entrant, so each link() inside takes and releases it again.
+        return $links ? $this->links->withLinkLock($issue, $run) : $run();
+    }
+
+    private function copy(Issue $from, User $actor, ?string $parent = null): Issue
+    {
+        $todo = $from->project->statuses()->get()->first(fn (Status $s) => $s->category === StatusCategory::ToDo);
+        $copy = $this->create($from->project, $actor, [
+            'title' => $from->title, 'description' => $from->description, 'type' => $from->type->value, 'story_points' => $from->story_points,
+            'labels' => $from->labels->pluck('name')->all(),
+            ...($todo ? ['status' => $todo->name] : []), ...($parent ? ['parent' => $parent] : []),
+        ], clonedFrom: $from);
+        $this->links->link($copy, LinkType::Clones->value, $from, $actor);
+
+        return $copy;
+    }
+
+    /** The original's blocks, precedes and relates-to links whose other end the actor can see (2-D2). */
+    private function copyableLinks(Issue $issue, User $actor): Builder
+    {
+        $other = fn ($q) => $q->visibleTo($actor);
+
+        return IssueLink::whereIn('type', [LinkType::Blocks, LinkType::Precedes, LinkType::RelatesTo])
+            ->where(fn ($q) => $q->where(fn ($q) => $q->where('source_issue_id', $issue->id)->whereHas('target', $other))
+                ->orWhere(fn ($q) => $q->where('target_issue_id', $issue->id)->whereHas('source', $other)));
     }
 
     /**
