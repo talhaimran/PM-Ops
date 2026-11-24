@@ -283,6 +283,14 @@ test('web: when the replaced original can\'t come back, Undo removes the new lin
     expect(IssueLink::count())->toBe(0);
 });
 
+test('web: restore only applies when the removed link was a duplicates link', function () {
+    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'blocks', 'to' => 'WEB-2'])->assertCreated();
+    $this->actingAs($this->admin);
+
+    $this->delete(w('/issues/WEB-1/links'), ['type' => 'blocks', 'to' => 'WEB-2', 'undo_of' => 1, 'restore' => 'WEB-3'])->assertSessionHasNoErrors();
+    expect(IssueLink::count())->toBe(0);
+});
+
 test('web: adding and removing a link flash Undo', function () {
     $this->actingAs($this->admin);
 

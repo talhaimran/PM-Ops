@@ -64,7 +64,7 @@ test('2-D1: a Duplicate\'s recorded original becomes a duplicates link; missing 
         [$deletedDup, $original, 'duplicates', $user, null, 'mcp', '2026-11-01 10:00:00'],
     ];
     expect($links())->toBe($expected)
-        ->and($output)->toContain('Duplicate links: 3 created, 3 skipped (original not recorded, purged, missing or in another workspace).');
+        ->and($output)->toContain('Duplicate links: 3 created, 3 skipped (original not recorded, purged, missing, in another workspace or removed on purpose).');
 
     // Re-runnable without losing anything: links made since survive, and the backfill adds only what's missing.
     $made = ['created_by' => $user, 'via' => 'web', 'created_at' => '2026-11-20 10:00:00'];

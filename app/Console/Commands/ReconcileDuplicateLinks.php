@@ -15,7 +15,7 @@ class ReconcileDuplicateLinks extends Command
     public function handle(): int
     {
         [$repaired, $skipped] = DuplicateLinkRepair::run();
-        $line = "Duplicate links: {$repaired} repaired, {$skipped} skipped (original not recorded, purged, missing or in another workspace).";
+        $line = "Duplicate links: {$repaired} repaired, {$skipped} skipped (original not recorded, purged, missing, in another workspace or removed on purpose).";
         $this->info($line);
         Log::info($line);
 

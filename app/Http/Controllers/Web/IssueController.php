@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Web;
 
+use App\Enums\LinkType;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\PresentsIssue;
 use App\Http\Requests\Issues\CommentRequest;
@@ -139,7 +140,7 @@ class IssueController extends Controller
         $restore = $request->validate(['restore' => ['nullable', 'string', 'max:30']])['restore'] ?? null;
         $removed = $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
 
-        if ($restore !== null && ! $this->links->restoreOriginal($removed->source, $this->issues->peek($request->user(), $restore), $request->user())) {
+        if ($restore !== null && $removed->type === LinkType::Duplicates && ! $this->links->restoreOriginal($removed->source, $this->issues->peek($request->user(), $restore), $request->user())) {
             return back()->withErrors(['undo' => "Undone. The earlier original couldn't be restored."]);
         }
 

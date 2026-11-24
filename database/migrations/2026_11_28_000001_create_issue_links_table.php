@@ -35,7 +35,7 @@ return new class extends Migration
         }
 
         [$created, $skipped] = DuplicateLinkRepair::run();
-        echo "Duplicate links: {$created} created, {$skipped} skipped (original not recorded, purged, missing or in another workspace).\n";
+        echo "Duplicate links: {$created} created, {$skipped} skipped (original not recorded, purged, missing, in another workspace or removed on purpose).\n";
     }
 
     public function down(): void
