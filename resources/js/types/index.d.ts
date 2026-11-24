@@ -6,6 +6,8 @@ export interface User {
     /** Spec 7.5: what to do with successors when a due date moves. */
     date_shift: 'ask' | 'always' | 'never';
     my_issues_group?: string | null;
+    /** Spec 7.10: watch what you report, are assigned or comment on. */
+    auto_watch: boolean;
 }
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
@@ -136,6 +138,10 @@ export interface Issue {
     blocked?: boolean;
     /** Spec 5.1: the Focus group; only on My issues, null for done ones. */
     focus?: string | null;
+    /** Spec 7.10, only on the single issue. */
+    watchers_count?: number;
+    watching?: boolean;
+    watchers?: UserSummary[];
     /** Only on the single issue: linked issues you can see, by type name as read from this issue ("is blocked by"). */
     links?: Record<string, IssueLink[]>;
     created_at: string;

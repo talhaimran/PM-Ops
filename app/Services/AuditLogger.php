@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\AuditRecorded;
 use App\Models\Agent;
 use App\Models\AuditLog;
 use App\Models\Issue;
@@ -50,7 +51,7 @@ class AuditLogger
     {
         $request = app()->bound('request') ? request() : null;
 
-        AuditLog::create([
+        $log = AuditLog::create([
             'workspace_id' => $workspaceId,
             'actor_user_id' => $actor?->id,
             'actor_type' => $actorType,
@@ -64,6 +65,8 @@ class AuditLogger
             'ip' => $request?->ip(),
             'user_agent' => $request?->userAgent() ? Str::limit($request->userAgent(), 500, '') : null,
         ]);
+        // 3-R1: after commit, so a rolled-back change emits nothing.
+        event(new AuditRecorded($log));
     }
 
     private function type(Model $target): string

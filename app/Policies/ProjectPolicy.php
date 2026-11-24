@@ -126,7 +126,7 @@ class ProjectPolicy
             : Response::deny("This agent can't delete. Its owner can allow deletes in Settings → Agents.");
     }
 
-    private function writable(User $user): ?Response
+    public function writable(User $user): ?Response
     {
         return $user->canWrite()
             ? null

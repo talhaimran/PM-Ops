@@ -33,6 +33,8 @@ class ProfileUpdateRequest extends FormRequest
             'date_shift' => ['sometimes', Rule::enum(DateShift::class)],
             // Spec 5.1: how My issues is grouped; "focus" is stored as null.
             'my_issues_group' => ['sometimes', 'nullable', Rule::in(DashboardService::GROUPS)],
+            // Spec 7.10: watch what you report, are assigned or comment on.
+            'auto_watch' => ['sometimes', 'boolean'],
         ];
     }
 }

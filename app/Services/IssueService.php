@@ -14,6 +14,7 @@ use App\Models\Activity;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\IssueLink;
+use App\Models\IssueWatcher;
 use App\Models\Project;
 use App\Models\Status;
 use App\Models\User;
@@ -38,6 +39,7 @@ class IssueService
         private StatusService $statuses,
         private HistoryRecorder $history,
         private LinkService $links,
+        private WatcherService $watchers,
     ) {}
 
     /**
@@ -81,6 +83,10 @@ class IssueService
             });
             $this->linkDuplicate($issue, $original, $actor);
             $issue->load(array_slice(self::DISPLAY, 1));
+            $this->watchers->autoWatch($issue, $actor);
+            if ($issue->assignee) {
+                $this->watchers->autoWatch($issue, $issue->assignee);
+            }
             $this->history->statusChanged($issue, null, $issue->status, $actor);
             $this->history->sprintChanged($issue, null, $issue->sprint, $actor, null);
             $this->history->estimateChanged($issue, null, $issue->story_points, $actor);
@@ -255,6 +261,9 @@ class IssueService
             }
             if ($changes) {
                 $issue->increment('version');
+            }
+            if (isset($changes['assignee']) && $issue->assignee) {
+                $this->watchers->autoWatch($issue, $issue->assignee);
             }
             if ($held) {
                 // After the bump, so the request remembers the version this change left the issue at.
@@ -528,6 +537,10 @@ class IssueService
         $issue->links = $this->links->visibleLinks($issue, $viewer);
         $issue->setAttribute('blocked', collect($issue->links['is blocked by'] ?? [])->contains(fn ($l) => $l['category'] !== StatusCategory::Done->value));
 
+        foreach ($this->watchers->summary($issue, $viewer) as $field => $value) {
+            $issue->setAttribute($field, $value);
+        }
+
         $issue->loadMissing(self::DISPLAY);
         $issue->scheduleWarning = $this->links->scheduleWarning($issue, $viewer);
 
@@ -545,17 +558,19 @@ class IssueService
     /**
      * Apply board/list/search filters: assignee (email or "unassigned"), type, priority, label (name),
      * sprint (name, "active" or "backlog"), category (to_do, in_progress, done), resolution, q (title text, or an issue key such as WEB-12),
-     * blocked (true: an unresolved blocker; false: none) and blocked_by (an issue key: the issues it blocks). Blockers
+     * watching (true: issues $viewer watches; false: the rest), blocked (true: an unresolved blocker; false: none) and blocked_by (an issue key: the issues it blocks). Blockers
      * count only when $viewer can see them (2-D2).
      */
     public function filter(Builder $query, array $filters, User $viewer): Builder
     {
         $blocker = fn ($q) => $q->visibleTo($viewer);
+        $watched = fn () => IssueWatcher::where('user_id', $viewer->id)->select('issue_id');
 
         return $query
             ->when(isset($filters['blocked']) && $filters['blocked'] !== '', fn ($q) => filter_var($filters['blocked'], FILTER_VALIDATE_BOOL)
                 ? $q->whereHas('blockers', fn ($b) => $blocker($b)->open())
                 : $q->whereDoesntHave('blockers', fn ($b) => $blocker($b)->open()))
+            ->when(isset($filters['watching']) && $filters['watching'] !== '', fn ($q) => filter_var($filters['watching'], FILTER_VALIDATE_BOOL) ? $q->whereIn('issues.id', $watched()) : $q->whereNotIn('issues.id', $watched()))
             ->when($filters['blocked_by'] ?? null, fn ($q, $key) => preg_match('/^([A-Za-z][A-Za-z0-9]{1,9})-(\d+)$/', trim($key), $m)
                 ? $q->whereHas('blockers', fn ($b) => $blocker($b)->where($b->qualifyColumn('number'), $m[2])->whereHas('project', fn ($p) => $p->where('key', strtoupper($m[1]))))
                 : $q->whereRaw('1 = 0'))

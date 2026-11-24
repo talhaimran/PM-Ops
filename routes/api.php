@@ -67,6 +67,8 @@ Route::prefix('v1')->middleware(['auth:sanctum', ResolveTokenWorkspace::class, '
     Route::post('issues/{key}/clone', [IssueController::class, 'clone']);
     Route::post('issues/{key}/links', [IssueController::class, 'link']);
     Route::delete('issues/{key}/links', [IssueController::class, 'unlink']);
+    Route::post('issues/{key}/watchers', [IssueController::class, 'watch']);
+    Route::delete('issues/{key}/watchers', [IssueController::class, 'unwatch']);
 
     Route::post('issues/{key}/comments', [CommentController::class, 'store']);
     Route::patch('comments/{comment}', [CommentController::class, 'update']);

@@ -16,6 +16,7 @@ import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge from '@/Components/StatusLozenge';
 import StatusMenu from '@/Components/StatusMenu';
 import TextInput from '@/Components/TextInput';
+import Watchers from '@/Components/Watchers';
 import { useWarningConfirm } from '@/Components/WarningConfirm';
 import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
@@ -269,6 +270,8 @@ export default function IssueView({
                     <InputError message={errors.resolution} />
                     <CloneModal show={cloning} issueKey={issue.key} onClose={() => setCloning(false)} />
                     <DuplicateOfModal show={duplicating} projectKey={issue.project} onClose={() => setDuplicating(false)} onSubmit={(original) => closeAs({ resolution: 'duplicate', duplicate_of: original }, () => setDuplicating(false))} />
+
+                    {issue.watchers && <Watchers issue={issue} options={options} canAdd={can.contribute} canRemove={can.manage} />}
 
                     <AiBox approvals={issue.pending_approvals} />
 

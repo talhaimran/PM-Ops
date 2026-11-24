@@ -10,6 +10,7 @@ use App\Http\Requests\Issues\DestroyIssueRequest;
 use App\Http\Requests\Issues\LinkRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
+use App\Http\Requests\Issues\WatcherRequest;
 use App\Http\Resources\ActivityResource;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
@@ -18,6 +19,7 @@ use App\Services\IssueService;
 use App\Services\LinkService;
 use App\Services\Pagination;
 use App\Services\ProjectService;
+use App\Services\WatcherService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -26,7 +28,7 @@ use Illuminate\Support\Facades\Gate;
 
 class IssueController extends Controller
 {
-    public function __construct(private ProjectService $projects, private IssueService $issues, private LinkService $links) {}
+    public function __construct(private ProjectService $projects, private IssueService $issues, private LinkService $links, private WatcherService $watchers) {}
 
     /**
      * Create an issue in a project.
@@ -162,6 +164,32 @@ class IssueController extends Controller
         $other = $this->issues->resolve($request->user(), $request->validated('to'));
         Gate::authorize('unlink', [$issue, $other]);
         $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
+
+        return response()->noContent();
+    }
+
+    /**
+     * Watch an issue (spec 7.10): body `{"user": "email"}` adds that project member, absent means you. Members and admins
+     * add anyone in the project, viewers only themselves; an agent watches as its owner and needs Write level. Answers 201 with
+     * `watchers_count`, `watching` and `watchers`.
+     */
+    public function watch(WatcherRequest $request, string $key): JsonResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $user = $this->watchers->target($issue, $request->validated('user'), $request->user());
+        Gate::authorize('watch', [$issue, $user]);
+        $this->watchers->watch($issue, $user, $request->user());
+
+        return response()->json(['data' => $this->watchers->summary($issue, $request->user())], 201);
+    }
+
+    /** Stop watching: yourself, or `{"user": "email"}` for someone else (project admins only). */
+    public function unwatch(WatcherRequest $request, string $key): Response
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $user = $this->watchers->target($issue, $request->validated('user'), $request->user());
+        Gate::authorize('unwatch', [$issue, $user]);
+        $this->watchers->unwatch($issue, $user, $request->user());
 
         return response()->noContent();
     }

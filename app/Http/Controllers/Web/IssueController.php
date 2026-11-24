@@ -13,6 +13,7 @@ use App\Http\Requests\Issues\LinkRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
+use App\Http\Requests\Issues\WatcherRequest;
 use App\Http\Resources\ActivityResource;
 use App\Models\Issue;
 use App\Models\Project;
@@ -22,6 +23,7 @@ use App\Services\IssueService;
 use App\Services\LinkService;
 use App\Services\ProjectService;
 use App\Services\UndoService;
+use App\Services\WatcherService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -38,6 +40,7 @@ class IssueController extends Controller
         private CommentService $comments,
         private UndoService $undo,
         private LinkService $links,
+        private WatcherService $watchers,
     ) {}
 
     public function store(StoreIssueRequest $request, Project $project): RedirectResponse
@@ -177,6 +180,26 @@ class IssueController extends Controller
             'url' => route('issues.links.store', $issue->key),
             'data' => [...$request->validated(), 'undo_of' => $issue->version],
         ]);
+    }
+
+    public function watch(WatcherRequest $request, string $key): RedirectResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $user = $this->watchers->target($issue, $request->validated('user'), $request->user());
+        Gate::authorize('watch', [$issue, $user]);
+        $this->watchers->watch($issue, $user, $request->user());
+
+        return back();
+    }
+
+    public function unwatch(WatcherRequest $request, string $key): RedirectResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $user = $this->watchers->target($issue, $request->validated('user'), $request->user());
+        Gate::authorize('unwatch', [$issue, $user]);
+        $this->watchers->unwatch($issue, $user, $request->user());
+
+        return back();
     }
 
     public function restoreComment(Request $request, int $comment): RedirectResponse

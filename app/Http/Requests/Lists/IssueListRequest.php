@@ -18,6 +18,8 @@ class IssueListRequest extends BoardFilterRequest
             'cursor' => ['nullable', 'string', 'max:100'],
             'fields' => ['nullable', 'string', 'max:500'],
             'project' => ['nullable', 'string', 'max:10'],
+            // Spec 7.10: true = issues you watch, false = the rest.
+            'watching' => ['nullable', fn (string $attribute, mixed $value, \Closure $fail) => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false'], true) || $fail('The watching filter must be true or false.')],
         ];
     }
 
