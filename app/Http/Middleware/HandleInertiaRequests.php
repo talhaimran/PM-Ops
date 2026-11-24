@@ -59,6 +59,8 @@ class HandleInertiaRequests extends Middleware
                 'recoveryCodes' => fn () => $request->session()->get('recoveryCodes'),
                 // {message, method, url, data}: what the toast sends back when the person picks Undo (UndoService).
                 'undo' => fn () => $request->session()->get('undo'),
+                // A notice the toast shows after a save that went through (e.g. no date shifts proposed: too many follow).
+                'warning' => fn () => $request->session()->get('warning'),
                 // Spec 7.5: {key, shifts: [{key, start_date, due_date, note}]} after a due date moved and "ask" shifted nothing, for the shift dialog.
                 'dateShift' => fn () => $request->session()->get('dateShift'),
                 // Spec 7.11: {key, version, url, yours, theirs, by, at} after a stale save, for the conflict dialog (EditConflict).

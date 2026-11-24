@@ -93,3 +93,17 @@ test('the loop check reads links committed after our transaction began', functio
         $this->links->link(($this->issue)(3), 'blocks', ($this->issue)(1), $this->owner);
     }))->toThrow(ValidationException::class, 'That would make a loop: WEB-1 → WEB-2 → WEB-3 → WEB-1.');
 });
+
+test('removing a blocks or precedes link waits for the workspace\'s link lock too, so it can\'t race a date shift', function (string $type) {
+    $this->links->link(($this->issue)(1), $type, ($this->issue)(2), $this->owner);
+    config(['pm.link_lock_timeout' => 1]);
+    expect((int) $this->locker->scalar('SELECT GET_LOCK(?, 0)', ["pm:links:{$this->workspace->id}"]))->toBe(1);
+
+    expect(fn () => $this->links->unlink(($this->issue)(1), $type, ($this->issue)(2), $this->owner))
+        ->toThrow(fn (ValidationException $e) => expect($e->status)->toBe(409));
+    expect(IssueLink::count())->toBe(1);
+
+    $this->locker->select('SELECT RELEASE_LOCK(?)', ["pm:links:{$this->workspace->id}"]);
+    $this->links->unlink(($this->issue)(1), $type, ($this->issue)(2), $this->owner);
+    expect(IssueLink::count())->toBe(0);
+})->with(['blocks', 'precedes']);

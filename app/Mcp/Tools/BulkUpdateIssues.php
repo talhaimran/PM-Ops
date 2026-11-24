@@ -9,6 +9,7 @@ use App\Http\Resources\IssueCardResource;
 use App\Mcp\Tools\Concerns\IssueFields;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
 use App\Services\IssueService;
+use App\Services\LinkService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
@@ -28,7 +29,13 @@ class BulkUpdateIssues extends Tool
         $rules = new BulkUpdateIssueRequest;
         $updated = $issues->updateMany($request->user(), $request->validate($rules->rules(), $rules->messages())['updates']);
         $summary = "Updated {$updated->count()} ".Str::plural('issue', $updated->count()).': '.$updated->pluck('key')->implode(', ').'.';
-        $cards = IssueCardResource::collection($updated)->resolve();
+        // Bulk never shifts (as REST): a changed due date comes back with the proposal and the warning.
+        $cards = $updated->map(fn ($issue) => [
+            ...(new IssueCardResource($issue))->resolve(),
+            ...($issue->proposedShifts === null ? [] : ['proposed_shifts' => $issue->proposedShifts, 'warning' => LinkService::shiftWarning($issue, $issue->proposedShifts)]),
+        ])->all();
+        $warnings = $updated->filter(fn ($issue) => $issue->proposedShifts !== null)->map(fn ($issue) => LinkService::shiftWarning($issue, $issue->proposedShifts));
+        $summary = trim($summary.' '.$warnings->implode(' '));
         $held = $updated->pluck('heldApproval')->filter()->values();
 
         return $held->isEmpty() ? $this->result($summary, $cards) : $this->result(

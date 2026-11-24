@@ -11,6 +11,7 @@ use App\Services\CommentService;
 use App\Services\CurrentWorkspace;
 use App\Services\IssueService;
 use App\Services\LabelService;
+use App\Services\LinkService;
 use App\Services\ProjectService;
 use App\Services\SprintService;
 use App\Services\StatusService;
@@ -125,6 +126,16 @@ class DemoSeeder extends Seeder
                 'sprint' => $sprint1->name, 'story_points' => 1,
             ]));
         }
+
+        // Links (spec 7.5): WEB-9 is blocked by WEB-7, and a dated chain WEB-14 -> WEB-15 -> WEB-17 that date shifting can move.
+        $links = app(LinkService::class);
+        $links->link($issues->resolve($demo, 'WEB-7'), 'blocks', $issues->resolve($demo, 'WEB-9'), $demo);
+        foreach ([['WEB-14', 11, 13], ['WEB-15', 14, 16], ['WEB-17', 17, 19]] as [$key, $from, $to]) {
+            $issues->update($issues->resolve($demo, $key), $demo, ['start_date' => $d($from), 'due_date' => $d($to)]);
+        }
+        $links->link($issues->resolve($demo, 'WEB-14'), 'precedes', $issues->resolve($demo, 'WEB-15'), $demo);
+        $links->link($issues->resolve($demo, 'WEB-15'), 'precedes', $issues->resolve($demo, 'WEB-17'), $demo);
+        $issues->clone($issues->resolve($demo, 'WEB-12'), $demo);
 
         $sprints->start($sprint1, ['start_date' => now()->subDays(4)->toDateString(), 'end_date' => now()->addDays(10)->toDateString()]);
 

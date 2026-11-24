@@ -13,7 +13,7 @@ const TICK = 100;
  * `role="status"` announces politely; timers pause while the stack is hovered or focused.
  */
 export default function Toaster() {
-    const { flash, errors } = usePage().props as { flash?: { undo?: UndoFlash | null }; errors?: Record<string, string> };
+    const { flash, errors } = usePage().props as { flash?: { undo?: UndoFlash | null; warning?: string | null }; errors?: Record<string, string> };
     const [toasts, setToasts] = useState<Toast[]>([]);
     const left = useRef(new Map<number, number>());
     const paused = useRef(false);
@@ -27,6 +27,12 @@ export default function Toaster() {
         // Take it out of this history entry, or Back would bring the page back with the old toast and a stale Undo.
         router.replace({ props: (props) => ({ ...props, flash: { ...(props.flash as object), undo: null } }), preserveScroll: true, preserveState: true });
     }, [flash?.undo, add]);
+
+    useEffect(() => {
+        if (!flash?.warning) return;
+        add({ message: flash.warning, tone: 'bad' });
+        router.replace({ props: (props) => ({ ...props, flash: { ...(props.flash as object), warning: null } }), preserveScroll: true, preserveState: true });
+    }, [flash?.warning, add]);
 
     useEffect(() => {
         if (errors?.undo) add({ message: errors.undo, tone: 'bad' });
