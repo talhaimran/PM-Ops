@@ -98,3 +98,15 @@ test('a merge does not wait on a pending request it does not change, and still r
     expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0)
         ->and(json_decode(DB::table('approval_requests')->find($related)->action, true)['to_status_id'])->toBe(Status::where('name', 'In Review')->value('id'));
 });
+
+test('merge and column changes take the project row before the workspace row, so an agent asking for Done cannot deadlock them', function () {
+    $qa = $this->web->columns()->create(['name' => 'QA', 'position' => 4]);
+    // The agent's move holds WEB's row; its approval request insert checks the workspace FK with a shared lock on the workspace row.
+    $this->locker->table('projects')->where('id', $this->web->id)->lockForUpdate()->first();
+    $this->locker->table('workspaces')->where('id', $this->web->workspace_id)->sharedLock()->first();
+
+    // Each waits on the project row (where the agent finishes first), never holding the workspace row the agent needs.
+    expect(fn () => $this->statuses->merge($this->review, 'In Review', $this->owner))->toThrow(QueryException::class, 'from `projects`');
+    expect(fn () => app(ColumnService::class)->addStatus($qa->setRelation('project', $this->web), $this->owner, ['status' => 'Review']))
+        ->toThrow(QueryException::class, 'from `projects`');
+});

@@ -61,7 +61,7 @@ Spec section 5 lists the conventions for all new code; these are how step 0 buil
 - Statuses are a workspace library (`StatusService`); columns map to them (`column_statuses`) and issues hold `status_id`. Done means the status category: `Issue::scopeOpen`, `scopeCompleted` (resolution Done) and `Status::isDone`; never a column position.
 - Written in one place: status, resolution and `resolved_at` in `IssueService::create/update` (`resolution()`); `issues.version` / `comments.version` bumped there and in `CommentService`; history rows (`issue_status_history`, `sprint_scope_events`, `estimate_history`) only through `HistoryRecorder`, who/agent/via from `ActivityLogger::attribution()`.
 - API/MCP issue and comment edits require `version` (stale = `EditConflict`, 409); moves don't. `overwrite` and Undo's version check are web-only.
-- Lock order: workspace, then project rows (id order), then issue. Status merge and column changes lock the workspace first.
+- Lock order: approval request, then project rows (id order), then the workspace row, then issue. Status library work (merge, column status changes) takes its projects before the workspace row: an insert with a `workspace_id` FK (an agent's Done request) share-locks the workspace row while holding its project.
 - Inertia dialogs that must show a refusal need `preserveState: true` on the visit, else the page remounts and the dialog closes.
 
 ## UI rules (step U)

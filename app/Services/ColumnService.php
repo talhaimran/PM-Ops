@@ -72,11 +72,13 @@ class ColumnService
         });
     }
 
-    /** Workspace row, then project row: the order merges use, so a status can't land in two columns of a project or vanish under one. */
+    /** Project row, then workspace row (the order merges use), so a status can't land in two columns of a project or vanish under one. */
     private function lock(Project $project): void
     {
-        Workspace::whereKey($project->workspace_id)->lockForUpdate()->first();
+        // Project, then workspace: an agent's Done request inserts under its project lock and its workspace FK check needs a
+        // shared lock on the workspace row, so taking the workspace first could deadlock with it.
         Project::whereKey($project->id)->lockForUpdate()->first();
+        Workspace::whereKey($project->workspace_id)->lockForUpdate()->first();
     }
 
     /** @param array{name?: string, position?: ?int} $data */
