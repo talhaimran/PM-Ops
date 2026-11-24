@@ -176,3 +176,17 @@ test('approving a Duplicate request whose original is gone marks it stale withou
 
     expect(ApprovalRequest::sole())->status->value->toBe('stale')->note->toBe('The issue WEB-1 would duplicate is no longer available.');
 });
+
+test('scan F1: "is duplicated by" can\'t repoint the original of an issue the caller can only view', function () {
+    // The member can view OPS (Viewer) but not write there; OPS-1 is already a duplicate of OPS-2.
+    addMember($this->ops, $this->member, ProjectRole::Viewer);
+    makeIssue($this->ops, $this->admin, ['title' => 'Ops original']);
+    app(LinkService::class)->link(($this->issue)('OPS', 1), 'duplicates', ($this->issue)('OPS', 2), $this->admin);
+
+    apiAs($this->member);
+    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'is duplicated by', 'to' => 'OPS-1'])->assertForbidden();
+    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'is duplicated by', 'to' => 'WEB-2'])->assertCreated();
+
+    expect(IssueLink::where('type', 'duplicates')->where('source_issue_id', ($this->issue)('OPS', 1)->id)->sole()->target_issue_id)
+        ->toBe(($this->issue)('OPS', 2)->id);
+});

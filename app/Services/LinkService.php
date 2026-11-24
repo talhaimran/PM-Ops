@@ -11,6 +11,7 @@ use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -33,6 +34,11 @@ class LinkService
 
         if ($source->is($target)) {
             throw ValidationException::withMessages(['to' => "An issue can't be linked to itself."]);
+        }
+        // A duplicates link sets the source's original (and replaces its old one), so it changes the source issue: the caller
+        // must be able to edit it even when they named it as the target ("is duplicated by"), scan F1.
+        if ($type === LinkType::Duplicates) {
+            Gate::forUser($actor)->authorize('update', $source);
         }
         if ($this->find($source, $type, $target)) {
             throw $this->exists($source, $type, $target);
