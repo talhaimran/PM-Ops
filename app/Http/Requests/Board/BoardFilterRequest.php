@@ -22,6 +22,9 @@ class BoardFilterRequest extends FormRequest
             'resolution' => ['nullable', Rule::enum(Resolution::class)],
             'q' => ['nullable', 'string', 'max:100'],
             'sprint' => ['nullable', 'string', 'max:100'],
+            // Spec 7.5: true/false (also 1/0, as query strings send them); IssueService::filter reads it.
+            'blocked' => ['nullable', fn (string $attribute, mixed $value, \Closure $fail) => is_bool($value) || in_array($value, [0, 1, '0', '1', 'true', 'false'], true) || $fail('The blocked filter must be true or false.')],
+            'blocked_by' => ['nullable', 'string', 'max:30'],
         ];
     }
 

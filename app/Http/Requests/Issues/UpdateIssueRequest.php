@@ -12,7 +12,8 @@ class UpdateIssueRequest extends StoreIssueRequest
     public function rules(): array
     {
         // reason (A-L5): why an agent asks to move to Done, shown to the person who decides.
-        return [...parent::rules(), 'title' => ['sometimes', 'required', 'string', 'max:255'], 'reason' => ['nullable', 'string', 'max:200'], ...self::VERSION];
+        // confirm (2-D4): go ahead with a move into In Progress although the issue is blocked or a predecessor isn't resolved.
+        return [...parent::rules(), 'title' => ['sometimes', 'required', 'string', 'max:255'], 'reason' => ['nullable', 'string', 'max:200'], 'confirm' => ['sometimes', 'boolean'], ...self::VERSION];
     }
 
     public function messages(): array

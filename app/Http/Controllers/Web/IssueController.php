@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\PresentsIssue;
 use App\Http\Requests\Issues\CommentRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
+use App\Http\Requests\Issues\LinkRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
@@ -13,6 +14,7 @@ use App\Http\Resources\ActivityResource;
 use App\Models\Project;
 use App\Services\CommentService;
 use App\Services\IssueService;
+use App\Services\LinkService;
 use App\Services\ProjectService;
 use App\Services\UndoService;
 use Illuminate\Http\RedirectResponse;
@@ -30,6 +32,7 @@ class IssueController extends Controller
         private IssueService $issues,
         private CommentService $comments,
         private UndoService $undo,
+        private LinkService $links,
     ) {}
 
     public function store(StoreIssueRequest $request, Project $project): RedirectResponse
@@ -47,7 +50,7 @@ class IssueController extends Controller
         return Inertia::render('Issues/Show', [
             ...$this->issueView($issue, $request->user()),
             'project' => ['key' => $issue->project->key, 'name' => $issue->project->name],
-            'activity' => ActivityResource::collection($issue->activities()->with(['user', 'agent.owner'])->latest('id')->limit(50)->get())->resolve(),
+            'activity' => ActivityResource::collection($issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->limit(50)->get())->resolve(),
         ]);
     }
 
@@ -106,6 +109,36 @@ class IssueController extends Controller
         $this->issues->restore($issue, $request->user());
 
         return back();
+    }
+
+    /** Spec 7.5; Undo (2-R10) sends the same type and key back to unlink(), with undo_of so it offers no Undo of its own. */
+    public function link(LinkRequest $request, string $key): RedirectResponse
+    {
+        $from = $this->issues->resolve($request->user(), $key);
+        Gate::authorize('update', $from);
+        $link = $this->links->link($from, $request->validated('type'), $this->issues->resolve($request->user(), $request->validated('to')), $request->user());
+
+        return $request->filled('undo_of') ? back() : back()->with('undo', [
+            'message' => "{$link->source->key} {$link->type->value} {$link->target->key}",
+            'method' => 'delete',
+            'url' => route('issues.links.destroy', $from->key),
+            'data' => [...$request->validated(), 'undo_of' => $from->version],
+        ]);
+    }
+
+    public function unlink(LinkRequest $request, string $key): RedirectResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $other = $this->issues->resolve($request->user(), $request->validated('to'));
+        Gate::authorize('unlink', [$issue, $other]);
+        $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
+
+        return $request->filled('undo_of') ? back() : back()->with('undo', [
+            'message' => 'Link removed',
+            'method' => 'post',
+            'url' => route('issues.links.store', $issue->key),
+            'data' => [...$request->validated(), 'undo_of' => $issue->version],
+        ]);
     }
 
     public function restoreComment(Request $request, int $comment): RedirectResponse

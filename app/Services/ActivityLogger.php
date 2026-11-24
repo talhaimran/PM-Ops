@@ -51,6 +51,8 @@ class ActivityLogger
         // Only the newest CHANGES_CAP rows are read; $truncated says older ones were left out, so a field's `from` is then
         // its value before the oldest row read. The conflict itself is decided by the version, never by this list.
         $rows = $issue->activities()->with(['user', 'agent.owner'])->where('issue_version', '>', $version)->whereNotNull('changes')
+            // Links aren't fields of the issue (and name another issue the reader may not see, 2-D2).
+            ->whereNotIn('action', ['linked', 'unlinked'])
             ->orderByDesc('id')->limit(self::CHANGES_CAP + 1)->get();
         $truncated = $rows->count() > self::CHANGES_CAP;
         $rows = $rows->take(self::CHANGES_CAP)->reverse();

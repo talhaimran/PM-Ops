@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
+use App\Enums\LinkType;
 use App\Enums\Resolution;
 use App\Enums\StatusCategory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -25,6 +26,9 @@ class Issue extends Model
 
     /** Set by IssueService::update when an agent's move to Done was held for a person (spec 8, A2); never stored. */
     public ?ApprovalRequest $heldApproval = null;
+
+    /** Set by IssueService::loadFull: the links the viewer can see, grouped by type name (spec 7.5, 2-D2); never stored. */
+    public ?array $links = null;
 
     /** Spec 7.11: the version a new issue starts at (the column default), so a created model carries it too. */
     protected $attributes = ['version' => 1];
@@ -117,6 +121,30 @@ class Issue extends Model
     public function activities(): HasMany
     {
         return $this->hasMany(Activity::class);
+    }
+
+    /** Issues that block this one (spec 7.5). Deleted ones drop out with the SoftDeletes scope. */
+    public function blockers(): BelongsToMany
+    {
+        return $this->belongsToMany(Issue::class, 'issue_links', 'target_issue_id', 'source_issue_id')->wherePivot('type', LinkType::Blocks->value);
+    }
+
+    /** Issues this one follows (they precede it). */
+    public function predecessors(): BelongsToMany
+    {
+        return $this->belongsToMany(Issue::class, 'issue_links', 'target_issue_id', 'source_issue_id')->wherePivot('type', LinkType::Precedes->value);
+    }
+
+    /** Only issues in projects $viewer can open (2-D2: links to the rest are hidden, not counted or hinted). */
+    public function scopeVisibleTo(Builder $query, User $viewer): void
+    {
+        $query->whereIn($query->qualifyColumn('project_id'), $viewer->accessibleProjects()->select('projects.id'));
+    }
+
+    /** Adds `blocked`: an unresolved blocker $viewer can see. One subquery, so a whole page costs no extra query. */
+    public function scopeWithBlocked(Builder $query, User $viewer): void
+    {
+        $query->withExists(['blockers as blocked' => fn ($q) => $q->open()->visibleTo($viewer)]);
     }
 
     /** Approval requests still waiting for a person (A2), oldest first. */

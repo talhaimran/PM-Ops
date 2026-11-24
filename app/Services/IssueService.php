@@ -6,6 +6,7 @@ use App\Enums\IssuePriority;
 use App\Enums\IssueType;
 use App\Enums\Resolution;
 use App\Enums\SprintState;
+use App\Enums\StatusCategory;
 use App\Exceptions\EditConflict;
 use App\Models\Activity;
 use App\Models\Column;
@@ -33,6 +34,7 @@ class IssueService
         private ApprovalService $approvals,
         private StatusService $statuses,
         private HistoryRecorder $history,
+        private LinkService $links,
     ) {}
 
     /**
@@ -68,7 +70,8 @@ class IssueService
             ]);
             $issue->labels()->sync($labelIds ?? []);
             $issue->setRelation('project', $project);
-            $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original]] : null);
+            $this->activity->log($issue, $actor, 'created', $original ? ['duplicate_of' => ['from' => null, 'to' => $original->key]] : null);
+            $this->linkDuplicate($issue, $original, $actor);
             $issue->load(array_slice(self::DISPLAY, 1));
             $this->history->statusChanged($issue, null, $issue->status, $actor);
             $this->history->sprintChanged($issue, null, $issue->sprint, $actor, null);
@@ -85,6 +88,9 @@ class IssueService
      * moves leave it out (1-D3). Any change bumps the version (1-D4).
      * An agent's move to Done is held instead (A2): the other fields still change (A-L7) and $issue->heldApproval
      * holds the request; $data['reason'] (A-L5) goes on it.
+     * 2-D4: entering an In Progress-category status while blocked (or before a predecessor is resolved) needs
+     * $data['confirm']; without it nothing is saved and the 422 says why. Only a person's or agent's own change asks:
+     * an Undo, an overwrite or an approval puts back or applies what was already decided.
      */
     public function update(Issue $issue, User $actor, array $data, string $action = 'updated'): Issue
     {
@@ -110,6 +116,10 @@ class IssueService
             $wasDone = $issue->status->isDone();
             [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);
             [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
+            if ($action === 'updated' && $status && empty($data['confirm']) && $warnings = $this->links->warnings($issue, $status, $actor)) {
+                // The web confirm dialog shows the sentences; API and MCP callers are told how to go ahead.
+                throw ValidationException::withMessages(['confirm' => implode(' ', $warnings).(ActivityLogger::via($actor) === 'web' ? '' : ' Send confirm: true to move it anyway.')]);
+            }
 
             $issue->heldApproval = null;
             $held = $status && $this->approvals->needsApproval($issue, $status, $agent = $actor->agent());
@@ -135,7 +145,8 @@ class IssueService
                 ->all();
 
             if ($original && $resolution) {
-                $changes['duplicate_of'] = ['from' => null, 'to' => $original];
+                $changes['duplicate_of'] = ['from' => null, 'to' => $original->key];
+                $this->linkDuplicate($issue, $original, $actor);
             }
             if ($changes) {
                 $issue->increment('version');
@@ -211,7 +222,23 @@ class IssueService
 
             // Checked once above, against the versions the call was sent with: two items for one issue both carry the
             // version read before the call. update() reads each issue afresh, as an earlier item may have changed it.
-            return $issues->map(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all())));
+            // 2-D4: every warned item is named, then nothing is saved (the throw rolls the whole call back).
+            $warned = [];
+            $updated = $issues->map(function ($issue, $i) use ($actor, $items, &$warned) {
+                try {
+                    return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all()));
+                } catch (ValidationException $e) {
+                    if (array_keys($e->errors()) !== ["updates.{$i}.confirm"]) {
+                        throw $e;
+                    }
+                    $warned += $e->errors();
+                }
+            });
+            if ($warned) {
+                throw ValidationException::withMessages($warned);
+            }
+
+            return $updated;
         });
     }
 
@@ -328,9 +355,12 @@ class IssueService
         }
     }
 
-    /** Load what IssueResource needs for the full single-issue view. */
-    public function loadFull(Issue $issue): Issue
+    /** Load what IssueResource needs for the full single-issue view, with the links $viewer can see (2-D2). */
+    public function loadFull(Issue $issue, User $viewer): Issue
     {
+        $issue->links = $this->links->visibleLinks($issue, $viewer);
+        $issue->setAttribute('blocked', collect($issue->links['is blocked by'] ?? [])->contains(fn ($l) => $l['category'] !== StatusCategory::Done->value));
+
         return $issue->loadMissing(self::DISPLAY)->load([
             'subtasks' => fn ($q) => $q->with('status')->orderBy('number'),
             'epicIssues' => fn ($q) => $q->with('status')->orderBy('number')->limit(100),
@@ -344,11 +374,21 @@ class IssueService
 
     /**
      * Apply board/list/search filters: assignee (email or "unassigned"), type, priority, label (name),
-     * sprint (name, "active" or "backlog"), category (to_do, in_progress, done), resolution, q (title text, or an issue key such as WEB-12).
+     * sprint (name, "active" or "backlog"), category (to_do, in_progress, done), resolution, q (title text, or an issue key such as WEB-12),
+     * blocked (true: an unresolved blocker; false: none) and blocked_by (an issue key: the issues it blocks). Blockers
+     * count only when $viewer can see them (2-D2).
      */
-    public function filter(Builder $query, array $filters): Builder
+    public function filter(Builder $query, array $filters, User $viewer): Builder
     {
+        $blocker = fn ($q) => $q->visibleTo($viewer);
+
         return $query
+            ->when(isset($filters['blocked']) && $filters['blocked'] !== '', fn ($q) => filter_var($filters['blocked'], FILTER_VALIDATE_BOOL)
+                ? $q->whereHas('blockers', fn ($b) => $blocker($b)->open())
+                : $q->whereDoesntHave('blockers', fn ($b) => $blocker($b)->open()))
+            ->when($filters['blocked_by'] ?? null, fn ($q, $key) => preg_match('/^([A-Za-z][A-Za-z0-9]{1,9})-(\d+)$/', trim($key), $m)
+                ? $q->whereHas('blockers', fn ($b) => $blocker($b)->where($b->qualifyColumn('number'), $m[2])->whereHas('project', fn ($p) => $p->where('key', strtoupper($m[1]))))
+                : $q->whereRaw('1 = 0'))
             ->when($filters['assignee'] ?? null, fn ($q, $assignee) => strtolower($assignee) === 'unassigned'
                 ? $q->whereNull('assignee_id')
                 : $q->whereHas('assignee', fn ($u) => $u->where('email', $assignee)))
@@ -379,7 +419,8 @@ class IssueService
 
         [$perPage, $page] = Pagination::resolve($params['cursor'] ?? null, $params['per_page'] ?? null, $params['page'] ?? null, max: $params['max_per_page'] ?? 100);
 
-        return $this->sort($this->filter($query, $params), $params['sort'] ?? null)
+        return $this->sort($this->filter($query, $params, $user), $params['sort'] ?? null)
+            ->withBlocked($user)
             ->with(self::DISPLAY)
             ->paginate($perPage, page: $page);
     }
@@ -479,7 +520,7 @@ class IssueService
      * entering a Done-category status sets a resolution (default Done) and resolved_at, leaving clears both, and a
      * resolution only goes with a Done status. $to is the status asked for, or null to stay where the issue is.
      *
-     * @return array{0: array<string, mixed>, 1: ?string} the columns to save, and the original's key for a Duplicate
+     * @return array{0: array<string, mixed>, 1: ?Issue} the columns to save, and the original for a Duplicate
      */
     private function resolution(Project $project, ?Issue $issue, ?Status $to, array $data, User $actor): array
     {
@@ -514,8 +555,8 @@ class IssueService
         };
     }
 
-    /** The key of the issue a Duplicate points at, found only among what $actor can open; unknown and inaccessible read the same. */
-    private function original(Project $project, ?Issue $issue, User $actor, mixed $key): string
+    /** The issue a Duplicate points at, found only among what $actor can open; unknown and inaccessible read the same. */
+    private function original(Project $project, ?Issue $issue, User $actor, mixed $key): Issue
     {
         $hint = "Send duplicate_of with the original issue's key, e.g. {$project->key}-3.";
         if (! is_string($key) || trim($key) === '') {
@@ -531,7 +572,21 @@ class IssueService
             throw ValidationException::withMessages(['duplicate_of' => "An issue can't be a duplicate of itself."]);
         }
 
-        return $original->key;
+        return $original;
+    }
+
+    /**
+     * "Close as Duplicate" makes a duplicates link (spec 7.5), after the commit: the insert share-locks the original's
+     * row, which must not wait while this transaction holds the duplicate's row (2-R4: two issues closed as duplicates
+     * of each other at once would deadlock).
+     * shortcut: not atomic with the close; a failure after the commit leaves the Duplicate without its link, and Undo
+     * then can't restore duplicate_of. Fold it into the transaction if links get a lock order of their own.
+     */
+    private function linkDuplicate(Issue $issue, ?Issue $original, User $actor): void
+    {
+        if ($original) {
+            DB::afterCommit(fn () => $this->links->ensureDuplicate($issue, $original, $actor));
+        }
     }
 
     private function validateLinks(Project $project, ?Issue $issue, array $attributes, ?Issue $epic, ?Issue $parent): void

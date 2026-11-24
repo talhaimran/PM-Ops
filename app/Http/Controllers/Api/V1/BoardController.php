@@ -27,7 +27,7 @@ class BoardController extends Controller
     {
         $project = $this->projects->resolve($request->user(), $key);
 
-        return new BoardResource($this->board->board($project, $request->validated()));
+        return new BoardResource($this->board->board($project, $request->validated(), $request->user()));
     }
 
     /**

@@ -47,6 +47,8 @@ class SearchIssues extends Tool
             'category' => $schema->string()->enum(StatusCategory::class)->description('Status category: to_do, in_progress or done.'),
             'resolution' => $schema->string()->enum(Resolution::class),
             'sprint' => $schema->string()->description('Sprint name, "active" or "backlog".'),
+            'blocked' => $schema->boolean()->description('true: issues with an unresolved blocker; false: issues without one.'),
+            'blocked_by' => $schema->string()->description('An issue key: the issues it blocks, e.g. WEB-12.'),
             'sort' => $schema->string()->enum(IssueListRequest::sorts())->description('Default -key (newest first). "-" means descending.'),
             'page' => $schema->integer()->min(1)->max(10000),
             'cursor' => $schema->string()->description('next_cursor from the previous page; use instead of page.'),

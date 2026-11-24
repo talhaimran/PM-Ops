@@ -26,9 +26,10 @@ class DashboardService
             ->where('assignee_id', $user->id)
             ->when(
                 $filters['category'] ?? $filters['resolution'] ?? null,
-                fn ($q) => $this->issues->filter($q, Arr::only($filters, ['category', 'resolution'])),
+                fn ($q) => $this->issues->filter($q, Arr::only($filters, ['category', 'resolution']), $user),
                 fn ($q) => $q->open(),
             )
+            ->withBlocked($user)
             ->with(IssueService::DISPLAY);
 
         return $query

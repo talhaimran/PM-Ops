@@ -16,7 +16,7 @@ trait PresentsIssue
     /** @return array{issue: array<string, mixed>, options: array<string, mixed>, can: array<string, bool>} */
     protected function issueView(Issue $issue, User $user): array
     {
-        $issue = app(IssueService::class)->loadFull($issue);
+        $issue = app(IssueService::class)->loadFull($issue, $user);
         $data = (new IssueResource($issue))->resolve();
         $data['description_html'] = self::markdown($issue->description);
         $data['comments'] = $issue->comments->values()->map(fn ($comment, $i) => [

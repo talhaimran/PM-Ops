@@ -46,7 +46,7 @@ class BoardController extends Controller
         return Inertia::render('Projects/Board', [
             'peek' => $this->peek($request),
             'project' => (new ProjectResource($project))->resolve(),
-            'board' => (new BoardResource($this->board->board($project, $filters)))->resolve(),
+            'board' => (new BoardResource($this->board->board($project, $filters, $request->user())))->resolve(),
             'active_sprint' => $sprint ? (new SprintResource($sprint))->resolve() : null,
             'filters' => (object) $filters,
             'options' => $this->projects->issueOptions($project),

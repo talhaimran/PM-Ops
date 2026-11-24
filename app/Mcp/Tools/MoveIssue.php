@@ -46,6 +46,7 @@ class MoveIssue extends Tool
             'position' => $schema->integer()->min(0)->description('0-based index in the destination column; default bottom. Do not combine with after.'),
             'after' => $schema->string()->description('Place directly after this issue key (must be in the destination column).'),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),
+            'confirm' => $schema->boolean()->description('Move although the issue is blocked or follows an unresolved issue; without it such a move is refused with the reason.'),
         ];
     }
 }

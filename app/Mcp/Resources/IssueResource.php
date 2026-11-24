@@ -25,7 +25,7 @@ class IssueResource extends Resource implements HasUriTemplate
 
     public function handle(Request $request, IssueService $issues): Response
     {
-        $issue = $issues->loadFull($issues->resolve($request->user(), (string) $request->get('key')));
+        $issue = $issues->loadFull($issues->resolve($request->user(), (string) $request->get('key')), $request->user());
 
         return Response::json((new IssueJson($issue))->resolve());
     }
