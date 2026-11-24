@@ -41,6 +41,12 @@ class DashboardService
             ->get();
     }
 
+    /** The dashboard tile: open issues assigned to the user, whatever filter the list below it has. */
+    public function openAssignedCount(User $user): int
+    {
+        return Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'))->where('assignee_id', $user->id)->open()->count();
+    }
+
     /**
      * Per-project status counts, type counts, open/overdue counts and active sprint progress,
      * computed with a fixed number of queries regardless of how many projects there are.

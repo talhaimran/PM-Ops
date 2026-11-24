@@ -80,3 +80,21 @@ test('a merge does not wait on projects that use neither status', function () {
     $this->locker->table('projects')->where('id', $ops->id)->lockForUpdate()->first();
     expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0);
 });
+
+test('a merge does not wait on a pending request it does not change, and still repoints the ones it does', function () {
+    [$agent] = makeAgent($this->owner);
+    $issue = Issue::sole();
+    $ask = fn (int $to) => DB::table('approval_requests')->insertGetId([
+        'workspace_id' => $this->web->workspace_id, 'issue_id' => $issue->id, 'agent_id' => $agent->id, 'owner_user_id' => $this->owner->id,
+        'action' => json_encode(['to_status_id' => $to, 'to_status' => 'x', 'from_status_id' => $issue->status_id]),
+        'status' => 'pending', 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $unrelated = $ask(Status::where('name', 'Done')->value('id'));
+    $related = $ask($this->review->id);
+    // A person is deciding the unrelated request, so another connection holds its row. The old range scan waited on it,
+    // and its gap locks also held up an agent's new request while the agent held a project row the merge needs.
+    $this->locker->table('approval_requests')->where('id', $unrelated)->lockForUpdate()->first();
+
+    expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0)
+        ->and(json_decode(DB::table('approval_requests')->find($related)->action, true)['to_status_id'])->toBe(Status::where('name', 'In Review')->value('id'));
+});

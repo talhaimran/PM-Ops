@@ -49,7 +49,15 @@ class UndoService
             'sprint' => $issue->sprint?->name,
         ];
 
-        return array_intersect_key($current, array_flip($fields));
+        // A status change takes the resolution with it: reopening clears it, so the undo must say what it was.
+        $data = array_intersect_key($current, array_flip(in_array('status', $fields, true) ? [...$fields, 'resolution'] : $fields));
+        if (isset($data['resolution']) && $issue->resolution === Resolution::Duplicate) {
+            $data['resolution'] = Resolution::Duplicate->value;
+            // The original's key lives only in the activity log until duplicate links (step 2).
+            $data['duplicate_of'] = $issue->activities()->latest('id')->get()->map(fn ($a) => $a->changes['duplicate_of']['to'] ?? null)->filter()->first();
+        }
+
+        return $data;
     }
 
     /**

@@ -97,7 +97,10 @@ class StatusService
             ]);
         }
 
-        $column->statuses()->syncWithoutDetaching([$status->id => ['position' => $column->statuses()->count()]]);
+        // Already here: leave its position alone, it may be the column's drop target.
+        if (! $column->statuses()->whereKey($status->id)->exists()) {
+            $column->statuses()->attach($status->id, ['position' => $column->statuses()->count()]);
+        }
     }
 
     /** The column editor's "Create": a new library status. An existing name is a 422 that says to pick it instead. Call inside the workspace lock. */
@@ -157,12 +160,14 @@ class StatusService
     public function delete(Status $status, User $actor): void
     {
         $this->locked($status, function (Status $status, Workspace $workspace) use ($actor) {
-            $use = $this->usage($workspace)->firstWhere('id', $status->id);
-            $columns = DB::table('column_statuses')->where('status_id', $status->id)->count();
-            if ($columns || $use->issues_count) {
+            $issues = DB::table('issues')->where('status_id', $status->id)->count();
+            $mapped = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')->where('column_statuses.status_id', $status->id)
+                ->selectRaw('count(*) as columns, count(distinct columns.project_id) as projects')->first();
+            $columns = (int) $mapped->columns;
+            if ($columns || $issues) {
                 $parts = array_filter([
-                    $columns ? "{$columns} ".str('column')->plural($columns)." in {$use->projects_count} ".str('project')->plural($use->projects_count) : null,
-                    $use->issues_count ? "{$use->issues_count} ".str('issue')->plural($use->issues_count) : null,
+                    $columns ? "{$columns} ".str('column')->plural($columns)." in {$mapped->projects} ".str('project')->plural((int) $mapped->projects) : null,
+                    $issues ? "{$issues} ".str('issue')->plural($issues) : null,
                 ]);
                 throw ValidationException::withMessages(['status' => "{$status->name} is used by ".implode(' and ', $parts).'. Merge it into another status, or move them first.']);
             }
@@ -188,12 +193,11 @@ class StatusService
                 throw ValidationException::withMessages(['status' => "{$from->name} is {$from->category->label()} and {$into->name} is {$into->category->label()}. Statuses merge only within the same category."]);
             }
 
-            // Lock order: workspace, pending requests (id order), projects, like ApprovalService::approve (request, then project).
-            // shortcut: this locking read holds every pending request of the workspace it scans (and blocks new ones), so approvals
-            // wait for a merge; fine while pending requests are few and merges rare, narrow it if approvals queue up behind merges.
-            $requests = ApprovalRequest::where('workspace_id', $workspace->id)->where('status', 'pending')
-                ->where(fn ($q) => $q->where('action->to_status_id', $from->id)->orWhere('action->from_status_id', $from->id))
-                ->orderBy('id')->lockForUpdate()->get();
+            // Lock order: workspace, pending requests (id order, by primary key: no gap locks), projects, like ApprovalService::approve.
+            // shortcut: a request created between the id read and the lock isn't repointed; at approval it goes stale ("… is no longer a status in KEY") and the agent asks again.
+            $ids = ApprovalRequest::where('workspace_id', $workspace->id)->where('status', 'pending')
+                ->where(fn ($q) => $q->where('action->to_status_id', $from->id)->orWhere('action->from_status_id', $from->id))->pluck('id');
+            $requests = ApprovalRequest::whereKey($ids)->where('status', 'pending')->orderBy('id')->lockForUpdate()->get();
             // Locked explicitly; the mapping read below joins no projects, so it holds only the mapping and column rows it finds.
             // The ids are read first and locked by primary key: a locking read through workspace_id would hold every project it scans.
             $projectIds = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')

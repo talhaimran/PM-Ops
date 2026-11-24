@@ -158,7 +158,7 @@ test('the same undo cannot run twice', function () {
     expect(Activity::where('action', 'undid')->count())->toBe(1);
 });
 
-test('another issue\'s undo token does not undo this one', function () {
+test('an undo with a version that is not current is refused', function () {
     makeIssue($this->project, $this->admin);
     makeIssue($this->project, $this->admin);
     $this->patch(w('/issues/WEB-2'), ['title' => 'Other', 'version' => 1])->assertRedirect();

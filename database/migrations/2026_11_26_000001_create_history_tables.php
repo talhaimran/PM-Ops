@@ -81,9 +81,10 @@ return new class extends Migration
     /** @return int rows skipped */
     private function backfill(object $issue): int
     {
+        // Old activity rows hold column names, so statuses are keyed by the column that maps them.
         $names = $this->names[$issue->project_id] ??= [
             'statuses' => DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')->join('statuses', 'statuses.id', '=', 'column_statuses.status_id')
-                ->where('columns.project_id', $issue->project_id)->get(['statuses.id', 'statuses.name', 'statuses.category'])->keyBy('name')->all(),
+                ->where('columns.project_id', $issue->project_id)->get(['statuses.id', 'columns.name as column_name', 'statuses.category'])->keyBy('column_name')->all(),
             'sprints' => DB::table('sprints')->where('project_id', $issue->project_id)->pluck('id', 'name')->all(),
         ];
         $current = DB::table('statuses')->find($issue->status_id);
