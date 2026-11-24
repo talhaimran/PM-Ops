@@ -45,6 +45,8 @@ class LinkService
             return DB::transaction(function () use ($source, $type, $target, $actor) {
                 if ($type === LinkType::Duplicates) {
                     // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs.
+                    // shortcut: web Undo of a hand-made link removes the new one but doesn't bring back the one it replaced;
+                    // carry the replaced key in the undo data if people rely on it.
                     IssueLink::where('source_issue_id', $source->id)->where('type', $type)
                         ->with(['source.project', 'target' => fn ($q) => $q->withTrashed()->with('project')])->get()
                         ->each(fn (IssueLink $old) => $this->remove($old, $actor));

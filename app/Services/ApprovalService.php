@@ -104,9 +104,14 @@ class ApprovalService
             $status = $project->statuses()->where('statuses.id', $approval->action['to_status_id'])->first();
             $issue = Issue::withTrashed()->with('status')->whereKey($approval->issue_id)->lockForUpdate()->firstOrFail()->setRelation('project', $project);
             $this->authorize($approval->setRelation('issue', $issue), $decider);
+            // The original a Duplicate request names, found as the agent's owner (it was checked when the agent asked):
+            // the decider may not see it, and must neither be blocked by it nor shown its key (2-D2).
+            $duplicateOf = $approval->action['duplicate_of'] ?? null;
+            $original = $duplicateOf ? app(IssueService::class)->peek(User::findOrFail($approval->owner_user_id), $duplicateOf) : null;
 
             $stale = match (true) {
                 $issue->trashed() => "{$issue->key} was deleted.",
+                $duplicateOf && ! $original => "The issue {$issue->key} would duplicate is no longer available.",
                 ! $status => "{$approval->action['to_status']} is no longer a status in {$project->key}.",
                 $approval->agent->status === AgentStatus::Revoked => self::revokedReason($approval->agent),
                 $issue->status_id === $status->id => "{$issue->key} is already in {$status->name}.",
@@ -127,7 +132,7 @@ class ApprovalService
                 ])->status(409);
             }
 
-            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $status->name, ...Arr::only($approval->action, ['resolution', 'duplicate_of'])], 'approved'));
+            ActivityLogger::forApproval($approval, fn () => app(BoardService::class)->move($issue, $decider, ['status' => $status->name, ...Arr::only($approval->action, ['resolution']), ...($original ? ['duplicate_of' => $original] : [])], 'approved'));
             $approval->update(['status' => ApprovalStatus::Approved, 'decided_by' => $decider->id, 'decided_at' => now()]);
 
             return $approval;

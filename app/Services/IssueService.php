@@ -555,18 +555,24 @@ class IssueService
         };
     }
 
-    /** The issue a Duplicate points at, found only among what $actor can open; unknown and inaccessible read the same. */
+    /**
+     * The issue a Duplicate points at, found only among what $actor can open; unknown and inaccessible read the same.
+     * An Issue (never from input: only ApprovalService::approve passes one) was already found as the request's owner,
+     * so a decider who can't see it can still approve (2-D2).
+     */
     private function original(Project $project, ?Issue $issue, User $actor, mixed $key): Issue
     {
         $hint = "Send duplicate_of with the original issue's key, e.g. {$project->key}-3.";
-        if (! is_string($key) || trim($key) === '') {
+        if ($key instanceof Issue) {
+            $original = $key;
+        } elseif (! is_string($key) || trim($key) === '') {
             throw ValidationException::withMessages(['duplicate_of' => $hint]);
-        }
-
-        try {
-            $original = $this->resolve($actor, $key);
-        } catch (ValidationException) {
-            throw ValidationException::withMessages(['duplicate_of' => "Issue \"{$key}\" was not found. {$hint}"]);
+        } else {
+            try {
+                $original = $this->resolve($actor, $key);
+            } catch (ValidationException) {
+                throw ValidationException::withMessages(['duplicate_of' => "Issue \"{$key}\" was not found. {$hint}"]);
+            }
         }
         if ($issue?->is($original)) {
             throw ValidationException::withMessages(['duplicate_of' => "An issue can't be a duplicate of itself."]);

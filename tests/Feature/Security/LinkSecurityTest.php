@@ -8,6 +8,7 @@ use App\Mcp\Tools\GetIssueActivity;
 use App\Mcp\Tools\LinkIssues;
 use App\Mcp\Tools\SearchIssues;
 use App\Mcp\Tools\UnlinkIssues;
+use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\User;
@@ -133,4 +134,45 @@ test('a Duplicate\'s original stays hidden from people who can\'t see it: activi
     expect(json_encode(session('undo')))->not->toContain('OPS-1');
     $this->post(w('/issues/WEB-1/move'), ['status' => 'Done'])->assertSessionHasNoErrors();
     expect(json_encode(session('undo')))->not->toContain('OPS-1');
+});
+
+test('an agent\'s Duplicate request never shows its original to a decider who can\'t see it; approving still works (2-D2)', function () {
+    $webAdmin = addMember($this->web, User::factory()->create(), ProjectRole::Admin);
+    apiAs($this->admin);
+    $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'OPS-1'])->assertStatus(202)
+        ->assertJsonPath('approval_request.duplicate_of', 'OPS-1');
+    $id = ApprovalRequest::sole()->id;
+
+    apiAsPerson($webAdmin);
+    $rest = $this->getJson('/api/v1/issues/WEB-1')->assertOk()->assertJsonPath('data.pending_approvals.0.resolution', 'duplicate');
+    expect($rest->getContent())->not->toContain('OPS-1')->and($rest->json('data.pending_approvals.0.duplicate_of'))->toBeNull();
+    apiAs($webAdmin);
+    PmServer::tool(GetIssue::class, ['issue' => 'WEB-1'])->assertOk()->assertSee('"pending_approvals":[{')->assertDontSee('OPS-1');
+    // The web as the person, not their agent's token.
+    app('auth')->forgetGuards();
+    $webAdmin = $webAdmin->fresh();
+    foreach (['/issues/WEB-1', '/dashboard', '/projects/WEB?issue=WEB-1'] as $path) {
+        $props = $this->actingAs($webAdmin)->get(w($path))->assertOk()->viewData('page')['props'];
+        expect(json_encode($props))->toContain("\"id\":{$id}")->not->toContain('OPS-1');
+    }
+
+    $this->actingAs($webAdmin)->post(w("/approvals/{$id}/approve"))->assertRedirect()->assertSessionHasNoErrors();
+    expect(json_encode(session()->all()))->not->toContain('OPS-1')
+        ->and(Issue::where('number', 1)->whereHas('project', fn ($p) => $p->where('key', 'WEB'))->sole())
+        ->resolution->value->toBe('duplicate')->status->name->toBe('Done')
+        ->and(IssueLink::sole()->target_issue_id)->toBe(($this->issue)('OPS', 1)->id);
+    // The agent's owner, who sees OPS, still reads it.
+    apiAsPerson($this->admin);
+    expect($this->getJson('/api/v1/issues/WEB-1/activity')->getContent())->toContain('OPS-1');
+});
+
+test('approving a Duplicate request whose original is gone marks it stale without naming it', function () {
+    apiAs($this->admin);
+    $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'OPS-1'])->assertStatus(202);
+    ($this->issue)('OPS', 1)->forceDelete();
+    app('auth')->forgetGuards();
+
+    $this->actingAs($this->admin->fresh())->post(w('/approvals/'.ApprovalRequest::sole()->id.'/approve'))->assertRedirect();
+
+    expect(ApprovalRequest::sole())->status->value->toBe('stale')->note->toBe('The issue WEB-1 would duplicate is no longer available.');
 });

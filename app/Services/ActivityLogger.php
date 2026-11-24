@@ -91,10 +91,7 @@ class ActivityLogger
     public static function hideUnseenOriginals(iterable $rows, User $viewer): void
     {
         $named = collect($rows)->filter(fn (Activity $a) => isset($a->changes['duplicate_of']['to']));
-        $keys = $named->map(fn (Activity $a) => preg_match('/^([A-Za-z][A-Za-z0-9]{1,9})-(\d+)$/', (string) $a->changes['duplicate_of']['to'], $m) ? [strtoupper($m[1]), $m[2]] : null)->filter();
-        $seen = $keys->isEmpty() ? collect() : Issue::withTrashed()->visibleTo($viewer)->join('projects', 'projects.id', '=', 'issues.project_id')
-            ->where(fn ($q) => $keys->each(fn ($k) => $q->orWhere(fn ($q) => $q->where('projects.key', $k[0])->where('issues.number', $k[1]))))
-            ->toBase()->get(['projects.key', 'issues.number'])->map(fn ($r) => "{$r->key}-{$r->number}");
+        $seen = Issue::visibleKeys($viewer, $named->map(fn (Activity $a) => $a->changes['duplicate_of']['to']));
         foreach ($named as $a) {
             if (! $seen->contains(strtoupper((string) $a->changes['duplicate_of']['to']))) {
                 $a->changes = Arr::except($a->changes, 'duplicate_of');

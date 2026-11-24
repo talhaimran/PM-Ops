@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 #[Fillable([
     'project_id', 'number', 'title', 'description', 'type', 'priority', 'status_id', 'resolution', 'resolved_at',
@@ -139,6 +140,21 @@ class Issue extends Model
     public function scopeVisibleTo(Builder $query, User $viewer): void
     {
         $query->whereIn($query->qualifyColumn('project_id'), $viewer->accessibleProjects()->select('projects.id'));
+    }
+
+    /**
+     * 2-D2: which of $keys ("WEB-12", as stored) name an issue $viewer can see, deleted or not; one query. Uppercase.
+     *
+     * @param  iterable<string>  $keys
+     * @return Collection<int, string>
+     */
+    public static function visibleKeys(User $viewer, iterable $keys): Collection
+    {
+        $parsed = collect($keys)->map(fn ($k) => preg_match('/^([A-Za-z][A-Za-z0-9]{1,9})-(\d+)$/', (string) $k, $m) ? [strtoupper($m[1]), $m[2]] : null)->filter();
+
+        return $parsed->isEmpty() ? collect() : self::withTrashed()->visibleTo($viewer)->join('projects', 'projects.id', '=', 'issues.project_id')
+            ->where(fn ($q) => $parsed->each(fn ($k) => $q->orWhere(fn ($q) => $q->where('projects.key', $k[0])->where('issues.number', $k[1]))))
+            ->toBase()->get(['projects.key', 'issues.number'])->map(fn ($r) => "{$r->key}-{$r->number}");
     }
 
     /** Adds `blocked`: an unresolved blocker $viewer can see. One subquery, so a whole page costs no extra query. */
