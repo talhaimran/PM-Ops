@@ -66,6 +66,7 @@ function isolationRouteCases(): array
         'POST api/v1/issues/{key}/move' => ['api/v1/issues/{I}/move', ['status' => '{COLN}']],
         'POST api/v1/issues/{key}/rank' => ['api/v1/issues/{I}/rank', ['sprint' => '{SN}']],
         // Links: B's issue as the target (from A's WEB-1), and as the issue in the URL.
+        'POST api/v1/issues/{key}/clone' => ['api/v1/issues/{I}/clone', ['links' => true]],
         'POST api/v1/issues/{key}/links' => ['api/v1/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
         'DELETE api/v1/issues/{key}/links' => ['api/v1/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
         'GET api/v1/me/issues' => ['api/v1/me/issues', []],
@@ -120,6 +121,7 @@ function isolationRouteCases(): array
         'POST {workspace}/issues/{key}/move' => ['alpha/issues/{I}/move', ['status' => '{COLN}']],
         'POST {workspace}/issues/{key}/rank' => ['alpha/issues/{I}/rank', ['sprint' => '{SN}']],
         'POST {workspace}/issues/{key}/restore' => ['alpha/issues/{I}/restore', []],
+        'POST {workspace}/issues/{key}/clone' => ['alpha/issues/{I}/clone', ['links' => true]],
         'POST {workspace}/issues/{key}/links' => ['alpha/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
         'DELETE {workspace}/issues/{key}/links' => ['alpha/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
         'GET {workspace}/projects' => ['alpha/projects', []],
@@ -245,6 +247,7 @@ function isolationToolCases(): array
         Tools\UpdateIssue::class => ['issue' => '{I}', 'title' => 'x'],
         Tools\DeleteIssue::class => ['issue' => '{I}', ...$confirm],
         Tools\GetIssueActivity::class => ['issue' => '{I}'],
+        Tools\CloneIssue::class => ['key' => '{I}', 'links' => true],
         Tools\LinkIssues::class => ['from' => 'WEB-1', 'type' => 'blocks', 'to' => '{I}'],
         Tools\UnlinkIssues::class => ['from' => '{I}', 'type' => 'blocks', 'to' => 'WEB-1'],
         Tools\AddComment::class => ['issue' => '{I}', 'body' => 'x'],

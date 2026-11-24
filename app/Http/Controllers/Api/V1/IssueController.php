@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Issues\BulkStoreIssueRequest;
 use App\Http\Requests\Issues\BulkUpdateIssueRequest;
+use App\Http\Requests\Issues\CloneIssueRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
 use App\Http\Requests\Issues\LinkRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
@@ -137,6 +138,21 @@ class IssueController extends Controller
         $link = $this->links->link($from, $request->validated('type'), $this->issues->resolve($request->user(), $request->validated('to')), $request->user());
 
         return response()->json(['data' => ['from' => $link->source->key, 'type' => $link->type->value, 'to' => $link->target->key]], 201);
+    }
+
+    /**
+     * Clone an issue (spec 7.9): a new issue in the same project with its title, description, type, labels and story
+     * points, in the first To Do status, unassigned, with no sprint, epic or dates, linked "clone clones original".
+     * `subtasks: true` clones each sub-task under it; `links: true` copies its blocks, precedes and relates to links to
+     * issues you can see. Comments and history are never copied. Answers 201 with the new issue.
+     */
+    public function clone(CloneIssueRequest $request, string $key): JsonResponse
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        Gate::authorize('update', $issue);
+        $clone = $this->issues->clone($issue, $request->user(), $request->boolean('subtasks'), $request->boolean('links'));
+
+        return (new IssueResource($clone))->response()->setStatusCode(201);
     }
 
     /** Remove a link: the same body as adding it (`type` may be the reverse name). Needs write access to either issue's project. */

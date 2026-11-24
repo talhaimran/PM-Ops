@@ -1,6 +1,7 @@
 import AgentLabel from '@/Components/AgentLabel';
 import AiBox from '@/Components/AiBox';
 import Avatar from '@/Components/Avatar';
+import CloneModal from '@/Components/CloneModal';
 import DateShiftDialog from '@/Components/DateShiftDialog';
 import Dropdown from '@/Components/Dropdown';
 import EmptyState from '@/Components/EmptyState';
@@ -59,6 +60,7 @@ export default function IssueView({
     const [description, setDescription] = useState(issue.description ?? '');
     const [addingSubtask, setAddingSubtask] = useState(false);
     const [duplicating, setDuplicating] = useState(false);
+    const [cloning, setCloning] = useState(false);
     const [tab, setTab] = useState<'comments' | 'history'>('comments');
     const comment = useForm({ body: '' });
 
@@ -234,6 +236,10 @@ export default function IssueView({
                                         </button>
                                     </Dropdown.Trigger>
                                     <Dropdown.Content>
+                                        <button type="button" className="block w-full px-4 py-2 text-start hover:bg-card-2" onClick={() => setCloning(true)}>
+                                            Clone…
+                                        </button>
+                                        <div className="my-1 border-t border-line" />
                                         <p className="px-4 pt-2 text-xs font-semibold text-muted">Close as…</p>
                                         {resolutions.map((r) => (
                                             <button
@@ -261,6 +267,7 @@ export default function IssueView({
                     </div>
                     <InputError message={errors.status} />
                     <InputError message={errors.resolution} />
+                    <CloneModal show={cloning} issueKey={issue.key} onClose={() => setCloning(false)} />
                     <DuplicateOfModal show={duplicating} projectKey={issue.project} onClose={() => setDuplicating(false)} onSubmit={(original) => closeAs({ resolution: 'duplicate', duplicate_of: original }, () => setDuplicating(false))} />
 
                     <AiBox approvals={issue.pending_approvals} />

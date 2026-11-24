@@ -109,6 +109,7 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::patch('/issues/{key}', [IssueController::class, 'update'])->name('issues.update');
     Route::delete('/issues/{key}', [IssueController::class, 'destroy'])->name('issues.destroy');
     Route::post('/issues/{key}/restore', [IssueController::class, 'restore'])->name('issues.restore');
+    Route::post('/issues/{key}/clone', [IssueController::class, 'clone'])->name('issues.clone');
     Route::post('/issues/{key}/links', [IssueController::class, 'link'])->name('issues.links.store');
     Route::delete('/issues/{key}/links', [IssueController::class, 'unlink'])->name('issues.links.destroy');
     Route::post('/comments/{comment}/restore', [IssueController::class, 'restoreComment'])->name('comments.restore');
