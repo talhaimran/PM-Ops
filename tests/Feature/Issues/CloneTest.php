@@ -168,3 +168,24 @@ test('a failure part way leaves nothing behind', function () {
     $this->postJson('/api/v1/issues/WEB-1/clone', ['subtasks' => true])->assertUnprocessable();
     expect(Issue::count())->toBe($before)->and(IssueLink::count())->toBe(0);
 });
+
+test('a clone over the cap is refused before anything is saved or locked', function () {
+    config(['pm.clone_limit' => 2]);
+    foreach (range(1, 3) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Sub {$n}", 'parent' => 'WEB-1']);
+    }
+    foreach (range(1, 3) as $n) {
+        app(LinkService::class)->link($this->original, 'relates to', makeIssue($this->web, $this->admin, ['title' => "Rel {$n}"]), $this->admin);
+    }
+    $issues = Issue::count();
+
+    $this->postJson('/api/v1/issues/WEB-1/clone', ['subtasks' => true])->assertUnprocessable()
+        ->assertJsonPath('errors.subtasks.0', 'WEB-1 has 3 sub-tasks; a clone copies at most 2. Clone it without sub-tasks.');
+    $this->postJson('/api/v1/issues/WEB-1/clone', ['links' => true])->assertUnprocessable()
+        ->assertJsonPath('errors.links.0', 'WEB-1 has 3 links to copy; a clone copies at most 2. Clone it without links.');
+    expect(Issue::count())->toBe($issues)
+        ->and(DB::scalar('SELECT IS_USED_LOCK(?)', ['pm:links:'.$this->web->workspace_id]))->toBeNull();
+
+    // Within the cap on each option, it clones.
+    $this->postJson('/api/v1/issues/WEB-1/clone')->assertCreated();
+});

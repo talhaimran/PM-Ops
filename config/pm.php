@@ -21,6 +21,8 @@ return [
 
     // Most issues one due date change may reach through precedes links (LinkService); more is refused, nothing saved.
     'shift_limit' => (int) env('PM_SHIFT_LIMIT', 500),
+    // At most this many sub-tasks, and separately this many links, are copied by one clone (spec 7.9).
+    'clone_limit' => (int) env('PM_CLONE_LIMIT', 100),
 
     // How long a replayable Idempotency-Key response is kept.
     'idempotency_ttl_hours' => (int) env('PM_IDEMPOTENCY_TTL_HOURS', 24),
