@@ -174,15 +174,15 @@ Updated after step U (2026-11-14); struck lines no longer apply.
 - Sidebar isn't collapsible (no 92px rail).
 - No inline "+ Create issue" in board columns (IssueFormModal has no preset status).
 - Assignee avatar toggles list every member (add "+N" overflow past ~10).
-- Search and Your-work status pills use the To Do colour (rows don't carry their project's column order).
+- ~~Search and Your-work status pills use the To Do colour.~~ Step 1 PR 1: rows carry `category`.
 - Board shows all issues by default (unchanged behaviour); title is the sprint name only when filtered to the active sprint.
 - ~~Welcome (guest `/`) page not restyled.~~ Step U: reduced to logo, one line and two buttons.
 
 ### Shortcuts from step U
-- Status control is a native select styled as a pill, not a menu. Decided 2026-11-15: build the menu in step 1, when statuses replace columns and this control is rewritten anyway.
+- ~~Status control is a native select styled as a pill, not a menu.~~ Step 1 PR 5: `StatusMenu`.
 - Board and backlog reordering uses dnd-kit's transitions timed from `motion.ts`, not Motion's `layout`.
 - Theme toggle is a View Transitions cross-fade, not the circle reveal.
-- Undo detects "changed meanwhile" by a newer activity row; a rank-only reorder by someone else isn't detected (edit-conflict versions arrive in step 1).
+- ~~Undo detects "changed meanwhile" by a newer activity row.~~ Step 1 PR 4: Undo checks the issue's `version`.
 - Column totals are summed from the cards on screen.
 - Activity actions are `deleted` / `restored` / `undid` (unprefixed, like the existing ones); purges go to the application log as `issue.purged` until the audit log exists.
 - No workspace switcher, AI box, compact card density or "Show N more" yet (steps 0, A and 10).

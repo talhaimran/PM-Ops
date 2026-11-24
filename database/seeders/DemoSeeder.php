@@ -106,6 +106,12 @@ class DemoSeeder extends Seeder
             ], fn ($v) => $v !== null && $v !== []));
         }
 
+        // Closed without being done: Done category, resolution Won't do.
+        $issues->create($project, $demo, [
+            'title' => 'Animated hero video', 'type' => 'task', 'priority' => 'low', 'status' => 'Done', 'resolution' => 'wont_do',
+            'description' => 'Dropped: it fails the performance budget.',
+        ]);
+
         // Sub-tasks (one level): WEB-7 checkout layout, WEB-10 rounding bug.
         foreach ([
             ['Shipping form step', 'WEB-7', 'Done', $al],
@@ -127,6 +133,10 @@ class DemoSeeder extends Seeder
         $comment('WEB-10', $demo, 'Agreed. Moving the math to integer cents; sub-tasks added.');
         $comment('WEB-7', $demo, "Design review notes:\n\n1. Keep the summary sticky on desktop\n2. Show delivery estimate before payment");
         $comment('WEB-5', $alex, 'Looks great. One nit: the loading spinner shifts the label by 2px.');
+
+        // A custom status colour (spec 7.4) so the pills show something other than the category colours.
+        $statuses = app(StatusService::class);
+        $statuses->recolour($statuses->resolveFor($project, 'In Review'), $demo, 'cobalt');
 
         [$agent, $token] = $agents->create($demo, ['name' => 'Demo token', 'level' => 'write']);
 

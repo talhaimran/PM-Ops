@@ -2,12 +2,14 @@
 
 use App\Enums\AgentLevel;
 use App\Enums\IssueType;
+use App\Enums\Resolution;
 use App\Enums\SprintState;
 use App\Enums\WorkspaceRole;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\Project;
+use App\Models\Status;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\Artisan;
@@ -44,6 +46,14 @@ test('demo seed builds a usable project and prints a working token', function ()
         ->and(Issue::where('assignee_id', $demo->id)->count())->toBeGreaterThan(0)
         ->and(Agent::where('name', 'Demo token')->sole()->permission_level)->toBe(AgentLevel::Write)
         ->and(PersonalAccessToken::where('name', 'Demo token')->sole()->agent_id)->not->toBeNull();
+});
+
+test('demo seed has a Won\'t do issue and a status with a custom colour', function () {
+    $this->artisan('db:seed')->assertSuccessful();
+
+    $issue = Issue::where('title', 'Animated hero video')->sole();
+    expect($issue->resolution)->toBe(Resolution::WontDo)->and($issue->resolved_at)->not->toBeNull()
+        ->and(Status::where('name', 'In Review')->sole()->color)->toBe('cobalt');
 });
 
 test('demo seed leaves one pending approval that demo can decide', function () {
