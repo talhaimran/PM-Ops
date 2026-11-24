@@ -7,7 +7,7 @@ import { categories } from '@/Components/IssueFilters';
 import { selectClass } from '@/Components/IssueFormModal';
 import { resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import { Head, Link, router } from '@inertiajs/react';
-import { CircleCheck, FolderKanban } from 'lucide-react';
+import { CircleCheck, Eye, FolderKanban } from 'lucide-react';
 
 interface Summary {
     statuses: { name: string; count: number }[];
@@ -56,6 +56,7 @@ function sections(issues: Issue[], group: string): { name: string; issues: Issue
 
 export default function Dashboard({
     myIssues,
+    watching,
     assignedOpen,
     pendingApprovals,
     projects,
@@ -63,6 +64,7 @@ export default function Dashboard({
     group,
 }: {
     myIssues: Issue[];
+    watching: Issue[];
     assignedOpen: number;
     filters: { category?: string; resolution?: string };
     group: string;
@@ -159,6 +161,16 @@ export default function Dashboard({
                                 </div>
                             ))}
                         </div>
+                    )}
+                </section>
+
+                {/* Spec 7.10: open issues this person watches. */}
+                <section>
+                    <h2 className="mb-3 text-heading-2xl text-text">Watching</h2>
+                    {watching.length === 0 ? (
+                        <EmptyState compact icon={Eye} title="You're not watching any open issues." hint="Watch an issue to follow it here. You watch what you create, are assigned or comment on." />
+                    ) : (
+                        <IssueTable issues={watching} />
                     )}
                 </section>
 

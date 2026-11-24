@@ -1,5 +1,6 @@
 import { selectClass } from '@/Components/IssueFormModal';
 import InputError from '@/Components/InputError';
+import Checkbox from '@/Components/Checkbox';
 import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
 import TextInput from '@/Components/TextInput';
@@ -23,6 +24,7 @@ export default function UpdateProfileInformation({
             name: user.name,
             email: user.email,
             date_shift: user.date_shift ?? 'ask',
+            auto_watch: user.auto_watch ?? true,
         });
 
     const submit: FormEventHandler = (e) => {
@@ -91,6 +93,15 @@ export default function UpdateProfileInformation({
                     </select>
 
                     <InputError className="mt-2" message={errors.date_shift} />
+                </div>
+
+                <div>
+                    <label className="flex items-center gap-2 text-md text-text">
+                        <Checkbox checked={data.auto_watch} onChange={(e) => setData('auto_watch', e.target.checked)} />
+                        Watch issues I create, am assigned or comment on
+                    </label>
+
+                    <InputError className="mt-2" message={errors.auto_watch} />
                 </div>
 
                 {mustVerifyEmail && user.email_verified_at === null && (

@@ -10,6 +10,7 @@ use App\Models\ApprovalRequest;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\IssueLink;
+use App\Models\IssueWatcher;
 use App\Models\Project;
 use App\Models\Sprint;
 use App\Models\User;
@@ -74,6 +75,23 @@ class DashboardService
         }
 
         return $issues;
+    }
+
+    /** Spec 7.10: open issues the user watches, in projects they can see; the same order as My issues. */
+    public function watching(User $user, int $limit = 50): Collection
+    {
+        return Issue::whereIn('project_id', $user->accessibleProjects()->select('projects.id'))
+            ->whereIn('issues.id', IssueWatcher::where('user_id', $user->id)->select('issue_id'))
+            ->open()
+            ->withBlocked($user)
+            ->with(IssueService::DISPLAY)
+            ->orderByRaw("FIELD(priority, 'lowest', 'low', 'medium', 'high', 'highest') desc")
+            ->orderByRaw('due_date is null')
+            ->orderBy('due_date')
+            ->orderBy('project_id')
+            ->orderBy('number')
+            ->limit($limit)
+            ->get();
     }
 
     /** The dashboard tile: open issues assigned to the user, whatever filter the list below it has. */

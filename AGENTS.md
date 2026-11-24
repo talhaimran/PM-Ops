@@ -65,6 +65,8 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `clone_issue` | Clone an issue in the same project (REST `POST /api/v1/issues/{key}/clone`): copies title, description, type, labels and story points into a new To Do issue (unassigned, no sprint, epic or dates), linked `clone clones original`. `subtasks: true` clones its sub-tasks; `links: true` copies its blocks, precedes and relates to links to issues you can see. Each option copies at most 100 (server setting): over that it's a 422 and nothing is saved, so clone without that option. Comments and history are never copied. Write level | issue | key, subtasks, links |
 | `link_issues` | Link two issues: `{"from":"WEB-12","type":"blocks","to":"WEB-15"}`. Types: blocks, precedes, relates to, duplicates, clones; reverse names (is blocked by, follows, is duplicated by, is cloned by) work too. Across projects in the workspace; blocks and precedes can't loop. Write level | from, type, to | |
 | `unlink_issues` | Remove a link; the same arguments. Write level | from, type, to | |
+| `watch_issue` | Watch an issue: it adds your owner (an agent watching counts as its owner watching). Returns `watchers_count`, `watching`, `watchers`. REST `POST /api/v1/issues/{key}/watchers`. Write level | issue | user (people only: a member's email) |
+| `unwatch_issue` | Stop watching. REST `DELETE /api/v1/issues/{key}/watchers`. Write level | issue | user (people only: project admins) |
 | `add_comment` | Markdown comment | issue, body | |
 | `update_comment` | Edit your own comment; send its `version` (from `get_issue`), a stale one saves nothing | comment_id, body, version | |
 | `delete_comment` | Delete your comment (admins: any). Soft, like issues | comment_id | |
@@ -81,7 +83,7 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `complete_sprint` | Close the active sprint and move unfinished issues | project, sprint, move_open_issues_to, confirm | |
 | `get_backlog` | Open sprints and backlog in rank order | project | |
 | `rank_backlog` | Reorder within, or move between, backlog and sprints | issue | sprint, position, after |
-| `search_issues` | Filter and sort issues across projects; each issue carries `blocked`. `blocked: true` = has an unresolved blocker, `blocked_by: "WEB-12"` = the issues WEB-12 blocks | | q, project, assignee, type, priority, label, category, resolution, sprint, blocked, blocked_by, sort, page, per_page, cursor, fields |
+| `search_issues` | Filter and sort issues across projects; each issue carries `blocked`. `blocked: true` = has an unresolved blocker, `blocked_by: "WEB-12"` = the issues WEB-12 blocks, `watching: true` = the issues your owner watches | | q, project, assignee, type, priority, label, category, resolution, sprint, blocked, blocked_by, watching, sort, page, per_page, cursor, fields |
 | `my_issues` | Your assigned issues that aren't done (pass `category` or `resolution` to see others), by priority then due date. Each row has `focus`: `waiting_on_you` (an approval request from your agents), `blocking_others`, `urgent_or_overdue`, `due_soon` (next 3 days), `in_progress`, `to_do`; null for done ones. REST `GET /me/issues` has it too. | | limit, category, resolution, fields |
 | `project_summary` | Counts per column and type, open (not done)/overdue, sprint progress | project | |
 | `bulk_create_issues` | Up to 50 creates, all or nothing | project, issues[] | |

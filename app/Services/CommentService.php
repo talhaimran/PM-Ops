@@ -11,13 +11,14 @@ use Illuminate\Validation\ValidationException;
 
 class CommentService
 {
-    public function __construct(private ActivityLogger $activity) {}
+    public function __construct(private ActivityLogger $activity, private WatcherService $watchers) {}
 
     public function add(Issue $issue, User $author, string $body): Comment
     {
         return DB::transaction(function () use ($issue, $author, $body) {
             $comment = $issue->comments()->create(['user_id' => $author->id, 'body' => $body, 'agent_id' => $author->agent()?->id]);
             $this->activity->log($issue, $author, 'commented');
+            $this->watchers->autoWatch($issue, $author);
 
             return $comment->setRelation('author', $author);
         });

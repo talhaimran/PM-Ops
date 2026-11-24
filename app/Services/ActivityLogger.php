@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ActivityRecorded;
 use App\Models\Activity;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
@@ -29,7 +30,7 @@ class ActivityLogger
             $changes = [...($changes ?? []), 'approval_request' => ['id' => $approval->id, 'to' => $approval->action['to_status']]];
         }
 
-        return $issue->activities()->create([
+        $activity = $issue->activities()->create([
             'action' => $action,
             'changes' => $changes,
             // The issue's version after this change (spec 7.11), so changesSince() is one query.
@@ -38,6 +39,10 @@ class ActivityLogger
             'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
             ...self::attribution($user),
         ]);
+        // 3-R1: after commit, so a rolled-back change emits nothing.
+        event(new ActivityRecorded($activity));
+
+        return $activity;
     }
 
     /**

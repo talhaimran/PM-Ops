@@ -32,4 +32,35 @@ class IssuePolicy
     {
         return $this->projects->contribute($user, $issue->project);
     }
+
+    /** 3-R3: members and admins add anyone; a viewer only themselves; an agent only its owner, and it needs Write level. */
+    public function watch(User $user, Issue $issue, User $target): Response
+    {
+        if ($denied = $this->projects->writable($user)) {
+            return $denied;
+        }
+        if ($target->is($user)) {
+            return Response::allow();
+        }
+
+        return $user->viaToken() ? Response::deny('Agents watch as their owner; they can\'t add other people.') : $this->projects->contribute($user, $issue->project);
+    }
+
+    /** 3-R3: anyone removes themselves; removing another person needs project admin. */
+    public function unwatch(User $user, Issue $issue, User $target): Response
+    {
+        return $target->is($user) ? ($this->projects->writable($user) ?? Response::allow()) : $this->projects->manage($user, $issue->project);
+    }
+
+    /** Checked before an email naming someone else is looked up, so the "not a member" answer (which lists members) only reaches who may add them. */
+    public function watchOthers(User $user, Issue $issue): Response
+    {
+        return $this->projects->writable($user) ?? ($user->viaToken() ? Response::deny('Agents watch as their owner; they can\'t add other people.') : $this->projects->contribute($user, $issue->project));
+    }
+
+    /** As watchOthers, for removing someone else: project admins. */
+    public function unwatchOthers(User $user, Issue $issue): Response
+    {
+        return $this->projects->manage($user, $issue->project);
+    }
 }

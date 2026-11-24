@@ -22,7 +22,7 @@ use Laravel\Passport\TransientToken as OAuthTransientToken;
 use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\PersonalAccessToken;
 
-#[Fillable(['name', 'email', 'password', 'date_shift', 'my_issues_group'])]
+#[Fillable(['name', 'email', 'password', 'date_shift', 'my_issues_group', 'auto_watch'])]
 // Hidden: auth.user is shared with every Inertia page.
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable
@@ -31,6 +31,9 @@ class User extends Authenticatable
     use HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
 
     private ?Agent $requestAgent = null;
+
+    /** Spec 7.10: a new user auto-watches (the column default), so a created model carries it too. */
+    protected $attributes = ['auto_watch' => true];
 
     /**
      * Get the attributes that should be cast.
@@ -42,6 +45,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'auto_watch' => 'boolean',
         ];
     }
 

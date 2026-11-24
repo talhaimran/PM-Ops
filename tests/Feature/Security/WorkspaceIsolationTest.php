@@ -69,6 +69,8 @@ function isolationRouteCases(): array
         'POST api/v1/issues/{key}/clone' => ['api/v1/issues/{I}/clone', ['links' => true]],
         'POST api/v1/issues/{key}/links' => ['api/v1/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
         'DELETE api/v1/issues/{key}/links' => ['api/v1/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
+        'POST api/v1/issues/{key}/watchers' => ['api/v1/issues/{I}/watchers', []],
+        'DELETE api/v1/issues/{key}/watchers' => ['api/v1/issues/{I}/watchers', []],
         'GET api/v1/me/issues' => ['api/v1/me/issues', []],
         // Take no id: whoami names only the token's own workspace; updates are only the calling agent's, in A.
         // Not compared: the rate-limit counter it reports differs between any two calls.
@@ -124,6 +126,8 @@ function isolationRouteCases(): array
         'POST {workspace}/issues/{key}/clone' => ['alpha/issues/{I}/clone', ['links' => true]],
         'POST {workspace}/issues/{key}/links' => ['alpha/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
         'DELETE {workspace}/issues/{key}/links' => ['alpha/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
+        'POST {workspace}/issues/{key}/watchers' => ['alpha/issues/{I}/watchers', []],
+        'DELETE {workspace}/issues/{key}/watchers' => ['alpha/issues/{I}/watchers', []],
         'GET {workspace}/projects' => ['alpha/projects', []],
         'POST {workspace}/projects' => ['alpha/projects', ['key' => '{P}', 'name' => 'x'], false],
         'GET {workspace}/projects/{project}' => ['alpha/projects/{P}', []],
@@ -250,6 +254,8 @@ function isolationToolCases(): array
         Tools\CloneIssue::class => ['key' => '{I}', 'links' => true],
         Tools\LinkIssues::class => ['from' => 'WEB-1', 'type' => 'blocks', 'to' => '{I}'],
         Tools\UnlinkIssues::class => ['from' => '{I}', 'type' => 'blocks', 'to' => 'WEB-1'],
+        Tools\WatchIssue::class => ['issue' => '{I}'],
+        Tools\UnwatchIssue::class => ['issue' => '{I}'],
         Tools\AddComment::class => ['issue' => '{I}', 'body' => 'x'],
         Tools\UpdateComment::class => ['comment_id' => '{C}', 'body' => 'x'],
         Tools\DeleteComment::class => ['comment_id' => '{C}', ...$confirm],

@@ -51,6 +51,10 @@ class IssueResource extends JsonResource
             'blocked' => $this->when(array_key_exists('blocked', $this->resource->getAttributes()), fn () => (bool) $this->resource->getAttributes()['blocked']),
             // Spec 5.1: the Focus group on My issues rows (null for done ones); only there.
             'focus' => $this->when(array_key_exists('focus', $this->resource->getAttributes()), fn () => $this->resource->getAttributes()['focus']),
+            // Spec 7.10: who watches; only on the single issue (IssueService::loadFull).
+            'watchers_count' => $this->when(array_key_exists('watchers_count', $this->resource->getAttributes()), fn () => $this->resource->getAttributes()['watchers_count']),
+            'watching' => $this->when(array_key_exists('watching', $this->resource->getAttributes()), fn () => $this->resource->getAttributes()['watching']),
+            'watchers' => $this->when(array_key_exists('watchers', $this->resource->getAttributes()), fn () => $this->resource->getAttributes()['watchers']),
             // Grouped by type name as read from this issue ("is blocked by"); only on the single issue (IssueService::loadFull).
             'links' => $this->when($this->resource->links !== null, fn () => (object) $this->resource->links),
             // Spec 7.5: a successor starting before its predecessor's due date, on both issues; only on the single issue (IssueService::loadFull).

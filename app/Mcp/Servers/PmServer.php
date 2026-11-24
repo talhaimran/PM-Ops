@@ -38,12 +38,14 @@ use App\Mcp\Tools\RankBacklog;
 use App\Mcp\Tools\SearchIssues;
 use App\Mcp\Tools\StartSprint;
 use App\Mcp\Tools\UnlinkIssues;
+use App\Mcp\Tools\UnwatchIssue;
 use App\Mcp\Tools\UpdateColumn;
 use App\Mcp\Tools\UpdateComment;
 use App\Mcp\Tools\UpdateIssue;
 use App\Mcp\Tools\UpdateLabel;
 use App\Mcp\Tools\UpdateProject;
 use App\Mcp\Tools\UpdateSprint;
+use App\Mcp\Tools\WatchIssue;
 use App\Mcp\Tools\Whoami;
 use App\Services\ActivityLogger;
 use App\Services\AgentService;
@@ -90,6 +92,8 @@ class PmServer extends Server
         CloneIssue::class,
         LinkIssues::class,
         UnlinkIssues::class,
+        WatchIssue::class,
+        UnwatchIssue::class,
         AddComment::class,
         UpdateComment::class,
         DeleteComment::class,
