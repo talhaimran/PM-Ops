@@ -75,7 +75,7 @@ export default function Index({ items }: { items: Paginated<Item> }) {
                         ))}
                     </ul>
                 )}
-                <Pagination page={items} />
+                {items.data.length > 0 && <Pagination page={items} />}
             </div>
         </AuthenticatedLayout>
     );
