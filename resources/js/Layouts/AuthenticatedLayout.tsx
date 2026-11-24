@@ -83,7 +83,7 @@ function Sidebar({ project, searchId, create }: { project?: { key: string; name:
                         <NavItem href={route('projects.index')} icon={FolderKanban} current={route().current('projects.index')}>
                             Projects
                         </NavItem>
-                        <NotificationBell className={`${row} ${rest}`} />
+                        <NotificationBell row={row} rest={rest} />
                     </nav>
 
                     {project && (
