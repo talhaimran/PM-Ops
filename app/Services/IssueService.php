@@ -99,26 +99,35 @@ class IssueService
      */
     public function clone(Issue $issue, User $actor, bool $subtasks = false, bool $links = false): Issue
     {
-        // A bounded unit (owner review): counted before any lock or write, so a huge parent never holds the project row or
-        // the workspace link lock for long. pm.clone_limit (PM_CLONE_LIMIT) caps each option.
+        // A bounded unit (owner review): a fast refusal counted before any lock or write, then the clone itself reads at most
+        // limit + 1 of each inside its transaction and refuses (rolling back) if more arrived meanwhile, so the work under the
+        // project row and the workspace link lock never exceeds the cap. pm.clone_limit (PM_CLONE_LIMIT) caps each option.
         $limit = (int) config('pm.clone_limit');
+        $tooMany = fn (string $option, int|string $count) => ValidationException::withMessages([$option => $option === 'subtasks'
+            ? "{$issue->key} has {$count} sub-tasks; a clone copies at most {$limit}. Clone it without sub-tasks."
+            : "{$issue->key} has {$count} links to copy; a clone copies at most {$limit}. Clone it without links."]);
         if ($subtasks && ($count = Issue::where('parent_id', $issue->id)->count()) > $limit) {
-            throw ValidationException::withMessages(['subtasks' => "{$issue->key} has {$count} sub-tasks; a clone copies at most {$limit}. Clone it without sub-tasks."]);
+            throw $tooMany('subtasks', $count);
         }
         if ($links && ($count = $this->copyableLinks($issue, $actor)->count()) > $limit) {
-            throw ValidationException::withMessages(['links' => "{$issue->key} has {$count} links to copy; a clone copies at most {$limit}. Clone it without links."]);
+            throw $tooMany('links', $count);
         }
 
-        $run = fn () => DB::transaction(function () use ($issue, $actor, $subtasks, $links) {
+        $run = fn () => DB::transaction(function () use ($issue, $actor, $subtasks, $links, $limit, $tooMany) {
+            // Own copy of each sub-task's labels, loaded once.
+            $subs = $subtasks ? Issue::where('parent_id', $issue->id)->with('labels')->orderBy('number')->limit($limit + 1)->get() : collect();
+            $copies = $links ? $this->copyableLinks($issue, $actor)->with(['source.project', 'target.project'])->orderBy('id')->limit($limit + 1)->get() : collect();
+            foreach (['subtasks' => $subs, 'links' => $copies] as $option => $rows) {
+                if ($rows->count() > $limit) {
+                    throw $tooMany($option, "more than {$limit}");
+                }
+            }
+
             $clone = $this->copy($issue, $actor);
-            if ($subtasks) {
-                // Own copy of each sub-task's labels, loaded once.
-                Issue::where('parent_id', $issue->id)->with('labels')->orderBy('number')->get()
-                    ->each(fn (Issue $sub) => $this->copy($sub->setRelation('project', $issue->project), $actor, $clone->key));
-            }
-            if ($links) {
-                $this->copyLinks($issue, $clone, $actor);
-            }
+            $subs->each(fn (Issue $sub) => $this->copy($sub->setRelation('project', $issue->project), $actor, $clone->key));
+            $copies->each(fn (IssueLink $l) => $l->source_issue_id === $issue->id
+                ? $this->links->link($clone, $l->type->value, $l->target, $actor)
+                : $this->links->link($l->source, $l->type->value, $clone, $actor));
 
             return $clone;
         });
@@ -149,14 +158,6 @@ class IssueService
         return IssueLink::whereIn('type', [LinkType::Blocks, LinkType::Precedes, LinkType::RelatesTo])
             ->where(fn ($q) => $q->where(fn ($q) => $q->where('source_issue_id', $issue->id)->whereHas('target', $other))
                 ->orWhere(fn ($q) => $q->where('target_issue_id', $issue->id)->whereHas('source', $other)));
-    }
-
-    private function copyLinks(Issue $issue, Issue $clone, User $actor): void
-    {
-        $this->copyableLinks($issue, $actor)->with(['source.project', 'target.project'])->orderBy('id')->get()
-            ->each(fn (IssueLink $l) => $l->source_issue_id === $issue->id
-                ? $this->links->link($clone, $l->type->value, $l->target, $actor)
-                : $this->links->link($l->source, $l->type->value, $clone, $actor));
     }
 
     /**

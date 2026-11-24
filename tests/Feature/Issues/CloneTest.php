@@ -11,7 +11,9 @@ use App\Models\Label;
 use App\Models\User;
 use App\Services\LinkService;
 use App\Services\SprintService;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 
 // Spec 7.9 (2-R7): cloning copies title, description, type, labels and story points into a new issue in the same
 // project, linked "clone clones original". Sub-tasks and links are options; comments and history never come along.
@@ -189,3 +191,27 @@ test('a clone over the cap is refused before anything is saved or locked', funct
     // Within the cap on each option, it clones.
     $this->postJson('/api/v1/issues/WEB-1/clone')->assertCreated();
 });
+
+test('sub-tasks or links added after the early count still can\'t push a clone past the cap', function (string $option) {
+    config(['pm.clone_limit' => 2]);
+    $add = fn (int $n) => $option === 'subtasks'
+        ? makeIssue($this->web, $this->admin, ['title' => "Sub {$n}", 'parent' => 'WEB-1'])
+        : app(LinkService::class)->link($this->original, 'relates to', makeIssue($this->web, $this->admin, ['title' => "Rel {$n}"]), $this->admin);
+    $add(1);
+    $issues = null;
+    // The race: two more arrive once the clone's transaction has begun, after the early count passed.
+    $fired = false;
+    Event::listen(TransactionBeginning::class, function () use (&$fired, &$issues, $add) {
+        if ($fired) {
+            return;
+        }
+        $fired = true;
+        $add(2);
+        $add(3);
+        $issues = Issue::count();
+    });
+
+    $this->postJson('/api/v1/issues/WEB-1/clone', [$option => true])->assertUnprocessable()
+        ->assertJsonPath("errors.{$option}.0", fn ($m) => str_contains($m, 'a clone copies at most 2'));
+    expect(Issue::where('title', 'Original')->count())->toBe(1);
+})->with(['subtasks', 'links']);
