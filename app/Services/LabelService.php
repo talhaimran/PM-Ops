@@ -16,7 +16,11 @@ class LabelService
         return $project->labels()->create(['name' => trim($data['name']), 'color' => $data['color'] ?? '#6b7280']);
     }
 
-    /** @param array{name?: string, color?: ?string} $data */
+    /**
+     * shortcut: renaming or deleting a label (like removing a member) doesn't raise the version of issues showing it (spec 7.11), so an edit read before still saves; bump them here if that confuses people.
+     *
+     * @param  array{name?: string, color?: ?string}  $data
+     */
     public function update(Label $label, array $data): Label
     {
         if (isset($data['name'])) {
