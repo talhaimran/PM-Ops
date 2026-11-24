@@ -12,13 +12,14 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Spec 7.10: who watches an issue. Authorization is the caller's (IssuePolicy::watch / unwatch); this only writes.
+ * Spec 7.10: who watches an issue. Authorization is the caller's (IssuePolicy::watch / unwatch); target() itself checks watchOthers / unwatchOthers
+ * before it looks an email up. The rest only writes.
  * A watcher counts (list, count, `watching`) only while they can still see the issue's project: a member of it, or an
  * Owner or Admin of its workspace. Rows of people who lost access stay in the table but are never counted or shown.
  */
 class WatcherService
 {
-    /** $actor is who asked (kept for the notifications in step 3's next slices); an existing watch keeps its source. */
+    /** $actor is who asked (kept for the notifications in step 3's next slices); a manual watch upgrades an existing auto row. */
     public function watch(Issue $issue, User $user, User $actor, string $source = 'manual'): void
     {
         IssueWatcher::insertOrIgnore(['issue_id' => $issue->id, 'user_id' => $user->id, 'source' => $source, 'created_at' => now(), 'updated_at' => now()]);

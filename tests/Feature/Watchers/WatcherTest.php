@@ -197,9 +197,10 @@ test('an unknown email from someone who may not add or remove others is a 403 wi
     $leaks(asToken($read)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
     $leaks(asToken($write)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
     foreach ([[$read, 'watch_issue'], [$write, 'watch_issue'], [$read, 'unwatch_issue'], [$write, 'unwatch_issue']] as [$token, $tool]) {
-        $text = asToken($token, ['Accept' => 'application/json, text/event-stream'])
-            ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => $tool, 'arguments' => ['issue' => 'WEB-1', 'user' => 'nobody@elsewhere.test']]])->getContent();
-        expect($text)->not->toContain('ann@example.com')->not->toContain('cat@example.com');
+        $response = asToken($token, ['Accept' => 'application/json, text/event-stream'])
+            ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => $tool, 'arguments' => ['issue' => 'WEB-1', 'user' => 'nobody@elsewhere.test']]])
+            ->assertOk()->assertJsonPath('result.isError', true);
+        expect($response->getContent())->not->toContain('ann@example.com')->not->toContain('cat@example.com');
     }
     // A member removing someone unknown: only admins may remove others.
     $leaks($this->actingAs($this->bob)->deleteJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());

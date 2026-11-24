@@ -25,7 +25,7 @@ class WatchIssue extends Tool
         $request->validate(['issue' => 'required|string|max:30']);
         $issue = $issues->resolve($request->user(), $request->get('issue'));
         $data = $request->validate((new WatcherRequest)->rules());
-        $user = $watchers->target($issue, $data['user'] ?? null, $request->user());
+        $user = $watchers->target($issue, $data['user'] ?? null, $request->user(), 'watch');
         Gate::authorize('watch', [$issue, $user]);
         $watchers->watch($issue, $user, $request->user());
         $summary = $watchers->summary($issue, $request->user());
