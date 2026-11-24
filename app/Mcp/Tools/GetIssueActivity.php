@@ -4,6 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Http\Resources\ActivityResource;
 use App\Mcp\Tools\Concerns\RespondsWithJson;
+use App\Services\ActivityLogger;
 use App\Services\IssueService;
 use App\Services\Pagination;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -27,6 +28,7 @@ class GetIssueActivity extends Tool
         $issue = $issues->resolve($request->user(), $data['issue']);
         [$perPage, $pageNumber] = Pagination::resolve($data['cursor'] ?? null, $data['per_page'] ?? null, $data['page'] ?? null, max: 50);
         $page = $issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $pageNumber);
+        ActivityLogger::hideUnseenOriginals($page->getCollection(), $request->user());
 
         return $this->paginated("activity entries for {$issue->key}", $page, ActivityResource::class);
     }

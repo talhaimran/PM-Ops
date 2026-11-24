@@ -17,7 +17,7 @@ class ApprovalController extends Controller
     {
         $request->validate(['confirm_changed' => ['sometimes', 'boolean']]);
         $approval = $this->approvals->resolve($request->user(), $approval)->load('issue.project');
-        $before = $approval->issue ? $this->undo->forMove($approval->issue) : [];
+        $before = $approval->issue ? $this->undo->forMove($approval->issue, $request->user()) : [];
 
         $issue = $this->approvals->approve($approval, $request->user(), $request->boolean('confirm_changed'))->issue;
 

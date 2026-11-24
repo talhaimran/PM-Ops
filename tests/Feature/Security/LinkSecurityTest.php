@@ -110,3 +110,27 @@ test('an issue\'s links, Blocked flag, filters, warnings and activity never show
         expect($props)->not->toContain('OPS-1')->not->toContain('Hidden ops work');
     }
 });
+
+test('a Duplicate\'s original stays hidden from people who can\'t see it: activity, 409s and Undo (2-D2)', function () {
+    apiAsPerson($this->admin);
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'OPS-1'])->assertOk();
+    // The admin, who sees OPS, still reads it.
+    expect($this->getJson('/api/v1/issues/WEB-1/activity')->getContent())->toContain('OPS-1');
+
+    apiAsPerson($this->member);
+    $activity = $this->getJson('/api/v1/issues/WEB-1/activity')->assertOk();
+    expect($activity->getContent())->not->toContain('OPS-1')->and($activity->json('data.0.changes'))->toHaveKeys(['status', 'resolution']);
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'title' => 'Stale'])->assertConflict()->assertDontSee('OPS-1');
+    apiAs($this->member);
+    PmServer::tool(GetIssueActivity::class, ['issue' => 'WEB-1'])->assertOk()->assertDontSee('OPS-1');
+
+    $this->actingAs($this->member);
+    expect(json_encode($this->get(w('/issues/WEB-1'))->assertOk()->viewData('page')['props']))->not->toContain('OPS-1');
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'title' => 'Stale']);
+    expect(json_encode(session('conflict')))->not->toContain('OPS-1');
+    $this->flushSession();
+    $this->patch(w('/issues/WEB-1'), ['version' => 2, 'status' => 'In Progress'])->assertSessionHasNoErrors();
+    expect(json_encode(session('undo')))->not->toContain('OPS-1');
+    $this->post(w('/issues/WEB-1/move'), ['status' => 'Done'])->assertSessionHasNoErrors();
+    expect(json_encode(session('undo')))->not->toContain('OPS-1');
+});

@@ -12,6 +12,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Spec 7.5: issue links, shared by web, REST and MCP. Callers resolve both issues with IssueService::resolve (so an
@@ -28,8 +29,7 @@ class LinkService
     /** Link $from to $to; a reverse name ("is blocked by") is stored the other way round. */
     public function link(Issue $from, string $type, Issue $to, User $actor): IssueLink
     {
-        [$type, $reversed] = LinkType::parse($type);
-        [$source, $target] = $reversed ? [$to, $from] : [$from, $to];
+        [$type, $source, $target] = $this->stored($from, $type, $to);
 
         if ($source->is($target)) {
             throw ValidationException::withMessages(['to' => "An issue can't be linked to itself."]);
@@ -43,6 +43,12 @@ class LinkService
 
         try {
             return DB::transaction(function () use ($source, $type, $target, $actor) {
+                if ($type === LinkType::Duplicates) {
+                    // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs.
+                    IssueLink::where('source_issue_id', $source->id)->where('type', $type)
+                        ->with(['source.project', 'target' => fn ($q) => $q->withTrashed()->with('project')])->get()
+                        ->each(fn (IssueLink $old) => $this->remove($old, $actor));
+                }
                 $attribution = ActivityLogger::attribution($actor);
                 $link = IssueLink::create([
                     'source_issue_id' => $source->id, 'target_issue_id' => $target->id, 'type' => $type,
@@ -61,42 +67,37 @@ class LinkService
     /** Remove the link between $a and $b ($type may be the reverse name, as for link()). */
     public function unlink(Issue $a, string $type, Issue $b, User $actor): void
     {
-        [$type, $reversed] = LinkType::parse($type);
-        [$source, $target] = $reversed ? [$b, $a] : [$a, $b];
-        $link = $this->find($source, $type, $target);
+        [$type, $source, $target] = $this->stored($a, $type, $b);
+        $link = $this->find($source, $type, $target)
+            ?? throw ValidationException::withMessages(['type' => "No link \"{$source->key} {$type->value} {$target->key}\" to remove."]);
 
-        if (! $link) {
-            $verb = match ($type) {
-                LinkType::Blocks => 'block', LinkType::Precedes => 'precede', LinkType::RelatesTo => 'relate to',
-                LinkType::Duplicates => 'duplicate', LinkType::Clones => 'clone',
-            };
-            throw ValidationException::withMessages(['type' => "{$source->key} doesn't {$verb} {$target->key}."]);
-        }
-
-        DB::transaction(function () use ($link, $actor) {
-            $link->delete();
-            // relates to may be stored either way round; the log says it as stored.
-            $this->logBoth('unlinked', $link->source, $link->type, $link->target, $actor);
-        });
+        DB::transaction(fn () => $this->remove($link, $actor));
     }
 
-    /** "Close as Duplicate" (spec 7.4, 7.5): the duplicates link, unless it is already there. */
+    /**
+     * "Close as Duplicate" (spec 7.4, 7.5): the duplicates link to $original (link() replaces one to another original).
+     * It runs after the close committed (IssueService::linkDuplicate), so it never fails the close:
+     * an error is reported and the Duplicate stays without its link.
+     */
     public function ensureDuplicate(Issue $duplicate, Issue $original, User $actor): void
     {
-        if (! $this->find($duplicate, LinkType::Duplicates, $original)) {
-            try {
+        try {
+            if (! $this->find($duplicate, LinkType::Duplicates, $original)) {
                 $this->link($duplicate, LinkType::Duplicates->value, $original, $actor);
-            } catch (ValidationException) {
-                // Made by a request at the same instant: the link is there either way.
+            }
+        } catch (Throwable $e) {
+            // A ValidationException here is the same link made by a request at the same instant: nothing to report.
+            if (! $e instanceof ValidationException) {
+                report($e);
             }
         }
     }
 
-    /** The original a Duplicate points at (its newest duplicates link), for Undo. */
-    public function original(Issue $duplicate): ?Issue
+    /** The original a Duplicate points at, when $viewer can see it (2-D2), for Undo. */
+    public function original(Issue $duplicate, User $viewer): ?Issue
     {
-        return IssueLink::where('source_issue_id', $duplicate->id)->where('type', LinkType::Duplicates)->latest('id')
-            ->with('target.project')->first()?->target;
+        return IssueLink::where('source_issue_id', $duplicate->id)->where('type', LinkType::Duplicates)
+            ->whereHas('target', fn ($q) => $q->visibleTo($viewer))->latest('id')->with('target.project')->first()?->target;
     }
 
     /**
@@ -168,31 +169,44 @@ class LinkService
         ]));
     }
 
+    /**
+     * The type and the issues as stored: a reverse name swaps them, and relates to (no direction) puts the lower id
+     * first, so the unique index also catches the opposite pair.
+     *
+     * @return array{0: LinkType, 1: Issue, 2: Issue}
+     */
+    private function stored(Issue $from, string $name, Issue $to): array
+    {
+        [$type, $reversed] = LinkType::parse($name);
+        $swap = $type === LinkType::RelatesTo ? $from->id > $to->id : $reversed;
+
+        return [$type, ...($swap ? [$to, $from] : [$from, $to])];
+    }
+
     private function find(Issue $source, LinkType $type, Issue $target): ?IssueLink
     {
-        $pair = fn ($q, Issue $a, Issue $b) => $q->where('source_issue_id', $a->id)->where('target_issue_id', $b->id);
-
-        return IssueLink::where('type', $type)
-            // relates to has no direction: either way round is the same link.
-            ->where(fn ($q) => $pair($q, $source, $target)->when($type === LinkType::RelatesTo, fn ($q) => $q->orWhere(fn ($q) => $pair($q, $target, $source))))
-            ->with(['source.project', 'target.project'])
-            ->first();
+        return IssueLink::where('type', $type)->where('source_issue_id', $source->id)->where('target_issue_id', $target->id)
+            ->with(['source.project', 'target.project'])->first();
     }
 
     private function exists(Issue $source, LinkType $type, Issue $target): ValidationException
     {
-        $link = $this->find($source, $type, $target);
-        [$a, $b] = $link && $link->source_issue_id !== $source->id ? [$target, $source] : [$source, $target];
+        return ValidationException::withMessages(['type' => "{$source->key} already {$type->value} {$target->key}."]);
+    }
 
-        return ValidationException::withMessages(['type' => "{$a->key} already {$type->value} {$b->key}."]);
+    private function remove(IssueLink $link, User $actor): void
+    {
+        $link->delete();
+        $this->logBoth('unlinked', $link->source, $link->type, $link->target, $actor);
     }
 
     /**
      * Keys on a $type path from $from to $to, or null: a breadth-first walk with a visited set, over issues $viewer can
-     * see that aren't deleted.
+     * see, deleted ones included (restoring one must not complete a loop).
      * shortcut: no lock (2-R4), so two links closing a loop at the same instant can both commit, and a loop through an
-     * issue the linker can't see or a deleted one isn't found; every walk keeps a visited set, so a loop never hangs
-     * anything. Lock the link graph per workspace if loops start showing up.
+     * issue the linker can't see isn't found (refusing it would hint at the hidden link); such a loop then shows to
+     * people who can see the whole chain. Every walk keeps a visited set, so a loop never hangs anything. Lock the link
+     * graph per workspace if loops start showing up.
      *
      * @return list<string>|null
      */
@@ -203,7 +217,7 @@ class LinkService
         while ($frontier && ! array_key_exists($to->id, $parent)) {
             $next = [];
             $edges = IssueLink::where('type', $type)->whereIn('source_issue_id', $frontier)
-                ->whereHas('target', fn ($q) => $q->visibleTo($viewer))->orderBy('id')->get(['source_issue_id', 'target_issue_id']);
+                ->whereHas('target', fn ($q) => $q->withTrashed()->visibleTo($viewer))->orderBy('id')->get(['source_issue_id', 'target_issue_id']);
             foreach ($edges as $edge) {
                 if (! array_key_exists($edge->target_issue_id, $parent)) {
                     $parent[$edge->target_issue_id] = $edge->source_issue_id;
@@ -220,7 +234,7 @@ class LinkService
         for ($id = $to->id; $id !== null; $id = $parent[$id]) {
             array_unshift($ids, $id);
         }
-        $keys = Issue::whereKey($ids)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]);
+        $keys = Issue::withTrashed()->whereKey($ids)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]);
 
         return array_map(fn ($id) => $keys[$id], $ids);
     }

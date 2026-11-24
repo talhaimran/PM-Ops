@@ -11,6 +11,7 @@ use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\User;
 use App\Services\IssueService;
+use Illuminate\Support\Facades\Exceptions;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // Spec 7.5: issue links, stored once in the forward direction; web, REST and MCP share LinkService.
@@ -51,8 +52,10 @@ test('each type and its reverse name store one forward row', function (string $f
     ['clones', 'is cloned by'],
 ]);
 
-test('relates to is one row either way; names are case-insensitive and take underscores', function () {
-    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'Relates_To', 'to' => 'WEB-2'])->assertCreated();
+test('relates to is one row either way, stored with the lower id first; names are case-insensitive and take underscores', function () {
+    $this->postJson('/api/v1/issues/WEB-2/links', ['type' => 'Relates_To', 'to' => 'WEB-1'])->assertCreated()
+        ->assertJsonPath('data', ['from' => 'WEB-1', 'type' => 'relates to', 'to' => 'WEB-2']);
+    expect(linkRow(web(1), web(2)))->not->toBeNull();
     $this->postJson('/api/v1/issues/WEB-2/links', ['type' => 'relates to', 'to' => 'WEB-1'])->assertUnprocessable()
         ->assertJsonPath('errors.type.0', 'WEB-1 already relates to WEB-2.');
 
@@ -88,6 +91,15 @@ test('blocks and precedes may not loop, and the error names the loop; relates to
     expect(IssueLink::count())->toBe(2);
 })->with(['blocks', 'precedes']);
 
+test('a loop through a deleted issue is refused, so restoring it can\'t complete one', function () {
+    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'blocks', 'to' => 'WEB-2'])->assertCreated();
+    $this->postJson('/api/v1/issues/WEB-2/links', ['type' => 'blocks', 'to' => 'WEB-3'])->assertCreated();
+    app(IssueService::class)->delete(web(2), $this->admin);
+
+    $this->postJson('/api/v1/issues/WEB-3/links', ['type' => 'blocks', 'to' => 'WEB-1'])->assertUnprocessable()
+        ->assertJsonPath('errors.to.0', 'That would make a loop: WEB-1 → WEB-2 → WEB-3 → WEB-1. "blocks" links can\'t loop.');
+});
+
 test('relates to may loop', function () {
     $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'relates to', 'to' => 'WEB-2'])->assertCreated();
     $this->postJson('/api/v1/issues/WEB-2/links', ['type' => 'relates to', 'to' => 'WEB-3'])->assertCreated();
@@ -101,7 +113,7 @@ test('adding and removing a link is logged on both issues with who, agent and vi
     PmServer::tool(LinkIssues::class, ['from' => 'WEB-12', 'type' => 'blocks', 'to' => 'WEB-2'])->assertHasErrors(['Issue WEB-12 was not found']);
     PmServer::tool(LinkIssues::class, ['from' => 'WEB-2', 'type' => 'is blocked by', 'to' => 'WEB-1'])->assertOk()->assertSee(['WEB-1 blocks WEB-2', '"from":"WEB-1"']);
     PmServer::tool(UnlinkIssues::class, ['from' => 'WEB-1', 'type' => 'blocks', 'to' => 'WEB-2'])->assertOk()->assertSee('Unlinked: WEB-1 blocks WEB-2.');
-    PmServer::tool(UnlinkIssues::class, ['from' => 'WEB-1', 'type' => 'blocks', 'to' => 'WEB-2'])->assertHasErrors(['WEB-1 doesn\'t block WEB-2.']);
+    PmServer::tool(UnlinkIssues::class, ['from' => 'WEB-1', 'type' => 'blocks', 'to' => 'WEB-2'])->assertHasErrors(['No link "WEB-1 blocks WEB-2" to remove.']);
 
     $log = fn (int $n) => Activity::where('issue_id', web($n)->id)->whereIn('action', ['linked', 'unlinked'])->orderBy('id')->get()
         ->map(fn ($a) => [$a->action, $a->changes['link']['from'] ?? null, $a->changes['link']['to'] ?? null, $a->user_id, $a->agent_id, $a->via])->all();
@@ -202,6 +214,33 @@ test('Close as Duplicate creates a duplicates link', function () {
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'To Do'])->assertOk();
     $this->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-3'])->assertOk();
     expect(IssueLink::count())->toBe(1);
+});
+
+test('closing as a duplicate of another original replaces the duplicates link, logged on both pairs; by hand too', function () {
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2'])->assertOk();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-3'])->assertOk();
+
+    expect(IssueLink::where('source_issue_id', web(1)->id)->pluck('target_issue_id')->all())->toBe([web(3)->id]);
+    $logged = fn (int $n) => Activity::where('issue_id', web($n)->id)->whereIn('action', ['linked', 'unlinked'])->orderBy('id')->get()
+        ->map(fn ($a) => $a->action.' '.($a->changes['link']['to'] ?? $a->changes['link']['from']))->all();
+    expect($logged(1))->toBe(['linked duplicates WEB-2', 'unlinked duplicates WEB-2', 'linked duplicates WEB-3'])
+        ->and($logged(2))->toBe(['linked is duplicated by WEB-1', 'unlinked is duplicated by WEB-1'])
+        ->and($logged(3))->toBe(['linked is duplicated by WEB-1']);
+
+    // By hand too: an issue duplicates one original.
+    $this->postJson('/api/v1/issues/WEB-1/links', ['type' => 'duplicates', 'to' => 'WEB-4'])->assertCreated();
+    expect(IssueLink::where('source_issue_id', web(1)->id)->pluck('target_issue_id')->all())->toBe([web(4)->id]);
+});
+
+test('a failing duplicates link after the close is reported and the close still succeeds', function () {
+    Exceptions::fake();
+    IssueLink::creating(fn () => throw new RuntimeException('link insert failed'));
+
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-3'])->assertOk()
+        ->assertJsonPath('data.resolution', 'duplicate');
+
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'link insert failed');
+    expect(web(1)->resolution->value)->toBe('duplicate')->and(IssueLink::count())->toBe(0);
 });
 
 test('web: Undo of a move off Duplicate restores duplicate_of from the link', function () {

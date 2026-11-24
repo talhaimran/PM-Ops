@@ -67,7 +67,7 @@ class BoardController extends Controller
             return back();
         }
 
-        $before = $this->undo->forMove($issue);
+        $before = $this->undo->forMove($issue, $request->user());
         $issue = $this->board->move($issue, $request->user(), $request->validated());
 
         return back()->with('undo', [

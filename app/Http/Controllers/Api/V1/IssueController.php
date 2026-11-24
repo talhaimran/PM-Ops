@@ -12,6 +12,7 @@ use App\Http\Requests\Issues\UpdateIssueRequest;
 use App\Http\Resources\ActivityResource;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
+use App\Services\ActivityLogger;
 use App\Services\IssueService;
 use App\Services\LinkService;
 use App\Services\Pagination;
@@ -148,6 +149,9 @@ class IssueController extends Controller
 
         [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'), 50);
 
-        return Pagination::collection(ActivityResource::class, $issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $page));
+        $rows = $issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $page);
+        ActivityLogger::hideUnseenOriginals($rows->getCollection(), $request->user());
+
+        return Pagination::collection(ActivityResource::class, $rows);
     }
 }

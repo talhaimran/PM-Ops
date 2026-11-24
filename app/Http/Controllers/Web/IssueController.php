@@ -12,6 +12,7 @@ use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
 use App\Http\Resources\ActivityResource;
 use App\Models\Project;
+use App\Services\ActivityLogger;
 use App\Services\CommentService;
 use App\Services\IssueService;
 use App\Services\LinkService;
@@ -50,7 +51,7 @@ class IssueController extends Controller
         return Inertia::render('Issues/Show', [
             ...$this->issueView($issue, $request->user()),
             'project' => ['key' => $issue->project->key, 'name' => $issue->project->name],
-            'activity' => ActivityResource::collection($issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->limit(50)->get())->resolve(),
+            'activity' => ActivityResource::collection(tap($issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->limit(50)->get(), fn ($rows) => ActivityLogger::hideUnseenOriginals($rows, $request->user())))->resolve(),
         ]);
     }
 
@@ -69,7 +70,7 @@ class IssueController extends Controller
             return back();
         }
 
-        $before = $this->undo->forUpdate($issue, array_keys($data));
+        $before = $this->undo->forUpdate($issue, array_keys($data), $request->user());
         $marker = $this->undo->token($issue);
         $issue = $this->issues->update($issue, $request->user(), $data, ($flags['overwrite'] ?? false) ? 'overwrote' : 'updated');
         $token = $this->undo->token($issue);

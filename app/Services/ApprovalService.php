@@ -121,7 +121,7 @@ class ApprovalService
             // Spec 7.11: any change since the request (not only a move) needs a second confirm, saying what changed.
             $asked = $approval->action['issue_version'] ?? 1;
             if ($issue->version !== $asked && ! $confirmChanged) {
-                $changed = ActivityLogger::describe($this->activity->changesSince($issue, $asked), $issue->key);
+                $changed = ActivityLogger::describe($this->activity->changesSince($issue, $asked, $decider), $issue->key);
                 throw ValidationException::withMessages([
                     'approval' => "{$changed} since this request. Approve again to move it to {$status->name}.",
                 ])->status(409);

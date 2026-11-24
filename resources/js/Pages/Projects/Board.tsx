@@ -20,6 +20,7 @@ import { Ban, Calendar, CircleAlert, Inbox } from 'lucide-react';
 import { motion } from 'motion/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { UNDO_LIFETIME } from '@/undo';
+import { dropAnnouncement } from '@/board';
 import { IssueOptions, Project, Resolution, StatusCategory } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -81,7 +82,7 @@ export default function Board({
     // 2-D4: dropping a blocked card into an In Progress column comes back as `confirm`; the card waits there until answered.
     const [ask, warning] = useWarningConfirm();
     const { lanes, active, sensors, reset, handlers } = useSortableLanes(source, (key, lane, laneChanged, index, cards) => {
-        setMoved(`${key} moved to ${lane}, position ${index + 1} of ${cards.length}`);
+        const say = (state: Parameters<typeof dropAnnouncement>[4]) => setMoved(dropAnnouncement(key, lane, index, cards.length, state));
         if (laneChanged && board.columns.find((c) => c.name === lane)!.statuses[0].category === 'done') {
             setFresh(key);
             clearTimeout(timer.current);
@@ -96,10 +97,21 @@ export default function Board({
                 {
                     preserveScroll: true,
                     preserveState: true,
-                    onError: (failed) =>
-                        failed.confirm
-                            ? ask({ title: `Move ${key} to ${status}?`, warnings: [{ text: failed.confirm }], confirmLabel: `Move to ${status}`, run: () => move(true), cancel: reset })
-                            : reset(),
+                    onSuccess: () => say('moved'),
+                    onError: (failed) => {
+                        if (!failed.confirm) return reset();
+                        say('confirm');
+                        ask({
+                            title: `Move ${key} to ${status}?`,
+                            warnings: [{ text: failed.confirm }],
+                            confirmLabel: `Move to ${status}`,
+                            run: () => move(true),
+                            cancel: () => {
+                                reset();
+                                say('kept');
+                            },
+                        });
+                    },
                 },
             );
         move(false);

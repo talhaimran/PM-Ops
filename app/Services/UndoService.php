@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Resolution;
 use App\Models\Issue;
+use App\Models\User;
 
 /**
  * Undo for the web UI (spec 5.1): a new change in the opposite direction through the same services.
@@ -30,7 +31,7 @@ class UndoService
      * @param  list<string>  $fields
      * @return array<string, mixed>
      */
-    public function forUpdate(Issue $issue, array $fields): array
+    public function forUpdate(Issue $issue, array $fields, User $viewer): array
     {
         $issue->loadMissing(IssueService::DISPLAY);
         $key = fn (?Issue $linked) => $linked ? "{$issue->project->key}-{$linked->number}" : null;
@@ -54,7 +55,7 @@ class UndoService
         // A status change takes the resolution with it: reopening clears it, so the undo must say what it was.
         $data = array_intersect_key($current, array_flip(in_array('status', $fields, true) ? [...$fields, 'resolution'] : $fields));
 
-        return isset($data['resolution']) ? [...$data, ...$this->resolution($issue)] : $data;
+        return isset($data['resolution']) ? [...$data, ...$this->resolution($issue, $viewer)] : $data;
     }
 
     /**
@@ -62,7 +63,7 @@ class UndoService
      *
      * @return array<string, mixed>
      */
-    public function forMove(Issue $issue): array
+    public function forMove(Issue $issue, User $viewer): array
     {
         $issue->loadMissing(IssueService::DISPLAY);
         $previous = Issue::where('project_id', $issue->project_id)
@@ -72,7 +73,7 @@ class UndoService
             ->orderByDesc('rank')
             ->first();
 
-        return ['status' => $issue->status->name, ...$this->resolution($issue)] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
+        return ['status' => $issue->status->name, ...$this->resolution($issue, $viewer)] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
     }
 
     /**
@@ -99,7 +100,7 @@ class UndoService
     }
 
     /** The resolution to put back, and for a Duplicate the original it points at (2-R10: from its duplicates link). */
-    private function resolution(Issue $issue): array
+    private function resolution(Issue $issue, User $viewer): array
     {
         if (! $issue->resolution) {
             return [];
@@ -107,9 +108,10 @@ class UndoService
         if ($issue->resolution !== Resolution::Duplicate) {
             return ['resolution' => $issue->resolution->value];
         }
-        $original = $this->links->original($issue);
+        $original = $this->links->original($issue, $viewer);
 
-        // No link (its original was purged, or the step 2 migration couldn't find it): put it back as Done rather than fail.
+        // No link $viewer can see (its original was purged or is hidden, 2-D2, or the step 2 migration couldn't find it):
+        // put it back as Done rather than fail or name it.
         return $original ? ['resolution' => Resolution::Duplicate->value, 'duplicate_of' => $original->key] : ['resolution' => Resolution::Done->value];
     }
 }

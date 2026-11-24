@@ -108,7 +108,7 @@ class IssueService
                 throw ValidationException::withMessages(['issue' => "Issue {$issue->key} was not found. Search the project's issues to find the right key."])->status(404);
             }
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
-                throw EditConflict::issue($issue, (int) $data['version']);
+                throw EditConflict::issue($issue, (int) $data['version'], $actor);
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
@@ -217,7 +217,7 @@ class IssueService
             $issues->reject(fn ($issue) => $versions->has($issue->id))->each(fn ($issue, $i) => $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $items[$i]['key']), as: 'key'));
             $stale = $issues->filter(fn ($issue, $i) => isset($items[$i]['version']) && (int) $items[$i]['version'] !== $versions[$issue->id]);
             if ($stale->isNotEmpty()) {
-                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version']))->values()->all());
+                throw EditConflict::bulk($stale->map(fn ($issue, $i) => EditConflict::issue($issue->refresh(), (int) $items[$i]['version'], $actor))->values()->all());
             }
 
             // Checked once above, against the versions the call was sent with: two items for one issue both carry the

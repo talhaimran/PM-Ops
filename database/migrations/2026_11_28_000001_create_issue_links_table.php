@@ -41,6 +41,8 @@ return new class extends Migration
                 $entry = DB::table('activities')->where('issue_id', $issue->id)->whereNotNull('changes->duplicate_of->to')
                     ->orderByDesc('id')->first(['user_id', 'agent_id', 'via', 'created_at', 'changes']);
                 if (! $entry) {
+                    $skipped++;
+
                     return;
                 }
                 $key = json_decode($entry->changes, true)['duplicate_of']['to'];
@@ -61,7 +63,7 @@ return new class extends Migration
                 $created++;
             }, 200, 'issues.id', 'id');
 
-        echo "Duplicate links: {$created} created, {$skipped} skipped (original purged, missing or in another workspace).\n";
+        echo "Duplicate links: {$created} created, {$skipped} skipped (original not recorded, purged, missing or in another workspace).\n";
     }
 
     public function down(): void

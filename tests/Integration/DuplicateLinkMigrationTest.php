@@ -43,6 +43,10 @@ test('2-D1: a Duplicate\'s recorded original becomes a duplicates link; missing 
     $activity($purged, 'WEB-99');
     $otherWorkspace = $issue($web, 6, 'duplicate');
     $activity($otherWorkspace, 'OPS-3');
+    // A deleted Duplicate gets its link too; one with no recorded original is counted.
+    $deletedDup = $issue($web, 8, 'duplicate', $now);
+    $activity($deletedDup, 'WEB-3');
+    $issue($web, 9, 'duplicate');
     // No longer a Duplicate: no link.
     $reopened = $issue($web, 7, 'done');
     $activity($reopened, 'WEB-3');
@@ -56,9 +60,10 @@ test('2-D1: a Duplicate\'s recorded original becomes a duplicates link; missing 
         [$dup, $original, 'duplicates', $user, $agent, 'mcp', '2026-11-01 10:00:00'],
         // A soft-deleted original still exists: the link hides with it and comes back on restore.
         [$toDeleted, $deletedOriginal, 'duplicates', $user, null, 'mcp', '2026-11-01 10:00:00'],
+        [$deletedDup, $original, 'duplicates', $user, null, 'mcp', '2026-11-01 10:00:00'],
     ];
     expect($links())->toBe($expected)
-        ->and($output)->toContain('Duplicate links: 2 created, 2 skipped (original purged, missing or in another workspace).');
+        ->and($output)->toContain('Duplicate links: 3 created, 3 skipped (original not recorded, purged, missing or in another workspace).');
 
     // Re-runnable: up() starts by dropping what an earlier run made.
     ob_start();
