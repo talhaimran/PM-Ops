@@ -48,6 +48,7 @@ class UndoService
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->values()->all(),
             'story_points' => $issue->story_points,
+            'start_date' => $issue->start_date?->format('Y-m-d'),
             'due_date' => $issue->due_date?->format('Y-m-d'),
             'epic' => $key($issue->epic),
             'parent' => $key($issue->parent),

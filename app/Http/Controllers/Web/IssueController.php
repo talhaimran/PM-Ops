@@ -84,6 +84,10 @@ class IssueController extends Controller
         $token = $this->undo->token($issue);
         // 2-R6: "ask" moved nothing; the dialog offers Shift dates or Keep dates.
         $shifts = $issue->proposedShifts ? ['dateShift' => ['key' => $issue->key, 'shifts' => $issue->proposedShifts]] : [];
+        // Past the shift limit nothing is proposed ([]); say why, as REST and MCP do.
+        if ($issue->proposedShifts === []) {
+            $shifts = ['warning' => LinkService::shiftWarning($issue, [])];
+        }
 
         if ($token !== $marker) {
             $status = $before['status'] ?? null;

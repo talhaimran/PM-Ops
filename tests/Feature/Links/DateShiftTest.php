@@ -3,6 +3,7 @@
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
 use App\Mcp\Servers\PmServer;
+use App\Mcp\Tools\BulkUpdateIssues;
 use App\Mcp\Tools\UpdateIssue;
 use App\Models\Activity;
 use App\Models\Issue;
@@ -405,4 +406,22 @@ test('the limit counts only the issues that would move: a big fan-out that doesn
     // Nothing conflicts at all: still saved, with no 422.
     $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'due_date' => '2026-12-15', 'shift_successors' => true])->assertOk();
     expect(($this->dates)(1))->toBe([null, '2026-12-15']);
+});
+
+test('web: ask past the shift limit saves and flashes the "more than N issues" warning', function () {
+    config(['pm.shift_limit' => 1]);
+    ($this->precedes)(1, 3);
+    $this->actingAs($this->admin);
+
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'due_date' => '2026-12-14'])
+        ->assertSessionHas('warning', fn ($w) => str_contains($w, 'More than 1 issues follow WEB-1'))
+        ->assertSessionMissing('dateShift');
+    expect(($this->dates)(1))->toBe([null, '2026-12-14']);
+});
+
+test('mcp bulk update returns proposed_shifts and the warning, and says so in the summary', function () {
+    apiAs($this->admin, AgentLevel::Write);
+
+    PmServer::tool(BulkUpdateIssues::class, ['updates' => [['key' => 'WEB-1', 'version' => 1, 'due_date' => '2026-12-14']]])
+        ->assertOk()->assertSee('proposed_shifts')->assertSee('shift_successors: true')->assertSee('WEB-2');
 });

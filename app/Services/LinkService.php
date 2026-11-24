@@ -62,7 +62,7 @@ class LinkService
      */
     public function withLinkLock(Issue $issue, Closure $run): mixed
     {
-        $lock = "pm:links:{$issue->project->workspace_id}";
+        $lock = "pm:links:{$issue->loadMissing('project')->project->workspace_id}";
         if ((int) DB::scalar('SELECT GET_LOCK(?, ?)', [$lock, config('pm.link_lock_timeout')]) !== 1) {
             throw ValidationException::withMessages(['type' => 'Links are being changed in this workspace; try again.'])->status(409);
         }

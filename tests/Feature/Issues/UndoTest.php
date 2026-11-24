@@ -220,3 +220,13 @@ test('undo of a backlog move stops when the issue changed meanwhile', function (
     $this->post($undo['url'], $undo['data'])->assertSessionHasErrors(['undo' => "Can't undo: Sam Member changed title on WEB-1."]);
     expect(Issue::sole()->sprint_id)->not->toBeNull();
 });
+
+test('undo of a start date change restores the old start date', function () {
+    makeIssue($this->project, $this->admin);
+
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'start_date' => '2026-12-05'])->assertSessionHasNoErrors();
+    expect(Issue::sole()->start_date->format('Y-m-d'))->toBe('2026-12-05');
+
+    sendUndo($this)->assertSessionHasNoErrors();
+    expect(Issue::sole()->start_date)->toBeNull();
+});
