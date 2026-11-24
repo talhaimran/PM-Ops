@@ -8,6 +8,7 @@ use App\Enums\WorkspaceRole;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
+use App\Models\IssueLink;
 use App\Models\Project;
 use App\Models\Status;
 use App\Models\User;
@@ -66,6 +67,16 @@ test('demo seed leaves one pending approval that demo can decide', function () {
         ->and($approval->issue->key)->toBe('WEB-5')
         ->and($approval->action['to_status'])->toBe('Done')
         ->and($demo->can('decide', $approval))->toBeTrue();
+});
+
+test('demo seed has a blocks link, a dated precedes chain and a clone', function () {
+    $this->artisan('db:seed')->assertSuccessful();
+    $key = fn (IssueLink $l) => $l->source->key.' '.$l->type->value.' '.$l->target->key;
+    $links = IssueLink::with(['source.project', 'target.project'])->get()->map($key)->all();
+
+    expect($links)->toContain('WEB-7 blocks WEB-9', 'WEB-14 precedes WEB-15', 'WEB-15 precedes WEB-17')
+        ->and($links)->toHaveCount(4)->and($links)->toContain('WEB-31 clones WEB-12')
+        ->and(Issue::whereIn('number', [14, 15, 17])->whereNull('start_date')->exists())->toBeFalse();
 });
 
 test('the printed demo token works against the api', function () {

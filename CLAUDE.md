@@ -64,6 +64,14 @@ Spec section 5 lists the conventions for all new code; these are how step 0 buil
 - Lock order: approval request, then project rows (id order), then the workspace row, then issue. Status library work (merge, column status changes) takes its projects before the workspace row: an insert with a `workspace_id` FK (an agent's Done request) share-locks the workspace row while holding its project.
 - Inertia dialogs that must show a refusal need `preserveState: true` on the visit, else the page remounts and the dialog closes.
 
+## Links (step 2)
+- `LinkService` is the only writer of `issue_links` (stored once, forward). `withLinkLock($issue, fn)` is the per-workspace named lock (`pm:links:{workspace_id}`, `pm.link_lock_timeout`): take it before any transaction or row lock; it's re-entrant per session. `link()`, `unlink()`, shifting updates and `clone(links: true)` use it; anything new that adds blocks/precedes links must too.
+- 2-D4 gate: entering an In Progress-category status while blocked or before a predecessor resolves needs `confirm: true` on REST/MCP (web: `WarningConfirm`); bulk names every warned item and saves nothing; Undo, overwrite and approvals don't ask.
+- Visibility: everything that shows a link filters through `accessibleProjects()` / `Issue::visibleTo` (and `Activity::visibleTo`); hidden issues are never counted, listed or hinted in warnings.
+- Date shifts write through `IssueService::update` (version, activity, `shifted_by`); bulk only proposes; Undo and approvals never shift; `pm.shift_limit` counts movers.
+- Clone caps (`pm.clone_limit`) are checked before any lock and again inside the transaction.
+- Focus is `DashboardService::withFocus` (My issues rows only; REST `/me/issues` and MCP `my_issues`).
+
 ## UI rules (step U)
 - Tokens: `tailwind.config.js` reads `docs/design-system/tokens.json`; use the token classes (`bg-card`, `text-muted`, `tint-amber`, `rounded-ctl`, `h-control-h`…). No hex colours, no default Tailwind colours, no `/40`-style opacity on token colours (they are CSS variables). `tests/Feature/Ui/DesignTokensTest.php` enforces this.
 - Motion: timings only from `resources/js/motion.ts` (`transition('drawerIn')`), never number literals in components. Reduced motion is handled there and in `app.css`.

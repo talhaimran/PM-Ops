@@ -89,6 +89,9 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `PM_MCP_REDIRECT_SCHEMES` | `cursor,vscode` | App schemes (`cursor://…`) allowed as OAuth callbacks. `javascript`, `data`, `file` and `vbscript` are always refused. Empty allows none; keep only the apps you use. |
 | `PM_AI_PROVIDER` | — | `anthropic`, `openai`, `google` or `openai_compatible` (Ollama, company gateways). Set, it makes **Settings → AI** read-only; empty, Owners and Admins set the provider there and the key is stored encrypted. |
 | `PM_AI_MODEL`, `PM_AI_ENDPOINT`, `PM_AI_KEY` | — | Model, endpoint (required for `openai_compatible`; `https://`, or `http://localhost…`) and key for `PM_AI_PROVIDER`. The key is never shown in the app or returned by any API. |
+| `PM_LINK_LOCK_TIMEOUT` | `5` | Seconds a change to links or dates waits for another link change in the same workspace before it answers "try again" (409). |
+| `PM_SHIFT_LIMIT` | `500` | Most issues one due-date change may shift through `precedes` links. Over it, nothing is shifted (422 when you asked for the shift). |
+| `PM_CLONE_LIMIT` | `100` | Most sub-tasks, and separately most links, one clone copies. Over it the clone is refused and nothing is saved. |
 | `PM_BILLING_URL` | — | Upgrade link in the plan-limit dialog. Leave empty on self-hosted. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Google sign-in. Leave empty to hide the button. See below. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | GitHub sign-in. Leave empty to hide the button. See below. |
@@ -142,7 +145,7 @@ An Owner can delete a workspace at **Settings → General**. It locks at once an
 
 ### Deleted issues
 
-Deleting an issue or comment (web, API or MCP) is a soft delete: it disappears everywhere but can be restored from the web app. `php artisan issues:purge` removes anything deleted more than 30 days ago; it is scheduled daily, so run the scheduler in production (`php artisan schedule:work`, or cron with `schedule:run`).
+Deleting an issue or comment (web, API or MCP) is a soft delete: it disappears everywhere but can be restored from the web app. `php artisan issues:purge` removes anything deleted more than 30 days ago; it is scheduled daily, so run the scheduler in production (`php artisan schedule:work`, or cron with `schedule:run`). The scheduler also runs `links:reconcile-duplicates` daily, which adds the `duplicates` link to a Close as Duplicate whose link failed to save.
 
 ## Tests and lint
 
@@ -160,6 +163,15 @@ npm run build             # TypeScript check + production build
 - **Resolution:** an issue in a Done-category status has a resolution: Done, Won't do, Duplicate (with the original's key) or Cannot reproduce. Moving into Done sets it (Done unless you pick another) and moving out clears it. Only Done counts as completed work in sprint progress.
 - **Edit conflicts:** issues and comments carry a `version`. A save based on an old version is refused with the changes made meanwhile; on the web you can reload or save yours over theirs. REST and MCP edits must send the `version` they read (see REST API).
 - **History:** status changes, sprint scope changes and estimate changes are recorded with who made them (and the agent and `via`, when there was one).
+
+## Links, dates, cloning and Focus
+
+- **Links:** link two issues from the issue's links section, the REST API or MCP. Types: blocks, precedes, relates to, duplicates and clones (reverse names such as "is blocked by" work too). Links can cross projects in the workspace, and blocks and precedes can't form a loop. An issue shows a **Blocked** badge (lists, board, My issues) while an issue that blocks it, and that you can see, isn't done. Closing an issue as Duplicate links it to its original.
+- **Warning before starting:** moving a blocked issue into an In Progress status, or one that follows an unresolved issue, asks you to confirm first (web dialog; REST and MCP need `confirm: true`).
+- **Visibility:** links are shown only for issues you can access. A hidden issue is never listed, counted or hinted at, including in warnings, activity and the Blocked badge.
+- **Start dates and shifting:** issues have an optional start date (not after the due date). When a due date moves later, issues it `precedes` that would now start too early can move by the same gap, keeping their duration. Only issues you can edit move, resolved ones never do, and each moved issue gets its own history entry. **Profile → When a due date moves later** sets ask every time (the default: the date is saved and you choose in a dialog), always, or never. Shifting more than `PM_SHIFT_LIMIT` issues is refused. Undoing a due date doesn't undo the shifts.
+- **Cloning:** **More actions → Clone** (REST `POST /api/v1/issues/{key}/clone`, MCP `clone_issue`) copies title, description, type, labels and story points into a new unassigned To Do issue with no sprint, epic or dates, linked "clones" the original. Optionally copy its sub-tasks and its blocks, precedes and relates to links (only to issues you can see). Comments and history aren't copied, and each option stops at `PM_CLONE_LIMIT`.
+- **Focus:** the dashboard's My issues groups your open issues by what needs you: Waiting on you (approvals), Blocking others, Urgent or overdue, Due in the next 3 days, In progress, To do. Switch to grouping by status, priority, project or sprint from the same menu; the choice is remembered. Grouping applies to the issues loaded, so very long lists can be cut off.
 
 ## Agents
 
@@ -181,7 +193,7 @@ An agent's move into a Done-category status doesn't happen at once. It opens an 
 
 Workspace Owners and Admins set the AI provider (Anthropic, OpenAI, Google, or an OpenAI-compatible endpoint such as Ollama or a company gateway), model, key and a monthly token cap at **Settings → AI**. The key is stored encrypted and is never shown or returned. Changing the provider or endpoint needs a new key. Mode C sends issue content to the chosen provider; there is a workspace switch here and one per project.
 
-To configure it on the server instead, set `PM_AI_PROVIDER`, `PM_AI_MODEL`, `PM_AI_KEY` and, for `openai_compatible`, `PM_AI_ENDPOINT`. The page is then read-only ("Configured by your server"); only the token cap stays editable. If the variables are incomplete or unusable (no key, no endpoint, a refused endpoint), they are ignored and the page says so, naming the variables and never their values. Endpoints must be `https://` (or `http://localhost`) and may not point at private or reserved addresses.
+To configure it on the server instead, set `PM_AI_PROVIDER`, `PM_AI_MODEL`, `PM_AI_KEY` and, for `openai_compatible`, `PM_AI_ENDPOINT`. The page is then read-only ("Configured by your server"); only the token cap stays editable. If the variables are incomplete or unusable (no key, no endpoint, a refused endpoint), they are ignored and the page says so, naming the variables and never their values. Endpoints must be `https://` (or `http://localhost`) and may not point at private or reserved addresses. The same check runs on every request to the provider: the host's DNS answers must all be public (private, loopback, link-local, carrier-grade NAT, multicast, cloud metadata and other reserved ranges, IPv4 or IPv6, are refused), the request connects to the address that was checked, and redirects aren't followed.
 
 Every REST and MCP call uses the token as `Authorization: Bearer <token>`.
 
