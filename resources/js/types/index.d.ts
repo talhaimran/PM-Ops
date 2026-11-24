@@ -29,6 +29,8 @@ export type PageProps<
     workspaces: { name: string; slug: string }[];
     edition: 'self_hosted' | 'cloud';
     ai: { enabled: boolean };
+    /** 3-R25: unread inbox items you can still see, in the current workspace. */
+    unread_notifications: number;
 };
 
 export type ProjectRole = 'admin' | 'member' | 'viewer';

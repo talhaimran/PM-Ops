@@ -8,6 +8,7 @@ use App\Enums\ProjectRole;
 use App\Enums\Resolution;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
+use App\Models\InboxItem;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\Status;
@@ -30,9 +31,9 @@ use Illuminate\Validation\ValidationException;
 class ApprovalService
 {
     /** Input for get_updates and GET /me/updates. */
-    public const UPDATE_RULES = ['cursor' => ['nullable', 'string', 'max:100'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:50']];
+    public const UPDATE_RULES = ['cursor' => ['nullable', 'string', 'max:100'], 'since' => ['nullable', 'date'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:50']];
 
-    public function __construct(private CurrentWorkspace $current, private ActivityLogger $activity) {}
+    public function __construct(private CurrentWorkspace $current, private ActivityLogger $activity, private NotificationService $notifications) {}
 
     /** The one rule: an agent moving an issue into a Done-category status it isn't already in needs a person (1-R5). */
     public function needsApproval(Issue $issue, Status $to, ?Agent $agent): bool
@@ -72,6 +73,7 @@ class ApprovalService
                     $open->update(['action' => $action]);
                 }
             }
+            $new = $open === null;
             $approval = $open ?? ApprovalRequest::create([
                 'workspace_id' => $issue->project->workspace_id,
                 'issue_id' => $issue->id,
@@ -81,6 +83,11 @@ class ApprovalService
                 'status' => ApprovalStatus::Pending,
                 'expires_at' => now()->addDays(ApprovalRequest::DAYS),
             ]);
+
+            // 3-R5: the owner hears at once (never batched, never the project's Admins), once the request is committed.
+            if ($new) {
+                DB::afterCommit(fn () => $this->notifications->notify($owner, $issue, 'approval_request', ['action' => 'approval_request', 'from' => null, 'to' => $to->name], null, $agent, ActivityLogger::via($owner), batch: false));
+            }
 
             return $approval->setRelation('issue', $issue)->setRelation('agent', $agent->setRelation('owner', $owner));
         });
@@ -203,29 +210,31 @@ class ApprovalService
     }
 
     /**
-     * A-L3: how $agent's requests ended, oldest first, after `cursor` (a position, not a page: pass back the last
-     * next_cursor to poll). Only that agent's own requests, in projects its owner can still reach. A request's last
-     * change is its end, so updated_at is when it happened; ties break by id.
-     * Only complete seconds are read (updated_at before this second), so an outcome can't land behind a cursor: it shows up at most ~1s late, never skipped.
+     * A-L3 and 3-R8: one stream, oldest first, of how $agent's requests ended (approved, rejected, expired, stale) and of
+     * $user's notifications (changes to watched issues, mentions; not the daily summary or their own agent's requests),
+     * after `cursor` (a position, not a page: pass back the last next_cursor to poll) or, with no cursor, since `$since`.
+     * Approval outcomes are only that agent's own requests, in projects its owner can still reach; notifications only
+     * for issues $user can still see. A request's last change is its end, so updated_at is when it happened; ties break
+     * by kind (approvals first) and id. Reading marks nothing read.
+     * Only complete seconds are read (before this second), so an item can't land behind a cursor: it shows up at most ~1s late, never skipped.
+     * shortcut: a notification that batches a later change keeps its place (created_at), the new change isn't re-sent; use updated_at if agents need that.
      *
      * @return array{updates: list<array>, next_cursor: ?string}
      */
-    public function updatesFor(User $user, ?Agent $agent, ?string $cursor, int $perPage = 25): array
+    public function updatesFor(User $user, ?Agent $agent, ?string $cursor, int $perPage = 25, ?string $since = null): array
     {
-        if (! $agent) {
-            return ['updates' => [], 'next_cursor' => $cursor];
-        }
-        [$at, $id] = $cursor ? $this->decodeUpdateCursor($cursor) : [null, 0];
+        [$at, $id, $notified] = $cursor ? $this->decodeUpdateCursor($cursor) : [$since ? Carbon::parse($since) : null, 0, false];
+        // Items at the cursor's own second: those of the same kind after its id, all of a later kind, none of an earlier one (approvals come first).
+        $after = fn ($q, string $column, string $idColumn, string $tie) => $q->when($at, fn ($q) => $q->where(fn ($q) => $q->where($column, $cursor ? '>' : '>=', $at)
+            ->when($cursor && $tie !== 'none', fn ($q) => $q->orWhere(fn ($q) => $q->where($column, $at)->when($tie === 'id', fn ($q) => $q->where($idColumn, '>', $id))))));
         $ended = collect([ApprovalStatus::Approved, ApprovalStatus::Rejected, ApprovalStatus::Expired, ApprovalStatus::Stale])->map->value->all();
 
-        $rows = ApprovalRequest::where('agent_id', $agent->id)->whereIn('status', $ended)->where('updated_at', '<', now()->startOfSecond())
+        $approvals = ! $agent ? collect() : ApprovalRequest::where('agent_id', $agent->id)->whereIn('status', $ended)->where('updated_at', '<', now()->startOfSecond())
             ->whereIn('issue_id', Issue::withTrashed()->whereIn('project_id', $user->accessibleProjects()->select('projects.id'))->select('issues.id'))
-            ->when($at, fn ($q) => $q->where(fn ($q) => $q->where('updated_at', '>', $at)->orWhere(fn ($q) => $q->where('updated_at', $at)->where('id', '>', $id))))
+            ->tap(fn ($q) => $after($q, 'updated_at', 'id', $notified ? 'none' : 'id'))
             ->with(['issue' => fn ($q) => $q->withTrashed(), 'issue.project', 'decider:id,name'])
-            ->orderBy('updated_at')->orderBy('id')->limit($perPage)->get();
-
-        return [
-            'updates' => $rows->map(fn (ApprovalRequest $a) => [
+            ->orderBy('updated_at')->orderBy('id')->limit($perPage)->get()
+            ->map(fn (ApprovalRequest $a) => ['rank' => 0, 'ts' => $a->updated_at->timestamp, 'id' => $a->id, 'item' => [
                 'id' => "approval:{$a->id}",
                 'kind' => "approval.{$a->status->value}",
                 'approval_request_id' => $a->id,
@@ -234,20 +243,44 @@ class ApprovalService
                 'decided_by' => $a->decider?->name,
                 'note' => $a->note,
                 'at' => $a->updated_at->toIso8601String(),
-            ])->all(),
-            'next_cursor' => $rows->isEmpty() ? $cursor : rtrim(strtr(base64_encode($rows->last()->updated_at->timestamp.'.'.$rows->last()->id), '+/', '-_'), '='),
+            ]]);
+
+        $workspace = $this->current->get();
+        $notes = InboxItem::visibleTo($user, $workspace->id)->whereNotIn('notifications.event', ['agent_summary', 'approval_request'])
+            ->where('notifications.created_at', '<', now()->startOfSecond())
+            ->tap(fn ($q) => $after($q, 'notifications.created_at', 'notifications.id', $notified ? 'id' : 'all'))
+            ->with(['issue.project', 'actor', 'agent.owner'])
+            ->orderBy('notifications.created_at')->orderBy('notifications.id')->limit($perPage)->get()
+            ->map(fn (InboxItem $n) => ['rank' => 1, 'ts' => $n->created_at->timestamp, 'id' => $n->id, 'item' => [
+                'id' => "notification:{$n->id}",
+                'kind' => "notification.{$n->event}",
+                'notification_id' => $n->id,
+                'issue' => $n->issue?->key,
+                'text' => NotificationService::describe($n),
+                'by' => $n->agent ? ActivityLogger::agentLabel($n->agent) : $n->actor?->name,
+                'count' => $n->count,
+                'at' => $n->created_at->toIso8601String(),
+            ]]);
+
+        $rows = $approvals->concat($notes)->sortBy([['ts', 'asc'], ['rank', 'asc'], ['id', 'asc']])->take($perPage)->values();
+        $last = $rows->last();
+
+        return [
+            'updates' => $rows->pluck('item')->all(),
+            'next_cursor' => ! $last ? $cursor : rtrim(strtr(base64_encode($last['ts'].'.'.$last['id'].($last['rank'] ? '.n' : '')), '+/', '-_'), '='),
         ];
     }
 
-    /** @return array{0: Carbon, 1: int} */
+    /** @return array{0: Carbon, 1: int, 2: bool} when, id, and whether the id is a notification's (else an approval request's) */
     private function decodeUpdateCursor(string $cursor): array
     {
         $parts = explode('.', (string) base64_decode(strtr($cursor, '-_', '+/'), true));
-        if (count($parts) !== 2 || ! ctype_digit($parts[0]) || ! ctype_digit($parts[1]) || strlen($parts[0]) > 10 || strlen($parts[1]) > 18 || (int) $parts[0] > now()->timestamp) {
+        $notified = count($parts) === 3 && $parts[2] === 'n';
+        if ((count($parts) !== 2 && ! $notified) || ! ctype_digit($parts[0]) || ! ctype_digit($parts[1]) || strlen($parts[0]) > 10 || strlen($parts[1]) > 18 || (int) $parts[0] > now()->timestamp) {
             throw ValidationException::withMessages(['cursor' => 'Invalid cursor. Pass the next_cursor from the previous get_updates response unchanged, or leave it out to start from the beginning.']);
         }
 
-        return [Carbon::createFromTimestamp((int) $parts[0]), (int) $parts[1]];
+        return [Carbon::createFromTimestamp((int) $parts[0]), (int) $parts[1], $notified];
     }
 
     /** Mark pending requests past their expiry as expired; the agent can ask again. */

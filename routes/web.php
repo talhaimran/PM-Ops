@@ -12,6 +12,7 @@ use App\Http\Controllers\Web\InvitationController;
 use App\Http\Controllers\Web\IssueController;
 use App\Http\Controllers\Web\IssueListController;
 use App\Http\Controllers\Web\LabelController;
+use App\Http\Controllers\Web\NotificationController;
 use App\Http\Controllers\Web\ProjectController;
 use App\Http\Controllers\Web\ProjectMemberController;
 use App\Http\Controllers\Web\SprintController;
@@ -66,6 +67,10 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::get('/dashboard', [IssueListController::class, 'dashboard'])->middleware('verified')->name('dashboard');
     Route::post('/approvals/{approval}/approve', [ApprovalController::class, 'approve'])->name('approvals.approve')->whereNumber('approval');
     Route::post('/approvals/{approval}/reject', [ApprovalController::class, 'reject'])->name('approvals.reject')->whereNumber('approval');
+
+    Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::post('/notifications/read-all', [NotificationController::class, 'readAll'])->name('notifications.read-all');
+    Route::post('/notifications/{notification}/read', [NotificationController::class, 'read'])->name('notifications.read')->whereNumber('notification');
 
     Route::get('/settings/tokens', fn () => redirect(route('agents.index', [], false), 301));
     Route::get('/settings/agents', [AgentController::class, 'index'])->name('agents.index');

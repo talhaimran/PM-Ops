@@ -19,3 +19,6 @@ Schedule::command('workspaces:purge')->daily();
 
 // A2: approval requests expire after 7 days; the agent can ask again.
 Schedule::command('approvals:expire')->hourly();
+
+// 3-R7: each person with agents hears once a day, shortly after midnight server time, what their agents did the day before.
+Schedule::command('notifications:agent-summary')->dailyAt('00:10');

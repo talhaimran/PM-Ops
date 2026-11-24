@@ -24,6 +24,7 @@ use App\Services\CommentService;
 use App\Services\CurrentWorkspace;
 use App\Services\InvitationService;
 use App\Services\LabelService;
+use App\Services\NotificationService;
 use App\Services\SprintService;
 use App\Services\StatusService;
 use Illuminate\Support\Arr;
@@ -47,7 +48,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 const B_MARKER = 'B-SECRET';
 
-/** Placeholders: {P} project key, {I} issue key, {C} comment id, {COL}/{COLN} column id/name, {L}/{LN} label id/name, {S}/{SN} sprint id/name, {T} token id, {INV} invitation id, {AR} approval request id, {U} user id, {E} member email. */
+/** Placeholders: {P} project key, {I} issue key, {C} comment id, {COL}/{COLN} column id/name, {L}/{LN} label id/name, {S}/{SN} sprint id/name, {T} token id, {INV} invitation id, {AR} approval request id, {N} notification id, {U} user id, {E} member email. */
 function isolationRouteCases(): array
 {
     $confirm = ['confirm' => true];
@@ -115,6 +116,9 @@ function isolationRouteCases(): array
         'GET {workspace}/dashboard' => ['alpha/dashboard', []],
         'POST {workspace}/approvals/{approval}/approve' => ['alpha/approvals/{AR}/approve', ['confirm_changed' => true]],
         'POST {workspace}/approvals/{approval}/reject' => ['alpha/approvals/{AR}/reject', ['note' => 'x']],
+        'GET {workspace}/notifications' => ['alpha/notifications', []],
+        'POST {workspace}/notifications/read-all' => ['alpha/notifications/read-all', []],
+        'POST {workspace}/notifications/{notification}/read' => ['alpha/notifications/{N}/read', []],
         'GET {workspace}/search' => ['alpha/search?q=secret', []],
         'GET {workspace}/issues/{key}' => ['alpha/issues/{I}', []],
         'PATCH {workspace}/issues/{key}' => ['alpha/issues/{I}', ['title' => 'x']],
@@ -297,13 +301,13 @@ function isolationVariants($t): array
         '{P}' => 'OPS', '{I}' => 'OPS-1', '{C}' => (string) $t->bComment->id, '{COL}' => (string) $t->bColumn->id, '{COLN}' => 'B-SECRET col',
         '{L}' => (string) $t->bLabel->id, '{LN}' => 'b-secret', '{S}' => (string) $t->bSprint->id, '{SN}' => 'B-SECRET sprint',
         '{T}' => (string) $t->annB[0]->id, '{INV}' => (string) $t->bInvitation->id, '{U}' => (string) $t->bob->id, '{E}' => $t->bob->email,
-        '{AR}' => (string) $t->bApproval->id, '{ST}' => (string) $t->bStatus->id, '{STN}' => $t->bStatus->name,
+        '{AR}' => (string) $t->bApproval->id, '{N}' => (string) $t->bNotification->id, '{ST}' => (string) $t->bStatus->id, '{STN}' => $t->bStatus->name,
     ];
     $missing = [
         '{P}' => 'NOPE', '{I}' => 'NOPE-1', '{C}' => '999999', '{COL}' => '999998', '{COLN}' => 'No such col',
         '{L}' => '999997', '{LN}' => 'no-such', '{S}' => '999996', '{SN}' => 'No such sprint',
         '{T}' => '999995', '{INV}' => '999994', '{U}' => '999993', '{E}' => 'nobody@example.com',
-        '{AR}' => '999992', '{ST}' => '999991', '{STN}' => 'No such status',
+        '{AR}' => '999992', '{N}' => '999990', '{ST}' => '999991', '{STN}' => 'No such status',
     ];
     $inA = ['{P}' => 'WEB', '{I}' => 'WEB-1'];
 
@@ -350,6 +354,7 @@ function workspaceSnapshot(Workspace $w): string
         DB::table('personal_access_tokens')->where('workspace_id', $w->id)->orderBy('id')->get(['id', 'name', 'abilities']),
         DB::table('agents')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('approval_requests')->where('workspace_id', $w->id)->orderBy('id')->get(),
+        DB::table('notifications')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('ai_providers')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('statuses')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('column_statuses')->whereIn('column_id', Column::whereIn('project_id', $projects)->select('id'))->orderBy('column_id')->get(),
@@ -374,6 +379,7 @@ beforeEach(function () {
     $this->bStatus = Status::where('workspace_id', $this->b->id)->where('name', 'B-SECRET col')->sole();
     $this->bSprint = app(SprintService::class)->create($ops, ['name' => 'B-SECRET sprint']);
     $this->bInvitation = app(InvitationService::class)->invite($this->b, $this->bob, 'carol@example.com', WorkspaceRole::Member, $ops, ProjectRole::Member);
+    $this->bNotification = app(NotificationService::class)->notify($this->ann, $opsIssue, 'commented', ['action' => 'commented', 'from' => null, 'to' => null], $this->bob, null, 'web');
     $this->annB = app(AgentService::class)->create($this->ann, ['name' => 'B-SECRET token', 'level' => 'delete']);
     AiProvider::create(['workspace_id' => $this->b->id, 'provider' => 'anthropic', 'model' => 'B-SECRET model', 'key' => 'B-SECRET-key', 'monthly_token_cap' => 7]);
     $this->bApproval = app(ApprovalService::class)->requestDone($opsIssue->setRelation('project', $ops), $this->ann, $this->annB[0], app(StatusService::class)->resolveFor($ops, 'Done'), 'B-SECRET reason');

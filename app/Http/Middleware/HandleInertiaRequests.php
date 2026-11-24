@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Services\AiSettingsService;
 use App\Services\CurrentWorkspace;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -49,6 +50,8 @@ class HandleInertiaRequests extends Middleware
                 ->map(fn ($w) => ['name' => $w->name, 'slug' => $w->slug])->all() ?? [],
             // Spec 8 (A5): only whether a provider is set; plain-English search and Mode C hide their controls without one.
             'ai' => fn () => ['enabled' => app(CurrentWorkspace::class)->id() && app(AiSettingsService::class)->for(app(CurrentWorkspace::class)->get()) !== null],
+            // 3-R25: the bell's count; one indexed query.
+            'unread_notifications' => fn () => $request->user() && app(CurrentWorkspace::class)->id() ? app(NotificationService::class)->unreadCount($request->user(), app(CurrentWorkspace::class)->get()) : 0,
             'edition' => config('pm.edition'),
             'flash' => [
                 'token' => fn () => $request->session()->get('token'),
