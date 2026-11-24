@@ -15,7 +15,7 @@ const when = (s: DateShiftFlash['shifts'][number]) =>
 /**
  * Spec 7.5 (2-R6): a due date moved with "ask every time", so nothing was shifted. Lists the issues that now start before
  * it is due and their proposed dates; "Shift dates" applies them, "Keep dates" leaves them. "Remember my choice" saves
- * always or never as the person's choice (the profile page changes it). Closing it (Esc) is Keep dates.
+ * always or never as the person's choice (the profile page changes it). Esc or a click outside only closes it: the date stays saved, nothing is shifted and nothing is remembered.
  */
 export default function DateShiftDialog({ issue }: { issue: Issue }) {
     const { flash } = usePage().props as { flash?: { dateShift?: DateShiftFlash | null } };
@@ -47,6 +47,7 @@ export default function DateShiftDialog({ issue }: { issue: Issue }) {
             cancelLabel="Keep dates"
             onConfirm={() => answer(true)}
             onCancel={() => answer(false)}
+            onClose={() => setOpen(false)}
         >
             <label className="flex items-center gap-2 text-md text-text">
                 <Checkbox checked={remember} onChange={(e) => setRemember(e.target.checked)} />

@@ -47,6 +47,8 @@ export default {
             borderRadius: px('radius', 'radius-'),
             // Fixed component sizes: h-control-h, h-input-h, w-side-w, w-drawer-w, min-w-column-min-w…
             spacing: px('size', /^$/),
+            // Layers: dialogs sit above toasts, so a toast never covers a sheet's buttons.
+            zIndex: px('layer', 'layer-'),
             transitionDuration: px('duration', 'dur-'),
             transitionTimingFunction: px('easing', 'ease-'),
         },

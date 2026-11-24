@@ -225,9 +225,6 @@ class LinkService
         ]));
     }
 
-    /** Most successors one date shift walks; a longer chain is cut off here. shortcut: a plain cap, raise it when a real chain needs more. */
-    private const SHIFT_LIMIT = 500;
-
     /** Ids (and projects) of the successors of $moved that $actor could shift: what IssueService locks before it shifts. @return array<int, int> */
     public function shiftable(Issue $moved, User $actor): array
     {
@@ -324,10 +321,10 @@ class LinkService
      */
     private function graph(Issue $moved, User $actor): array
     {
-        $nodes = $next = $kind = [];
+        $nodes = $next = $kind = $editable = [];
         $seen = [$moved->id => true];
         $frontier = [$moved->id];
-        while ($frontier && count($seen) <= self::SHIFT_LIMIT) {
+        while ($frontier) {
             $edges = IssueLink::where('type', LinkType::Precedes)->whereIn('source_issue_id', $frontier)->orderBy('id')->get(['source_issue_id', 'target_issue_id']);
             $found = Issue::whereIn('id', $edges->pluck('target_issue_id')->unique())->visibleTo($actor)->with(['project', 'status'])->get()->keyBy('id');
             $frontier = [];
@@ -342,9 +339,14 @@ class LinkService
                 }
                 $seen[$successor->id] = true;
                 $nodes[$successor->id] = $successor;
+                // A hard cap on everything reached, so one request can't lock or walk an unbounded chain (nothing is saved).
+                if (count($nodes) > config('pm.shift_limit')) {
+                    throw ValidationException::withMessages(['due_date' => 'This would shift more than '.config('pm.shift_limit').' issues. Shift fewer at a time.']);
+                }
                 $kind[$successor->id] = match (true) {
                     $successor->status->isDone() => 'resolved',
-                    Gate::forUser($actor)->allows('update', $successor) => 'ok',
+                    // The edit right is per project, so it is asked once for each.
+                    ($editable[$successor->project_id] ??= Gate::forUser($actor)->allows('update', $successor)) => 'ok',
                     default => 'cant',
                 };
                 if ($kind[$successor->id] === 'ok') {

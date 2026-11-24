@@ -99,9 +99,10 @@ class IssueService
         // Spec 7.5: a due date that moves (or shift_successors: true) may shift successors. Their projects, then their rows
         // and this one, are locked first, in id order, as every other writer takes them; read before the transaction so the
         // snapshot it opens comes after those locks. shortcut: the set is read once, so a link added meanwhile is shifted unlocked, and a bulk update (which holds its own locks first) can wait on one out of order: MySQL then aborts one of the two, so retry.
-        $reach = $this->mayShift($data, $actor, $action) ? $this->links->shiftable($issue, $actor) : [];
+        $may = $this->mayShift($data, $actor, $action);
+        $reach = $may ? $this->links->shiftable($issue, $actor) : [];
 
-        return DB::transaction(function () use ($issue, $actor, $data, $action, $reach) {
+        return DB::transaction(function () use ($issue, $actor, $data, $action, $reach, $may) {
             // The project row first (as moves and column changes do), so the status read can't race a column delete.
             $projects = [...(isset($data['status']) || isset($data['resolution']) ? [$issue->project_id] : []), ...array_values($reach)];
             if ($projects) {
@@ -109,6 +110,10 @@ class IssueService
             }
             if ($reach) {
                 Issue::withTrashed()->whereIn('id', [$issue->id, ...array_keys($reach)])->orderBy('id')->lockForUpdate()->get(['id']);
+            }
+            if ($may && array_diff_key($this->links->shiftable($issue, $actor), $reach)) {
+                // A link was added after the set was read, so some successor isn't locked: nothing is saved.
+                throw ValidationException::withMessages(['due_date' => 'Links or dates changed while shifting. Try again.'])->status(409);
             }
             // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
             // and the bump below can't interleave with another save (Review Focus 3).
@@ -203,7 +208,7 @@ class IssueService
     {
         $explicit = $this->shiftChoice($data);
 
-        return in_array($action, ['updated', 'overwrote'], true) && ($explicit ?? (array_key_exists('due_date', $data) && $this->dateShift($actor) === DateShift::Always)) === true;
+        return in_array($action, ['updated', 'overwrote'], true) && ($explicit ?? (array_key_exists('due_date', $data) && $this->dateShift($actor, $data) === DateShift::Always)) === true;
     }
 
     /** shift_successors as given (true, false), or null when absent. */
@@ -213,9 +218,10 @@ class IssueService
     }
 
     /** The saved choice of the person ($actor is the owner for an agent). */
-    private function dateShift(User $actor): DateShift
+    private function dateShift(User $actor, array $data = []): DateShift
     {
-        return DateShift::tryFrom((string) $actor->date_shift) ?? DateShift::Ask;
+        // shift_mode is set only by updateMany (bulk proposes and never shifts), never by a caller.
+        return DateShift::tryFrom((string) ($data['shift_mode'] ?? $actor->date_shift)) ?? DateShift::Ask;
     }
 
     /**
@@ -225,7 +231,7 @@ class IssueService
     private function shiftSuccessors(Issue $issue, User $actor, array $data, string $action, bool $dueMoved): void
     {
         $explicit = $this->shiftChoice($data);
-        $choice = $explicit === null ? ($dueMoved ? $this->dateShift($actor) : DateShift::Never) : ($explicit ? DateShift::Always : DateShift::Never);
+        $choice = $explicit === null ? ($dueMoved ? $this->dateShift($actor, $data) : DateShift::Never) : ($explicit ? DateShift::Always : DateShift::Never);
         if (! $issue->due_date || ! in_array($action, ['updated', 'overwrote'], true) || $choice === DateShift::Never) {
             return;
         }
@@ -271,6 +277,10 @@ class IssueService
         $issues = $items->map(function ($data, $i) use ($actor) {
             $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
             Gate::forUser($actor)->authorize('update', $issue);
+            // Shifting takes locks in an order a bulk call can't keep, so it is one issue at a time (spec 7.5).
+            if (filter_var($data['shift_successors'] ?? false, FILTER_VALIDATE_BOOL)) {
+                $this->forItem("updates.{$i}", fn () => throw ValidationException::withMessages(['shift_successors' => "Bulk updates don't shift successors. Update {$data['key']} on its own with shift_successors: true."]));
+            }
 
             return $issue;
         });
@@ -293,7 +303,7 @@ class IssueService
             $warned = [];
             $updated = $issues->map(function ($issue, $i) use ($actor, $items, &$warned) {
                 try {
-                    return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all()));
+                    return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, [...collect($items[$i])->except(['key', 'version'])->all(), 'shift_mode' => 'ask']));
                 } catch (ValidationException $e) {
                     if (array_keys($e->errors()) !== ["updates.{$i}.confirm"]) {
                         throw $e;

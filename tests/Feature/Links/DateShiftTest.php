@@ -9,6 +9,7 @@ use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\User;
 use App\Services\LinkService;
+use Illuminate\Support\Facades\DB;
 
 // Spec 7.5, 2-R5, 2-R6, 2-R9: start_date, and moving a predecessor's due date shifts the successors that would conflict.
 
@@ -257,4 +258,105 @@ test('the "because WEB-1 moved" note is hidden from someone who can\'t see WEB-1
     $person = addMember($ops, User::factory()->create(), ProjectRole::Member);
     apiAsPerson($person);
     $this->getJson('/api/v1/issues/OPS-1/activity')->assertOk()->assertJsonPath('data.0.changes.start_date.to', '2026-12-14')->assertJsonMissingPath('data.0.changes.shifted_by');
+});
+
+test('a diamond moves its last issue once, by the larger need, and a stale save of a shifted issue gets the 409', function () {
+    ($this->issue)(2)->update(['start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+    ($this->issue)(3)->update(['start_date' => '2026-12-10', 'due_date' => '2026-12-20']);
+    ($this->issue)(4)->update(['start_date' => '2026-12-13', 'due_date' => '2026-12-14']);
+    ($this->precedes)(1, 3);
+    ($this->precedes)(2, 4);
+    ($this->precedes)(3, 4);
+    ($this->pref)('always');
+
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14'])->assertOk();
+
+    // Behind WEB-2 it needs 3 days (to the 16th), behind WEB-3 it needs 11 (to the 24th).
+    expect(($this->dates)(4))->toBe(['2026-12-24', '2026-12-25'])->and(($this->issue)(4)->version)->toBe(2);
+    $this->patchJson('/api/v1/issues/WEB-4', ['version' => 1, 'title' => 'Late'])->assertStatus(409);
+});
+
+test('an issue you can\'t see in the middle of a chain is not moved, not mentioned, and the chain stops there', function () {
+    $ops = makeProject($this->admin, 'OPS');
+    makeIssue($ops, $this->admin, ['title' => 'Hidden', 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+    ($this->precedes)(1, 3);
+    $links = app(LinkService::class);
+    $links->link(($this->issue)(1), 'precedes', ($this->issue)(1, 'OPS'), $this->admin);
+    $links->link(($this->issue)(1, 'OPS'), 'precedes', ($this->issue)(4), $this->admin);
+    ($this->issue)(4)->update(['start_date' => '2026-12-13', 'due_date' => '2026-12-14']);
+    $person = addMember($this->web, User::factory()->create(), ProjectRole::Member);
+    $person->forceFill(['date_shift' => 'ask'])->save();
+    apiAsPerson($person);
+
+    $response = $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14'])->assertOk();
+    expect(collect($response->json('data.proposed_shifts'))->pluck('key')->all())->toBe(['WEB-2', 'WEB-3'])->and($response->getContent())->not->toContain('OPS-1');
+
+    $person->forceFill(['date_shift' => 'always'])->save();
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'shift_successors' => true])->assertOk();
+    // WEB-4 sits behind the hidden OPS-1 only.
+    expect(($this->dates)(4))->toBe(['2026-12-13', '2026-12-14'])->and(($this->dates)(1, 'OPS'))->toBe(['2026-12-10', '2026-12-12']);
+});
+
+test('an agent\'s shift is attributed to the agent, via api', function () {
+    ($this->pref)('always');
+    [$agent] = makeAgent($this->admin, AgentLevel::Write);
+    $this->admin->withAccessToken($agent->token()->sole());
+    app('auth')->guard('sanctum')->setUser($this->admin);
+
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14'])->assertOk();
+
+    $entry = Activity::where('issue_id', ($this->issue)(2)->id)->where('action', 'updated')->latest('id')->first();
+    expect($entry->agent_id)->toBe($agent->id)->and($entry->via)->toBe('api');
+});
+
+test('bulk updates never shift: a due date is saved and proposed, whatever the saved choice; shift_successors: true is a 422', function () {
+    ($this->pref)('always');
+
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'version' => 1, 'due_date' => '2026-12-14']]])->assertOk()
+        ->assertJsonPath('data.0.due_date', '2026-12-14')
+        ->assertJsonPath('data.0.proposed_shifts.0.key', 'WEB-2')
+        ->assertJsonPath('data.0.warning', fn ($w) => str_contains($w, 'shift_successors: true'));
+    expect(($this->dates)(2))->toBe(['2026-12-10', '2026-12-12']);
+
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [
+        ['key' => 'WEB-4', 'version' => 1, 'title' => 'Changed'],
+        ['key' => 'WEB-1', 'version' => 2, 'due_date' => '2026-12-20', 'shift_successors' => true],
+    ]])->assertUnprocessable()->assertJsonValidationErrors('updates.1.shift_successors');
+    expect(($this->issue)(4)->title)->toBe('Issue 4')->and(($this->dates)(1))->toBe([null, '2026-12-14']);
+    $this->patchJson('/api/v1/issues/bulk', ['updates' => [['key' => 'WEB-1', 'version' => 2, 'due_date' => '2026-12-20', 'shift_successors' => true]]])
+        ->assertJsonPath('errors', fn ($e) => str_contains(json_encode($e), "Bulk updates don't shift successors. Update WEB-1 on its own with shift_successors: true."));
+});
+
+test('more successors than the limit refuse the whole update, and finding them costs the same queries however many there are', function () {
+    foreach (range(6, 9) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Issue {$n}", 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+        ($this->precedes)(1, $n);
+    }
+    ($this->pref)('always');
+    config(['pm.shift_limit' => 3]);
+
+    // Five successors (WEB-2, 6 to 9) against a limit of three: nothing is saved.
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14', 'title' => 'Not saved'])->assertUnprocessable()
+        ->assertJsonPath('errors.due_date.0', 'This would shift more than 3 issues. Shift fewer at a time.');
+    expect(($this->issue)(1))->title->toBe('One')->version->toBe(1)->and(($this->dates)(6))->toBe(['2026-12-10', '2026-12-12']);
+    config(['pm.shift_limit' => 500]);
+
+    // The proposal for 4 successors and for 40 runs the same queries (the edit check is made once per project).
+    $queries = function () {
+        $this->admin->forceFill(['date_shift' => 'ask'])->save();
+        $version = ($this->issue)(1)->version;
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+        $this->patchJson('/api/v1/issues/WEB-1', ['version' => $version, 'due_date' => ($version % 2 ? '2026-12-14' : '2026-12-15')])->assertOk();
+        $count = count(DB::getQueryLog());
+        DB::disableQueryLog();
+
+        return $count;
+    };
+    $few = $queries();
+    foreach (range(10, 45) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Issue {$n}", 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+        ($this->precedes)(1, $n);
+    }
+    expect($queries())->toBe($few);
 });

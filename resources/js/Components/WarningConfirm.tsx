@@ -17,6 +17,7 @@ export default function WarningConfirm({
     cancelLabel = 'Cancel',
     onConfirm,
     onCancel,
+    onClose,
     processing = false,
     children,
 }: PropsWithChildren<{
@@ -27,12 +28,14 @@ export default function WarningConfirm({
     cancelLabel?: string;
     onConfirm: () => void;
     onCancel: () => void;
+    /** Esc or a click outside; defaults to onCancel. */
+    onClose?: () => void;
     processing?: boolean;
 }>) {
     const cancel = useRef<HTMLButtonElement>(null);
 
     return (
-        <Modal show={open} onClose={onCancel} maxWidth="md" initialFocus={cancel}>
+        <Modal show={open} onClose={onClose ?? onCancel} maxWidth="md" initialFocus={cancel}>
             <form
                 className="space-y-4 p-6"
                 onSubmit={(e) => {

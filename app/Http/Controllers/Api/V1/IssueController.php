@@ -61,6 +61,8 @@ class IssueController extends Controller
      * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
      * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
      * An agent's moves to a Done-category status wait for a person: 202 with `status: pending_approval` and `approval_requests`.
+     * Bulk never shifts successors: an item that changes a due date saves it and returns `proposed_shifts` and a `warning` (as "ask"),
+     * and an item with `shift_successors: true` is a 422; update that issue on its own to shift.
      * Items that need `confirm` (a blocked issue entering In Progress) are all named as `updates.{index}.confirm`, and nothing is saved.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse

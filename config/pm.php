@@ -19,6 +19,9 @@ return [
     // Seconds a blocks/precedes link waits for another one in the same workspace before "try again" (LinkService).
     'link_lock_timeout' => (int) env('PM_LINK_LOCK_TIMEOUT', 5),
 
+    // Most issues one due date change may reach through precedes links (LinkService); more is refused, nothing saved.
+    'shift_limit' => (int) env('PM_SHIFT_LIMIT', 500),
+
     // How long a replayable Idempotency-Key response is kept.
     'idempotency_ttl_hours' => (int) env('PM_IDEMPOTENCY_TTL_HOURS', 24),
 
