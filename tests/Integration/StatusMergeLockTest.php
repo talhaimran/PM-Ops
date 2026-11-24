@@ -110,3 +110,16 @@ test('merge and column changes take the project row before the workspace row, so
     expect(fn () => app(ColumnService::class)->addStatus($qa->setRelation('project', $this->web), $this->owner, ['status' => 'Review']))
         ->toThrow(QueryException::class, 'from `projects`');
 });
+
+test('a merge whose target was deleted meanwhile is a 404, not a merge into a missing status', function () {
+    // REPEATABLE READ: our transaction has already read (as the merge's name lookup does), then another admin's delete commits.
+    $this->locker->rollBack();
+    $gone = $this->statuses->create($this->web->workspace, $this->owner, 'Gone', StatusCategory::InProgress);
+
+    expect(fn () => DB::transaction(function () use ($gone) {
+        Status::count();
+        DB::connection('locker')->table('statuses')->where('id', $gone->id)->delete();
+        $this->statuses->merge($this->review, 'Gone', $this->owner);
+    }))->toThrow(ValidationException::class, 'Gone no longer exists.');
+    expect(Status::find($this->review->id))->not->toBeNull();
+});

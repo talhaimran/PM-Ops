@@ -204,8 +204,10 @@ class StatusService
                 ->whereIn('column_statuses.status_id', [$from->id, $into->id])->distinct()->pluck('columns.project_id');
             $keys = Project::whereKey($projectIds)->orderBy('id')->lockForUpdate()->pluck('key', 'id');
             $workspace = Workspace::whereKey($from->workspace_id)->lockForUpdate()->firstOrFail();
+            // A locking read: a plain one would see this transaction's snapshot, from before a delete that committed meanwhile.
+            $alive = Status::whereKey([$from->id, $into->id])->lockForUpdate()->pluck('id');
             foreach ([$from, $into] as $status) {
-                Status::whereKey($status->id)->exists() || throw ValidationException::withMessages(['status' => "{$status->name} no longer exists."])->status(404);
+                $alive->contains($status->id) || throw ValidationException::withMessages(['status' => "{$status->name} no longer exists."])->status(404);
             }
             // The mapping read joins no projects, so it holds only the mapping and column rows it finds.
             $rows = DB::table('column_statuses')->join('columns', 'columns.id', '=', 'column_statuses.column_id')
