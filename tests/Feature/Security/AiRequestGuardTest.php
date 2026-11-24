@@ -94,7 +94,6 @@ test('localhost is allowed self-hosted, pinned to 127.0.0.1, and refused on Clou
     AiRequestGuard::resolveUsing(fn () => throw new RuntimeException('looked up'));
 
     expect(AiRequestGuard::options('http://localhost:11434')['curl'][CURLOPT_RESOLVE])->toBe(['localhost:11434:127.0.0.1'])
-        ->and(AiRequestGuard::options('http://localhost.:11434')['curl'][CURLOPT_RESOLVE])->toBe(['localhost.:11434:127.0.0.1'])
         ->and(AiRequestGuard::options('http://[::1]:11434')['curl'][CURLOPT_RESOLVE])->toBe(['[::1]:11434:[::1]']);
 
     config(['pm.edition' => 'cloud']);
@@ -121,17 +120,14 @@ test('the port comes from the address, or the scheme default', function () {
         ->and(AiRequestGuard::options('https://api.example.com:443')['curl'][CURLOPT_RESOLVE])->toBe(AiRequestGuard::options('https://api.example.com')['curl'][CURLOPT_RESOLVE]);
 });
 
-test('a trailing dot is looked up without it and pinned with it, since curl keys its pin by the host as written', function () {
-    $asked = null;
-    AiRequestGuard::resolveUsing(function (string $host) use (&$asked) {
-        $asked = $host;
+test('a trailing dot or a name part starting with a hyphen is refused, since curl would miss or drop the pin', function (string $endpoint) {
+    // "-host:443:ip" tells curl to remove an entry, so nothing is pinned; older libcurl doesn't match a pin keyed "host.".
+    $message = "Leave out a trailing dot, and don't start any part of the host name with a hyphen.";
+    resolvesTo(['93.184.216.34']);
 
-        return ['93.184.216.34'];
-    });
-
-    expect(AiRequestGuard::options('https://API.Example.com./v1')['curl'][CURLOPT_RESOLVE])->toBe(['api.example.com.:443:93.184.216.34'])
-        ->and($asked)->toBe('api.example.com');
-});
+    expect(AiEndpoint::problem($endpoint))->toBe($message)
+        ->and(guardRefusal($endpoint))->toBe($message);
+})->with(['https://API.Example.com./v1', 'https://-evil.example.com', 'https://api.-evil.example.com', 'http://localhost.:11434']);
 
 test('a proxy from the environment is turned off, since a proxy would resolve the host itself', function () {
     resolvesTo(['93.184.216.34']);

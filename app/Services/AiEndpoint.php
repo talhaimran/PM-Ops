@@ -32,6 +32,8 @@ class AiEndpoint
         return match (true) {
             ! $host || ! ($scheme === 'https' || ($scheme === 'http' && $local)) => 'Use an https:// address, or http://localhost for a model on this machine.',
             isset($url['user']) || isset($url['pass']) || isset($url['query']) || isset($url['fragment']) => 'Leave the login, query and fragment out of the address. The key goes in the API key field.',
+            // AiRequestGuard pins "host:port:ip": a leading "-" makes curl remove the entry instead, and older libcurl doesn't match "host.".
+            str_ends_with($url['host'] ?? '', '.') || preg_match('/(^|\.)-/', $host) => "Leave out a trailing dot, and don't start any part of the host name with a hyphen.",
             $local => config('pm.edition') === 'cloud' ? 'A local model address is only allowed on a self-hosted install.' : null,
             // curl rewrites a non-ASCII or %-encoded host before connecting, so AiRequestGuard's pin (keyed by the host as written) would miss.
             ! str_starts_with($host, '[') && ! preg_match('/^[a-z0-9.-]+$/D', $host) => 'Use the host name in plain ASCII (punycode for international names, e.g. xn--…).',
