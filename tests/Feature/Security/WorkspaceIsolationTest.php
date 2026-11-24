@@ -14,6 +14,7 @@ use App\Models\Issue;
 use App\Models\Label;
 use App\Models\Project;
 use App\Models\Sprint;
+use App\Models\Status;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\AgentService;
@@ -123,6 +124,8 @@ function isolationRouteCases(): array
         'DELETE {workspace}/projects/{project}' => ['alpha/projects/{P}', $confirm],
         'GET {workspace}/projects/{project}/backlog' => ['alpha/projects/{P}/backlog', []],
         'POST {workspace}/projects/{project}/columns' => ['alpha/projects/{P}/columns', ['name' => 'x']],
+        'POST {workspace}/projects/{project}/columns/{column}/statuses' => ['alpha/projects/{P}/columns/{COL}/statuses', ['status' => '{STN}']],
+        'DELETE {workspace}/projects/{project}/columns/{column}/statuses/{status}' => ['alpha/projects/{P}/columns/{COL}/statuses/{ST}', []],
         'PATCH {workspace}/projects/{project}/columns/{column}' => ['alpha/projects/{P}/columns/{COL}', ['name' => 'x']],
         'DELETE {workspace}/projects/{project}/columns/{column}' => ['alpha/projects/{P}/columns/{COL}', []],
         'POST {workspace}/projects/{project}/invitations' => ['alpha/projects/{P}/invitations', ['email' => 'x@example.com', 'role' => 'member']],
@@ -162,6 +165,10 @@ function isolationRouteCases(): array
         'DELETE {workspace}/settings/general' => ['alpha/settings/general', ['confirm_slug' => '{P}']],
         'GET {workspace}/settings/members' => ['alpha/settings/members', []],
         // Filtering A's log by a user of B shows nothing of B.
+        'GET {workspace}/settings/statuses' => ['alpha/settings/statuses', []],
+        'PATCH {workspace}/settings/statuses/{status}' => ['alpha/settings/statuses/{ST}', ['name' => 'x']],
+        'POST {workspace}/settings/statuses/{status}/merge' => ['alpha/settings/statuses/{ST}/merge', ['into' => '{STN}']],
+        'DELETE {workspace}/settings/statuses/{status}' => ['alpha/settings/statuses/{ST}', []],
         'GET {workspace}/settings/audit-log' => ['alpha/settings/audit-log?actor={U}', []],
         'GET {workspace}/settings/audit-log/export' => ['alpha/settings/audit-log/export?actor={U}', []],
         // Takes no id: it must count only A's people and projects (B has more of both).
@@ -265,7 +272,7 @@ function isolationToolCases(): array
     ];
 }
 
-const CHILD_PLACEHOLDERS = ['{C}', '{COL}', '{COLN}', '{L}', '{LN}', '{S}', '{SN}', '{T}', '{INV}'];
+const CHILD_PLACEHOLDERS = ['{C}', '{COL}', '{COLN}', '{L}', '{LN}', '{S}', '{SN}', '{T}', '{INV}', '{ST}', '{STN}'];
 
 /** @return array<string, array<string, string>> variant name => placeholder values; paired variants must answer alike. */
 function isolationVariants($t): array
@@ -274,13 +281,13 @@ function isolationVariants($t): array
         '{P}' => 'OPS', '{I}' => 'OPS-1', '{C}' => (string) $t->bComment->id, '{COL}' => (string) $t->bColumn->id, '{COLN}' => 'B-SECRET col',
         '{L}' => (string) $t->bLabel->id, '{LN}' => 'b-secret', '{S}' => (string) $t->bSprint->id, '{SN}' => 'B-SECRET sprint',
         '{T}' => (string) $t->annB[0]->id, '{INV}' => (string) $t->bInvitation->id, '{U}' => (string) $t->bob->id, '{E}' => $t->bob->email,
-        '{AR}' => (string) $t->bApproval->id,
+        '{AR}' => (string) $t->bApproval->id, '{ST}' => (string) $t->bStatus->id, '{STN}' => $t->bStatus->name,
     ];
     $missing = [
         '{P}' => 'NOPE', '{I}' => 'NOPE-1', '{C}' => '999999', '{COL}' => '999998', '{COLN}' => 'No such col',
         '{L}' => '999997', '{LN}' => 'no-such', '{S}' => '999996', '{SN}' => 'No such sprint',
         '{T}' => '999995', '{INV}' => '999994', '{U}' => '999993', '{E}' => 'nobody@example.com',
-        '{AR}' => '999992',
+        '{AR}' => '999992', '{ST}' => '999991', '{STN}' => 'No such status',
     ];
     $inA = ['{P}' => 'WEB', '{I}' => 'WEB-1'];
 
@@ -347,6 +354,7 @@ beforeEach(function () {
     $this->bComment = app(CommentService::class)->add($opsIssue, $this->bob, 'B-SECRET comment');
     $this->bLabel = app(LabelService::class)->create($ops, ['name' => 'b-secret']);
     $this->bColumn = app(ColumnService::class)->create($ops, $this->bob, ['name' => 'B-SECRET col']);
+    $this->bStatus = Status::where('workspace_id', $this->b->id)->where('name', 'B-SECRET col')->sole();
     $this->bSprint = app(SprintService::class)->create($ops, ['name' => 'B-SECRET sprint']);
     $this->bInvitation = app(InvitationService::class)->invite($this->b, $this->bob, 'carol@example.com', WorkspaceRole::Member, $ops, ProjectRole::Member);
     $this->annB = app(AgentService::class)->create($this->ann, ['name' => 'B-SECRET token', 'level' => 'delete']);

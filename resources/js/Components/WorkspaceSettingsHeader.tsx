@@ -4,6 +4,7 @@ import { Link, usePage } from '@inertiajs/react';
 const tabs = [
     ['settings.general', 'General', true],
     ['settings.members', 'Members', true],
+    ['statuses.index', 'Statuses', true],
     ['settings.security', 'Security', true],
     ['settings.ai', 'AI', true],
     ['settings.audit-log', 'Audit log', true],

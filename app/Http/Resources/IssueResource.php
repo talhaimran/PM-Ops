@@ -18,7 +18,7 @@ class IssueResource extends JsonResource
     {
         $projectKey = $this->project->key;
         $link = fn (?Issue $i) => $i ? ['key' => "{$projectKey}-{$i->number}", 'title' => $i->title] : null;
-        $child = fn (Issue $i) => [...$link($i), 'type' => $i->type->value, 'status' => $i->status->name, 'category' => $i->status->category->value];
+        $child = fn (Issue $i) => [...$link($i), 'type' => $i->type->value, 'status' => $i->status->name, 'category' => $i->status->category->value, 'status_color' => $i->status->color];
 
         // Nested collections are resolved to plain arrays: Inertia would wrap nested resources in {data: …}.
         return $this->selected([
@@ -33,6 +33,8 @@ class IssueResource extends JsonResource
             'priority' => $this->priority->value,
             'status' => $this->status->name,
             'category' => $this->status->category->value,
+            // Null = the category's colour (spec 7.4).
+            'status_color' => $this->status->color,
             'resolution' => $this->resolution?->value,
             'resolved_at' => $this->resolved_at?->toIso8601String(),
             'assignee' => self::user($this->assignee),

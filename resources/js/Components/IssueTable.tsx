@@ -39,7 +39,7 @@ const columns: Column[] = [
         className: 'w-36',
         cell: (i) => (
             <span className="flex flex-col items-start gap-0.5">
-                <StatusLozenge status={i.status} category={i.category} />
+                <StatusLozenge status={i.status} category={i.category} color={i.status_color} />
                 {i.resolution && i.resolution !== 'done' && <span className="text-xs text-muted">{resolutionLabels[i.resolution]}</span>}
             </span>
         ),

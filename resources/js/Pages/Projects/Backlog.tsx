@@ -302,7 +302,7 @@ function Row({ card, dragging = false }: { card: Card; dragging?: boolean }) {
                 {card.title}
             </span>
             <span className="hidden max-w-32 sm:block">
-                <StatusLozenge status={card.status} category={card.category} />
+                <StatusLozenge status={card.status} category={card.category} color={card.status_color} />
             </span>
             {card.story_points !== null && <span className="shrink-0 text-sm text-muted">{card.story_points} pts</span>}
             <PriorityIcon priority={card.priority} />

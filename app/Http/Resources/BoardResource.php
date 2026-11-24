@@ -31,6 +31,7 @@ class BoardResource extends JsonResource
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,
             'category' => $issue->status->category->value,
+            'status_color' => $issue->status->color,
             'resolution' => $issue->resolution?->value,
             'resolved_at' => $issue->resolved_at?->toIso8601String(),
             'assignee' => $issue->assignee ? ['name' => $issue->assignee->name, 'email' => $issue->assignee->email] : null,

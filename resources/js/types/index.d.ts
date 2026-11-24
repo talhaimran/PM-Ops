@@ -75,6 +75,7 @@ export interface IssueLink {
     type?: string;
     status?: string;
     category?: StatusCategory;
+    status_color?: string | null;
 }
 
 export interface Comment {
@@ -108,6 +109,8 @@ export interface Issue {
     priority: string;
     status: string;
     category: StatusCategory;
+    /** The status's custom colour; null = the category's. */
+    status_color: string | null;
     /** Null while the issue isn't in a Done-category status. */
     resolution: Resolution | null;
     resolved_at: string | null;
@@ -136,6 +139,7 @@ export interface ApprovalRequest {
     /** Null only when that status was deleted since. */
     from: string | null;
     from_category: StatusCategory | null;
+    from_color: string | null;
     to: string;
     now: string;
     moved: boolean;
@@ -164,7 +168,7 @@ export interface ActivityEntry {
 
 export interface IssueOptions {
     /** The project's statuses in board order. */
-    statuses: { name: string; category: StatusCategory }[];
+    statuses: { name: string; category: StatusCategory; color: string | null }[];
     members: { name: string; email: string }[];
     labels: Label[];
     types: string[];

@@ -32,6 +32,7 @@ class ApprovalRequestResource extends JsonResource
             'title' => $issue->title,
             'from' => $from?->name,
             'from_category' => $from?->category->value,
+            'from_color' => $from?->color,
             'to' => $this->action['to_status'],
             'now' => $issue->status->name,
             'moved' => $moved,

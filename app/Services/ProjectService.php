@@ -122,7 +122,7 @@ class ProjectService
     {
         return [
             // Board order; each issue takes one of these (1-R2).
-            'statuses' => $project->statuses()->get()->map(fn ($s) => ['name' => $s->name, 'category' => $s->category->value])->all(),
+            'statuses' => $project->statuses()->get()->map(fn ($s) => ['name' => $s->name, 'category' => $s->category->value, 'color' => $s->color])->all(),
             'members' => $project->members()->orderBy('name')->get(['users.id', 'name', 'email'])
                 ->map(fn ($u) => ['name' => $u->name, 'email' => $u->email])->all(),
             'labels' => $project->labels()->get(['id', 'name', 'color'])

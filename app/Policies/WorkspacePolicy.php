@@ -46,6 +46,12 @@ class WorkspacePolicy
         return $this->admin($user, $workspace);
     }
 
+    /** Settings → Statuses (spec 7.4): web only for Owners and Admins; agents have no route here. */
+    public function manageStatuses(User $user, Workspace $workspace): Response
+    {
+        return $this->admin($user, $workspace);
+    }
+
     public function viewAuditLog(User $user, Workspace $workspace): Response
     {
         return $this->admin($user, $workspace);

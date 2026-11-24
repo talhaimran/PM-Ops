@@ -6,7 +6,9 @@ use App\Enums\StatusCategory;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
+use App\Models\Status;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -26,8 +28,7 @@ class ColumnService
         $this->ensureUnique($project, $data['name']);
 
         return DB::transaction(function () use ($project, $actor, $data) {
-            // The project row first, the same order as moves and approvals; it also keeps a status in one column.
-            Project::whereKey($project->id)->lockForUpdate()->first();
+            $this->lock($project);
             $columns = $project->columns()->lockForUpdate()->get();
             $workspace = $project->workspace()->firstOrFail();
             $status = isset($data['status'])
@@ -39,6 +40,43 @@ class ColumnService
 
             return $column->load('statuses');
         });
+    }
+
+    /**
+     * The column editor's add: an existing library status by name (`status`), or a new one (`name` and `category`).
+     * 1-R13: statuses stay in the order added; the first is the drop target.
+     *
+     * @param  array{status?: ?string, name?: ?string, category?: ?string}  $data
+     */
+    public function addStatus(Column $column, User $actor, array $data): Column
+    {
+        $project = $column->project;
+
+        return DB::transaction(function () use ($column, $project, $actor, $data) {
+            $this->lock($project);
+            $workspace = $project->workspace()->firstOrFail();
+            $status = isset($data['status'])
+                ? $this->statuses->named($workspace, $data['status'])
+                : $this->statuses->create($workspace, $actor, $data['name'], StatusCategory::from($data['category']));
+            $this->statuses->attach($column, $status);
+
+            return $column->load('statuses');
+        });
+    }
+
+    public function removeStatus(Column $column, Status $status): void
+    {
+        DB::transaction(function () use ($column, $status) {
+            $this->lock($column->project);
+            $this->statuses->detach($column, $status);
+        });
+    }
+
+    /** Workspace row, then project row: the order merges use, so a status can't land in two columns of a project or vanish under one. */
+    private function lock(Project $project): void
+    {
+        Workspace::whereKey($project->workspace_id)->lockForUpdate()->first();
+        Project::whereKey($project->id)->lockForUpdate()->first();
     }
 
     /** @param array{name?: string, position?: ?int} $data */
