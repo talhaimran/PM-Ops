@@ -28,7 +28,7 @@ export default function Modal({
     return (
         <AnimatePresence>
             {show && (
-                <Dialog static open onClose={() => closeable && onClose()} initialFocus={initialFocus} className="fixed inset-0 z-50 flex items-end overflow-y-auto md:items-center md:p-6">
+                <Dialog static open onClose={() => closeable && onClose()} initialFocus={initialFocus} className="fixed inset-0 z-dialog flex items-end overflow-y-auto md:items-center md:p-6">
                     <motion.div
                         aria-hidden="true"
                         className="fixed inset-0 scrim"

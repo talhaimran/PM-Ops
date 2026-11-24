@@ -27,6 +27,8 @@ class UndoService
     /**
      * Request data that puts $fields back to what they are on $issue now, in the shared input shape.
      * Call it before the update.
+     * shortcut: undoing a due-date change restores only this issue, not the successors it shifted; carry the shifted
+     * keys and dates in the undo data if people expect a full revert.
      *
      * @param  list<string>  $fields
      * @return array<string, mixed>

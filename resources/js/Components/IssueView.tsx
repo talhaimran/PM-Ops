@@ -1,6 +1,7 @@
 import AgentLabel from '@/Components/AgentLabel';
 import AiBox from '@/Components/AiBox';
 import Avatar from '@/Components/Avatar';
+import DateShiftDialog from '@/Components/DateShiftDialog';
 import Dropdown from '@/Components/Dropdown';
 import EmptyState from '@/Components/EmptyState';
 import InputError from '@/Components/InputError';
@@ -19,7 +20,7 @@ import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
 import { ActivityEntry, Comment, Issue, IssueLink, IssueOptions } from '@/types';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { Ban, Ellipsis } from 'lucide-react';
+import { Ban, Ellipsis, TriangleAlert } from 'lucide-react';
 import { ElementType, ReactNode, useEffect, useState } from 'react';
 
 // Minimal Markdown styling without @tailwindcss/typography.
@@ -348,6 +349,22 @@ export default function IssueView({
                                 errors.priority,
                             )}
                             {field(
+                                'Start date',
+                                <TextInput
+                                    type="date"
+                                    aria-label="Start date"
+                                    className={`${inlineField} py-1.5`}
+                                    key={`${settled}-${issue.start_date ?? ''}`}
+                                    defaultValue={issue.start_date ?? ''}
+                                    disabled={!can.contribute}
+                                    onBlur={(e) => {
+                                        const v = e.target.value || null;
+                                        if (v !== (issue.start_date ?? null)) save({ start_date: v });
+                                    }}
+                                />,
+                                errors.start_date,
+                            )}
+                            {field(
                                 'Due date',
                                 <TextInput
                                     type="date"
@@ -395,7 +412,14 @@ export default function IssueView({
                                 errors.type,
                             )}
                         </dl>
+                        {issue.schedule_warning && (
+                            <p role="status" className="mx-4 mb-3 flex items-start gap-2 rounded-ctl tint-warn px-3 py-2 text-sm">
+                                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                                {issue.schedule_warning}
+                            </p>
+                        )}
                     </section>
+                    <DateShiftDialog issue={issue} />
 
                     <p className="text-xs text-muted">
                         Created {new Date(issue.created_at).toLocaleString()}
@@ -605,7 +629,13 @@ function ActivityList({ entries }: { entries: ActivityEntry[] }) {
                                 <ul className="mt-1 space-y-0.5">
                                     {Object.entries(a.changes).map(([name, c]) => (
                                         <li key={name} className="break-words">
-                                            <span className="font-medium capitalize">{name.replace('_', ' ')}</span>: {show(c.from)} → {show(c.to)}
+                                            {name === 'shifted_by' ? (
+                                                <>Dates shifted because {show(c.to)} moved</>
+                                            ) : (
+                                                <>
+                                                    <span className="font-medium capitalize">{name.replace('_', ' ')}</span>: {show(c.from)} → {show(c.to)}
+                                                </>
+                                            )}
                                         </li>
                                     ))}
                                 </ul>

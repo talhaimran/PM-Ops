@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\DateShift;
 use App\Models\User;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
@@ -26,6 +27,8 @@ class ProfileUpdateRequest extends FormRequest
                 'max:255',
                 Rule::unique(User::class)->ignore($this->user()->id),
             ],
+            // Spec 7.5 (2-R9): what to do with successors when a due date moves.
+            'date_shift' => ['sometimes', Rule::enum(DateShift::class)],
         ];
     }
 }

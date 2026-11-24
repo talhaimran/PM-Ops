@@ -22,7 +22,7 @@ use Laravel\Passport\TransientToken as OAuthTransientToken;
 use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\PersonalAccessToken;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'date_shift'])]
 // Hidden: auth.user is shared with every Inertia page.
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable

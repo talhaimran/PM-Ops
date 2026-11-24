@@ -1,3 +1,4 @@
+import { selectClass } from '@/Components/IssueFormModal';
 import InputError from '@/Components/InputError';
 import InputLabel from '@/Components/InputLabel';
 import PrimaryButton from '@/Components/PrimaryButton';
@@ -21,6 +22,7 @@ export default function UpdateProfileInformation({
         useForm({
             name: user.name,
             email: user.email,
+            date_shift: user.date_shift ?? 'ask',
         });
 
     const submit: FormEventHandler = (e) => {
@@ -72,6 +74,23 @@ export default function UpdateProfileInformation({
                     />
 
                     <InputError className="mt-2" message={errors.email} />
+                </div>
+
+                <div>
+                    <InputLabel htmlFor="date_shift" value="When a due date moves later" />
+
+                    <select
+                        id="date_shift"
+                        className={`${selectClass} mt-1 block w-full`}
+                        value={data.date_shift}
+                        onChange={(e) => setData('date_shift', e.target.value as typeof data.date_shift)}
+                    >
+                        <option value="ask">Ask me whether to shift the issues that follow</option>
+                        <option value="always">Always shift the issues that follow</option>
+                        <option value="never">Never shift them</option>
+                    </select>
+
+                    <InputError className="mt-2" message={errors.date_shift} />
                 </div>
 
                 {mustVerifyEmail && user.email_verified_at === null && (

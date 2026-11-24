@@ -83,7 +83,7 @@ export default function Toaster() {
         <div
             role="status"
             aria-live="polite"
-            className="pointer-events-none fixed inset-x-0 bottom-[22px] z-[60] flex flex-col items-center gap-2 px-4"
+            className="pointer-events-none fixed inset-x-0 bottom-[22px] z-toast flex flex-col items-center gap-2 px-4"
             onMouseEnter={pause(true)}
             onMouseLeave={pause(false)}
             onFocus={pause(true)}

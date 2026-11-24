@@ -19,7 +19,7 @@ use Illuminate\Support\Collection;
 
 #[Fillable([
     'project_id', 'number', 'title', 'description', 'type', 'priority', 'status_id', 'resolution', 'resolved_at',
-    'assignee_id', 'reporter_id', 'story_points', 'due_date', 'epic_id', 'parent_id', 'sprint_id', 'rank',
+    'assignee_id', 'reporter_id', 'story_points', 'due_date', 'start_date', 'epic_id', 'parent_id', 'sprint_id', 'rank',
 ])]
 class Issue extends Model
 {
@@ -27,6 +27,12 @@ class Issue extends Model
 
     /** Set by IssueService::update when an agent's move to Done was held for a person (spec 8, A2); never stored. */
     public ?ApprovalRequest $heldApproval = null;
+
+    /** Set by IssueService::update when "ask" left successors unmoved (spec 7.5, 2-R6); never stored. @var ?list<array<string, mixed>> */
+    public ?array $proposedShifts = null;
+
+    /** Set by IssueService::loadFull: the sentence for IssueResource's `schedule_warning` (spec 7.5); never stored. */
+    public ?string $scheduleWarning = null;
 
     /** Set by IssueService::loadFull: the links the viewer can see, grouped by type name (spec 7.5, 2-D2); never stored. */
     public ?array $links = null;
@@ -40,6 +46,7 @@ class Issue extends Model
             'type' => IssueType::class,
             'priority' => IssuePriority::class,
             'due_date' => 'date:Y-m-d',
+            'start_date' => 'date:Y-m-d',
             'story_points' => 'integer',
             'resolution' => Resolution::class,
             'resolved_at' => 'datetime',
@@ -134,6 +141,12 @@ class Issue extends Model
     public function predecessors(): BelongsToMany
     {
         return $this->belongsToMany(Issue::class, 'issue_links', 'target_issue_id', 'source_issue_id')->wherePivot('type', LinkType::Precedes->value);
+    }
+
+    /** Issues this one precedes. */
+    public function successors(): BelongsToMany
+    {
+        return $this->belongsToMany(Issue::class, 'issue_links', 'source_issue_id', 'target_issue_id')->wherePivot('type', LinkType::Precedes->value);
     }
 
     /** Only issues in projects $viewer can open (2-D2: links to the rest are hidden, not counted or hinted). */

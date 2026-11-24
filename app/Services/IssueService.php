@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\DateShift;
 use App\Enums\IssuePriority;
 use App\Enums\IssueType;
 use App\Enums\Resolution;
@@ -47,6 +48,7 @@ class IssueService
             // The project row first (as moves and column changes do), so the status read below can't race a column delete.
             Project::whereKey($project->id)->lockForUpdate()->first();
             [$attributes, $labelIds, $status] = $this->resolveInput($project, $data, null);
+            $this->checkDates($attributes, null);
 
             // A-L6: an agent can't skip the approval by creating the issue in Done, even when Done is the default (first) status.
             $status ??= $project->statuses()->first();
@@ -94,10 +96,27 @@ class IssueService
      */
     public function update(Issue $issue, User $actor, array $data, string $action = 'updated'): Issue
     {
-        return DB::transaction(function () use ($issue, $actor, $data, $action) {
-            if (isset($data['status']) || isset($data['resolution'])) {
-                // The project row first (as moves and column changes do), so the status read can't race a column delete.
-                Project::whereKey($issue->project_id)->lockForUpdate()->first();
+        // Spec 7.5: a due date that moves (or shift_successors: true) may shift successors. Their projects, then their rows
+        // and this one, are locked first, in id order, as every other writer takes them; read before the transaction so the
+        // snapshot it opens comes after those locks. Only the issues that would move are locked. The whole thing runs under
+        // the workspace's link lock (taken first, holding no row), so no precedes link is added meanwhile; the set is read
+        // again once the rows are held, and a change in it (a date edited meanwhile) is a 409.
+        return ($may = $this->mayShift($data, $actor, $action)) ? $this->links->withLinkLock($issue, fn () => $this->save($issue, $actor, $data, $action, $may)) : $this->save($issue, $actor, $data, $action, $may);
+    }
+
+    private function save(Issue $issue, User $actor, array $data, string $action, bool $may): Issue
+    {
+        $due = fn (Issue $current) => array_key_exists('due_date', $data) ? $data['due_date'] : $current->due_date?->format('Y-m-d');
+        $reach = $may ? $this->links->shiftable($issue, $actor, $due($issue)) : [];
+
+        return DB::transaction(function () use ($issue, $actor, $data, $action, $reach, $may, $due) {
+            // The project row first (as moves and column changes do), so the status read can't race a column delete.
+            $projects = [...(isset($data['status']) || isset($data['resolution']) ? [$issue->project_id] : []), ...array_values($reach)];
+            if ($projects) {
+                Project::whereIn('id', array_unique($projects))->orderBy('id')->lockForUpdate()->get();
+            }
+            if ($reach) {
+                Issue::withTrashed()->whereIn('id', [$issue->id, ...array_keys($reach)])->orderBy('id')->lockForUpdate()->get(['id']);
             }
             // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
             // and the bump below can't interleave with another save (Review Focus 3).
@@ -110,12 +129,17 @@ class IssueService
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
                 throw EditConflict::issue($issue, (int) $data['version'], $actor);
             }
+            if ($may && array_diff_key($this->links->shiftable($issue, $actor, $due($issue)), $reach)) {
+                // Another issue would move now that the rows are held (a date was edited meanwhile): one isn't locked, so nothing is saved.
+                throw ValidationException::withMessages(['due_date' => 'Links or dates changed while shifting. Try again.'])->status(409);
+            }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
             [$fromStatus, $fromSprint] = [$issue->status, $issue->sprint];
             $wasDone = $issue->status->isDone();
             [$attributes, $labelIds, $status] = $this->resolveInput($issue->project, $data, $issue);
             [$resolution, $original] = $this->resolution($issue->project, $issue, $status, $data, $actor);
+            $this->checkDates($attributes, $issue);
             if ($action === 'updated' && $status && empty($data['confirm']) && $warnings = $this->links->warnings($issue, $status, $actor)) {
                 // The web confirm dialog shows the sentences; API and MCP callers are told how to go ahead.
                 throw ValidationException::withMessages(['confirm' => implode(' ', $warnings).(ActivityLogger::via($actor) === 'web' ? '' : ' Send confirm: true to move it anyway.')]);
@@ -144,6 +168,10 @@ class IssueService
                     : ['from' => $value, 'to' => $after[$field]])
                 ->all();
 
+            if ($changes && isset($data['shifted_by'])) {
+                // Only IssueService sets it, for a successor moved by LinkService::shift: the key of the issue that moved.
+                $changes['shifted_by'] = ['from' => null, 'to' => $data['shifted_by']];
+            }
             if ($original && $resolution) {
                 $changes['duplicate_of'] = ['from' => null, 'to' => $original->key];
                 $this->linkDuplicate($issue, $original, $actor);
@@ -173,9 +201,67 @@ class IssueService
                 }
                 $this->activity->log($issue, $actor, $reopened && $action === 'updated' ? 'reopened' : $action, $changes);
             }
+            $this->shiftSuccessors($issue, $actor, $data, $action, isset($changes['due_date']));
 
             return $issue;
         });
+    }
+
+    /**
+     * Spec 7.5, 2-R6: could this update shift successors? Only a person's or agent's own change does (not an Undo or an
+     * approval), and not when shift_successors is false or the owner's saved choice is never.
+     */
+    private function mayShift(array $data, User $actor, string $action): bool
+    {
+        $explicit = $this->shiftChoice($data);
+
+        return in_array($action, ['updated', 'overwrote'], true) && ($explicit ?? (array_key_exists('due_date', $data) && $this->dateShift($actor, $data) === DateShift::Always)) === true;
+    }
+
+    /** shift_successors as given (true, false), or null when absent. */
+    private function shiftChoice(array $data): ?bool
+    {
+        return isset($data['shift_successors']) ? filter_var($data['shift_successors'], FILTER_VALIDATE_BOOL) : null;
+    }
+
+    /** The saved choice of the person ($actor is the owner for an agent). */
+    private function dateShift(User $actor, array $data = []): DateShift
+    {
+        // shift_mode is set only by updateMany (bulk proposes and never shifts), never by a caller.
+        return DateShift::tryFrom((string) ($data['shift_mode'] ?? $actor->date_shift)) ?? DateShift::Ask;
+    }
+
+    /**
+     * After the issue itself is saved: shift its successors (always, or shift_successors: true), or with "ask" leave them
+     * and put the proposal on the issue for the response (2-R6). $dueMoved: this update changed the due date.
+     */
+    private function shiftSuccessors(Issue $issue, User $actor, array $data, string $action, bool $dueMoved): void
+    {
+        $explicit = $this->shiftChoice($data);
+        $choice = $explicit === null ? ($dueMoved ? $this->dateShift($actor, $data) : DateShift::Never) : ($explicit ? DateShift::Always : DateShift::Never);
+        if (! $issue->due_date || ! in_array($action, ['updated', 'overwrote'], true) || $choice === DateShift::Never) {
+            return;
+        }
+        if ($choice === DateShift::Always) {
+            $this->links->shift($issue, $actor);
+        } else {
+            try {
+                $shifts = $this->links->proposedShifts($issue, $actor) ?: null;
+            } catch (ValidationException) {
+                // Too many to walk: "ask" never refuses. The date is saved and the empty list tells the resource to say why.
+                $shifts = [];
+            }
+            $issue->proposedShifts = $shifts;
+        }
+    }
+
+    /** Spec 7.5: the start can't be after the due date; $attributes are what this save sets, $issue (if any) what it has now. */
+    private function checkDates(array $attributes, ?Issue $issue): void
+    {
+        $date = fn (string $field) => array_key_exists($field, $attributes) ? $attributes[$field] : $issue?->{$field}?->format('Y-m-d');
+        if (($start = $date('start_date')) && ($due = $date('due_date')) && $start > $due) {
+            throw ValidationException::withMessages(['start_date' => "The start date ({$start}) can't be after the due date ({$due})."]);
+        }
     }
 
     /**
@@ -204,6 +290,10 @@ class IssueService
         $issues = $items->map(function ($data, $i) use ($actor) {
             $issue = $this->forItem("updates.{$i}", fn () => $this->resolve($actor, $data['key']), as: 'key');
             Gate::forUser($actor)->authorize('update', $issue);
+            // Shifting takes locks in an order a bulk call can't keep, so it is one issue at a time (spec 7.5).
+            if (filter_var($data['shift_successors'] ?? false, FILTER_VALIDATE_BOOL)) {
+                $this->forItem("updates.{$i}", fn () => throw ValidationException::withMessages(['shift_successors' => "Bulk updates don't shift successors. Update {$data['key']} on its own with shift_successors: true."]));
+            }
 
             return $issue;
         });
@@ -226,7 +316,7 @@ class IssueService
             $warned = [];
             $updated = $issues->map(function ($issue, $i) use ($actor, $items, &$warned) {
                 try {
-                    return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, collect($items[$i])->except(['key', 'version'])->all()));
+                    return $this->forItem("updates.{$i}", fn () => $this->update($issue, $actor, [...collect($items[$i])->except(['key', 'version'])->all(), 'shift_mode' => 'ask']));
                 } catch (ValidationException $e) {
                     if (array_keys($e->errors()) !== ["updates.{$i}.confirm"]) {
                         throw $e;
@@ -361,7 +451,10 @@ class IssueService
         $issue->links = $this->links->visibleLinks($issue, $viewer);
         $issue->setAttribute('blocked', collect($issue->links['is blocked by'] ?? [])->contains(fn ($l) => $l['category'] !== StatusCategory::Done->value));
 
-        return $issue->loadMissing(self::DISPLAY)->load([
+        $issue->loadMissing(self::DISPLAY);
+        $issue->scheduleWarning = $this->links->scheduleWarning($issue, $viewer);
+
+        return $issue->load([
             'subtasks' => fn ($q) => $q->with('status')->orderBy('number'),
             'epicIssues' => fn ($q) => $q->with('status')->orderBy('number')->limit(100),
             'comments' => fn ($q) => $q->with(['author', 'agent.owner'])->oldest()->limit(100),
@@ -475,7 +568,7 @@ class IssueService
      */
     private function resolveInput(Project $project, array $data, ?Issue $issue): array
     {
-        $attributes = collect($data)->only(['title', 'description', 'story_points', 'due_date'])->all();
+        $attributes = collect($data)->only(['title', 'description', 'story_points', 'due_date', 'start_date'])->all();
         $labelIds = $status = null;
 
         if (isset($data['type'])) {
@@ -716,6 +809,7 @@ class IssueService
             'labels' => $issue->labels->pluck('name')->sort()->values()->implode(', ') ?: null,
             'story_points' => $issue->story_points,
             'due_date' => $issue->due_date?->format('Y-m-d'),
+            'start_date' => $issue->start_date?->format('Y-m-d'),
             'epic' => $key($issue->epic),
             'parent' => $key($issue->parent),
             'sprint' => $issue->sprint?->name,

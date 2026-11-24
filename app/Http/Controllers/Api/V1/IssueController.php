@@ -61,6 +61,8 @@ class IssueController extends Controller
      * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
      * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
      * An agent's moves to a Done-category status wait for a person: 202 with `status: pending_approval` and `approval_requests`.
+     * Bulk never shifts successors: an item that changes a due date saves it and returns `proposed_shifts` and a `warning` (as "ask"),
+     * and an item with `shift_successors: true` is a 422; update that issue on its own to shift.
      * Items that need `confirm` (a blocked issue entering In Progress) are all named as `updates.{index}.confirm`, and nothing is saved.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse
@@ -94,6 +96,12 @@ class IssueController extends Controller
      *
      * Moving into an In Progress-category status while the issue is blocked, or before an issue it follows is resolved,
      * is a 422 with `errors.confirm` saying why, and nothing is saved; resend with `confirm: true` to go ahead.
+     *
+     * Moving `due_date` later can leave successors (issues this one precedes) starting before it. `shift_successors: true`
+     * moves each by just enough, keeping its duration, down the chain (resolved issues and ones you can't edit never move);
+     * `false` leaves them; absent, the owner's saved `date_shift` decides. With "ask" the date is saved, nothing moves, and the
+     * issue carries `proposed_shifts` (`key`, `start_date`, `due_date`, `note`) and a `warning`: resend with `shift_successors: true`.
+     * `start_date` may not be after `due_date` (422).
      */
     public function update(UpdateIssueRequest $request, string $key): IssueResource|JsonResponse
     {

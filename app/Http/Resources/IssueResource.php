@@ -6,6 +6,7 @@ use App\Http\Resources\Concerns\SelectsFields;
 use App\Models\Agent;
 use App\Models\Issue;
 use App\Models\User;
+use App\Services\LinkService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -42,6 +43,7 @@ class IssueResource extends JsonResource
             'labels' => $this->labels->pluck('name')->all(),
             'story_points' => $this->story_points,
             'due_date' => $this->due_date?->format('Y-m-d'),
+            'start_date' => $this->start_date?->format('Y-m-d'),
             'epic' => $link($this->epic),
             'parent' => $link($this->parent),
             'sprint' => $this->sprint ? ['id' => $this->sprint->id, 'name' => $this->sprint->name, 'state' => $this->sprint->state->value] : null,
@@ -49,6 +51,11 @@ class IssueResource extends JsonResource
             'blocked' => $this->when(array_key_exists('blocked', $this->resource->getAttributes()), fn () => (bool) $this->resource->getAttributes()['blocked']),
             // Grouped by type name as read from this issue ("is blocked by"); only on the single issue (IssueService::loadFull).
             'links' => $this->when($this->resource->links !== null, fn () => (object) $this->resource->links),
+            // Spec 7.5: a successor starting before its predecessor's due date, on both issues; only on the single issue (IssueService::loadFull).
+            'schedule_warning' => $this->when($this->resource->links !== null, fn () => $this->resource->scheduleWarning),
+            // 2-R6: "ask" saved the due date and moved nothing; these are the dates that would apply (send shift_successors: true).
+            'proposed_shifts' => $this->when($this->resource->proposedShifts !== null, fn () => $this->resource->proposedShifts),
+            'warning' => $this->when($this->resource->proposedShifts !== null, fn () => LinkService::shiftWarning($this->resource, $this->resource->proposedShifts)),
             'subtasks' => $this->whenLoaded('subtasks', fn () => $this->subtasks->map($child)->all()),
             'epic_issues' => $this->whenLoaded('epicIssues', fn () => $this->epicIssues->map($child)->all()),
             'comments' => $this->whenLoaded('comments', fn () => CommentResource::collection($this->comments)->resolve()),
