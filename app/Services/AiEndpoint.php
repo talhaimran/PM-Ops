@@ -4,12 +4,12 @@ namespace App\Services;
 
 /**
  * Spec 8 (A5): what an AI endpoint address may be. Used by the form on save and by AiSettingsService to decide whether a
- * connection (the server's or a workspace's) is usable. Static checks only; the request-time SSRF guard (DNS resolve,
- * pinned IP, redirects) is required before any provider call, see CLAUDE.md.
+ * connection (the server's or a workspace's) is usable. Static checks only; every provider call also goes through
+ * AiRequestGuard (DNS resolve, pinned IP, no redirects).
  */
 class AiEndpoint
 {
-    private const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+    public const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
     /**
      * IPv4 ranges never a provider: IANA special-purpose blocks (this network, private, shared/CGNAT, loopback, link-local
@@ -32,7 +32,11 @@ class AiEndpoint
         return match (true) {
             ! $host || ! ($scheme === 'https' || ($scheme === 'http' && $local)) => 'Use an https:// address, or http://localhost for a model on this machine.',
             isset($url['user']) || isset($url['pass']) || isset($url['query']) || isset($url['fragment']) => 'Leave the login, query and fragment out of the address. The key goes in the API key field.',
+            // AiRequestGuard pins "host:port:ip": a leading "-" makes curl remove the entry instead, and older libcurl doesn't match "host.".
+            str_ends_with($url['host'] ?? '', '.') || preg_match('/(^|\.)-/', $host) => "Leave out a trailing dot, and don't start any part of the host name with a hyphen.",
             $local => config('pm.edition') === 'cloud' ? 'A local model address is only allowed on a self-hosted install.' : null,
+            // curl rewrites a non-ASCII or %-encoded host before connecting, so AiRequestGuard's pin (keyed by the host as written) would miss.
+            ! str_starts_with($host, '[') && ! preg_match('/^[a-z0-9.-]+$/D', $host) => 'Use the host name in plain ASCII (punycode for international names, e.g. xn--…).',
             ! self::isPublicHost($host) => 'Use a public host name or IP address. Private, loopback, link-local, reserved, shared (100.64.0.0/10), multicast and cloud-metadata addresses are not allowed.',
             default => null,
         };
@@ -44,16 +48,24 @@ class AiEndpoint
             return false;
         }
         if (str_starts_with($host, '[')) {
-            $ip = filter_var(trim($host, '[]'), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6);
-
-            return $ip !== false && self::isPublicIpv6(inet_pton($ip));
+            return filter_var(trim($host, '[]'), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false && self::isPublicIp(trim($host, '[]'));
         }
         if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
-            return self::isPublicIpv4(ip2long($host));
+            return self::isPublicIp($host);
         }
 
         // A last label of digits or 0x… is read as an IP by the resolver (2130706433, 127.1, 0x7f.0.0.1), not as a name.
         return ! preg_match('/(^|\.)(0x[0-9a-f]*|\d+)$/', $host);
+    }
+
+    /** An IPv4 or IPv6 address (no brackets) outside every blocked range; false for anything that isn't an IP. */
+    public static function isPublicIp(string $ip): bool
+    {
+        return match (true) {
+            filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false => self::isPublicIpv4(ip2long($ip)),
+            filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false => self::isPublicIpv6(inet_pton($ip)),
+            default => false,
+        };
     }
 
     private static function isPublicIpv4(int $ip): bool
