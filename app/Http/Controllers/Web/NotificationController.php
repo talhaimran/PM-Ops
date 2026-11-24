@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\InboxItemResource;
+use App\Models\Issue;
 use App\Services\CurrentWorkspace;
 use App\Services\NotificationService;
 use Illuminate\Http\RedirectResponse;
@@ -25,9 +26,15 @@ class NotificationController extends Controller
 
     public function read(Request $request, int $notification): RedirectResponse
     {
-        $this->notifications->markRead($request->user(), $this->notifications->resolve($request->user(), $notification)->id);
+        $item = $this->notifications->resolve($request->user(), $notification);
+        $this->notifications->markRead($request->user(), $item->id);
+        if (! $request->boolean('open')) {
+            return back();
+        }
+        // Opening: the issue's page, or the inbox again when the reader can no longer see it (nothing is hinted).
+        $issue = $item->issue_id ? Issue::visibleTo($request->user())->with('project')->find($item->issue_id) : null;
 
-        return back();
+        return $issue ? redirect()->route('issues.show', $issue->key) : redirect()->route('notifications.index');
     }
 
     public function readAll(Request $request): RedirectResponse

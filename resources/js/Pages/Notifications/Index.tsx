@@ -22,14 +22,12 @@ interface Item {
 
 export default function Index({ items }: { items: Paginated<Item> }) {
     const unread = usePage().props.unread_notifications;
-    const markRead = (id: number, then?: () => void) =>
-        router.post(route('notifications.read', id), {}, { preserveScroll: true, preserveState: true, onFinish: then });
-    // A plain click marks the item read, then opens the issue; Cmd/Ctrl/Shift-click keep the browser's own behaviour.
+    const markRead = (id: number) => router.post(route('notifications.read', id), {}, { preserveScroll: true, preserveState: true });
+    // A plain click is one request: the server marks the item read and redirects to the issue. Cmd/Ctrl/Shift-click keep the browser's own behaviour.
     const open = (item: Item) => (e: MouseEvent) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         e.preventDefault();
-        if (item.read) return router.visit(issueUrl(item.issue!));
-        markRead(item.id, () => router.visit(issueUrl(item.issue!)));
+        router.post(route('notifications.read', item.id), { open: true });
     };
 
     return (

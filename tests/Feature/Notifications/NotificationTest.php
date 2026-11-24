@@ -201,3 +201,18 @@ test('get_updates returns watched changes and approval outcomes in one stream, o
     // Reading doesn't mark anything read: the two changes and the agent's own request.
     expect($this->notes->unreadCount($this->ann, $this->project->workspace))->toBe(3);
 });
+
+test('opening an item marks it read and goes to its issue, or to the inbox when it is no longer visible', function () {
+    app(CommentService::class)->add($this->issue, $this->bob, 'One');
+    $item = inboxOf($this->ann)->sole();
+
+    $this->actingAs($this->ann)->post(w("/notifications/{$item->id}/read"), ['open' => true])->assertRedirect(w('/issues/WEB-1'));
+    expect($item->refresh()->read_at)->not->toBeNull();
+
+    $this->project->members()->detach($this->ann->id);
+    $this->ann->workspaces()->updateExistingPivot($this->project->workspace_id, ['role' => 'member']);
+    $item->update(['read_at' => null]);
+    $this->actingAs($this->ann)->post(w("/notifications/{$item->id}/read"), ['open' => true])->assertRedirect(w('/notifications'));
+
+    $this->actingAs($this->bob)->postJson(w("/notifications/{$item->id}/read"), ['open' => true])->assertNotFound();
+});
