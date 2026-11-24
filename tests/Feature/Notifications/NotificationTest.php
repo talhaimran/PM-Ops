@@ -105,9 +105,11 @@ test('a first-time request notifies only once its transaction commits, and a rol
     try {
         DB::transaction(function () use ($ask) {
             $ask();
-            throw new RuntimeException('boom');
+            throw new LogicException('boom');
         });
-    } catch (RuntimeException) {
+    } catch (LogicException $e) {
+        // Only our own rollback: a failed expectation inside $ask (a PHPUnit exception) must fail the test.
+        expect($e->getMessage())->toBe('boom');
     }
     expect(ApprovalRequest::count())->toBe(0)->and(inboxOf($this->bob)->where('event', 'approval_request'))->toHaveCount(0);
 
@@ -140,6 +142,7 @@ test('since honours its own UTC offset', function () {
     $this->travel(2)->seconds();
     $at = fn ($minutes) => urlencode(now()->addMinutes($minutes)->setTimezone('+05:00')->format('Y-m-d\TH:i:sP'));
 
+    // -1 minute is the discriminating case (read as local time it would be 5 hours ahead); +1 minute is empty either way.
     expect(asToken($token)->getJson('/api/v1/me/updates?since='.$at(-1))->json('data'))->toHaveCount(1)
         ->and(asToken($token)->getJson('/api/v1/me/updates?since='.$at(1))->json('data'))->toBe([]);
 });
