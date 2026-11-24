@@ -66,8 +66,11 @@ class ProfileController extends Controller
 
         $request->user()->save();
 
-        // back(): the dashboard remembers its grouping with this same route.
-        return Redirect::back(fallback: route('profile.edit'));
+        // Back to the page it came from (the dashboard saves its grouping here, filters kept), but only on this site:
+        // previous() is the Referer, which may be external.
+        $back = url()->previous();
+
+        return Redirect::to(str_starts_with($back, url('/').'/') ? $back : route('profile.edit'));
     }
 
     /**
