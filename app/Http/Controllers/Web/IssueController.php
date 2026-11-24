@@ -66,11 +66,6 @@ class IssueController extends Controller
         // overwrite (web only, spec 7.11): the conflict dialog's "Save mine over theirs", sent with the current version.
         $flags = $request->validate(['undo_of' => ['nullable', 'integer', 'min:1'], 'overwrite' => ['sometimes', 'boolean'], 'remember_date_shift' => ['sometimes', 'boolean']]);
 
-        if (($flags['remember_date_shift'] ?? false) && isset($data['shift_successors'])) {
-            // The shift dialog's "Remember my choice" (2-R9).
-            $request->user()->update(['date_shift' => ($data['shift_successors'] ? DateShift::Always : DateShift::Never)->value]);
-        }
-
         if ($flags['undo_of'] ?? null) {
             // The undo sends the version right after the change; if the issue changed since, IssueService refuses it.
             $this->issues->update($issue, $request->user(), $data, 'undid');
@@ -81,6 +76,10 @@ class IssueController extends Controller
         $before = $this->undo->forUpdate($issue, array_keys($data), $request->user());
         $marker = $this->undo->token($issue);
         $issue = $this->issues->update($issue, $request->user(), $data, ($flags['overwrite'] ?? false) ? 'overwrote' : 'updated');
+        if (($flags['remember_date_shift'] ?? false) && isset($data['shift_successors'])) {
+            // The shift dialog's "Remember my choice" (2-R9), saved once the update went through.
+            $request->user()->update(['date_shift' => ($data['shift_successors'] ? DateShift::Always : DateShift::Never)->value]);
+        }
         $token = $this->undo->token($issue);
         // 2-R6: "ask" moved nothing; the dialog offers Shift dates or Keep dates.
         $shifts = $issue->proposedShifts ? ['dateShift' => ['key' => $issue->key, 'shifts' => $issue->proposedShifts]] : [];

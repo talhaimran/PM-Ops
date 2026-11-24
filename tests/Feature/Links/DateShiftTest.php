@@ -360,3 +360,32 @@ test('more successors than the limit refuse the whole update, and finding them c
     }
     expect($queries())->toBe($few);
 });
+
+test('"ask" never refuses: past the limit the date is saved, nothing is proposed and the warning says why; always still refuses', function () {
+    foreach (range(6, 8) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Issue {$n}", 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+        ($this->precedes)(1, $n);
+    }
+    config(['pm.shift_limit' => 3]);
+
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14'])->assertOk()
+        ->assertJsonPath('data.due_date', '2026-12-14')
+        ->assertJsonPath('data.proposed_shifts', [])
+        ->assertJsonPath('data.warning', 'More than 3 issues follow WEB-1, so no shifts are proposed. Review their dates.');
+    expect(($this->dates)(2))->toBe(['2026-12-10', '2026-12-12']);
+
+    ($this->pref)('always');
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'due_date' => '2026-12-20'])->assertUnprocessable();
+    expect(($this->dates)(1))->toBe([null, '2026-12-14']);
+});
+
+test('web: a refused update leaves the remembered choice unchanged', function () {
+    $this->actingAs($this->admin);
+
+    $this->patch(w('/issues/WEB-1'), ['version' => 99, 'shift_successors' => true, 'remember_date_shift' => true]);
+    expect($this->admin->fresh()->date_shift)->toBe('ask');
+
+    config(['pm.shift_limit' => 0]);
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'shift_successors' => true, 'remember_date_shift' => true])->assertSessionHasErrors('due_date');
+    expect($this->admin->fresh()->date_shift)->toBe('ask');
+});

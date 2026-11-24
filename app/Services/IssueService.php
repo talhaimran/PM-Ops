@@ -98,7 +98,7 @@ class IssueService
     {
         // Spec 7.5: a due date that moves (or shift_successors: true) may shift successors. Their projects, then their rows
         // and this one, are locked first, in id order, as every other writer takes them; read before the transaction so the
-        // snapshot it opens comes after those locks. shortcut: the set is read once, so a link added meanwhile is shifted unlocked, and a bulk update (which holds its own locks first) can wait on one out of order: MySQL then aborts one of the two, so retry.
+        // snapshot it opens comes after those locks; the set is read again once they are held (a new link is a 409).
         $may = $this->mayShift($data, $actor, $action);
         $reach = $may ? $this->links->shiftable($issue, $actor) : [];
 
@@ -237,7 +237,13 @@ class IssueService
         }
         if ($choice === DateShift::Always) {
             $this->links->shift($issue, $actor);
-        } elseif ($shifts = $this->links->proposedShifts($issue, $actor)) {
+        } else {
+            try {
+                $shifts = $this->links->proposedShifts($issue, $actor) ?: null;
+            } catch (ValidationException) {
+                // Too many to walk: "ask" never refuses. The date is saved and the empty list tells the resource to say why.
+                $shifts = [];
+            }
             $issue->proposedShifts = $shifts;
         }
     }

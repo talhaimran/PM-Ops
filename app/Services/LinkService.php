@@ -255,6 +255,9 @@ class LinkService
     /** The sentence that goes with proposedShifts(): nothing moved, and how to move it. @param list<array{key: string, start_date: ?string, due_date: ?string, note: ?string}> $shifts */
     public static function shiftWarning(Issue $moved, array $shifts): string
     {
+        if (! $shifts) {
+            return 'More than '.config('pm.shift_limit')." issues follow {$moved->key}, so no shifts are proposed. Review their dates.";
+        }
         $list = collect($shifts)->map(fn ($s) => $s['note'] ? "{$s['key']} ({$s['note']})" : "{$s['key']} to ".match (true) {
             $s['start_date'] && $s['due_date'] => "{$s['start_date']} – {$s['due_date']}",
             (bool) $s['due_date'] => "due {$s['due_date']}",
@@ -339,6 +342,7 @@ class LinkService
                 }
                 $seen[$successor->id] = true;
                 $nodes[$successor->id] = $successor;
+                // shortcut: counts every successor reached, not only the ones that would move, so a big fan-out is refused even when none conflict; count only the conflicting ones if one needs shifting.
                 // A hard cap on everything reached, so one request can't lock or walk an unbounded chain (nothing is saved).
                 if (count($nodes) > config('pm.shift_limit')) {
                     throw ValidationException::withMessages(['due_date' => 'This would shift more than '.config('pm.shift_limit').' issues. Shift fewer at a time.']);
