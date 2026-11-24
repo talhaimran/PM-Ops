@@ -113,12 +113,16 @@ class LinkService
     public function unlink(Issue $a, string $type, Issue $b, User $actor): IssueLink
     {
         [$type, $source, $target] = $this->stored($a, $type, $b);
-        $link = $this->find($source, $type, $target)
-            ?? throw ValidationException::withMessages(['type' => "No link \"{$source->key} {$type->value} {$target->key}\" to remove."]);
+        $remove = function () use ($source, $type, $target, $actor) {
+            $link = $this->find($source, $type, $target)
+                ?? throw ValidationException::withMessages(['type' => "No link \"{$source->key} {$type->value} {$target->key}\" to remove."]);
+            DB::transaction(fn () => $this->remove($link, $actor));
 
-        DB::transaction(fn () => $this->remove($link, $actor));
+            return $link;
+        };
 
-        return $link;
+        // Blocks/precedes edges are removed under the same lock as they're added and as dates shift along them.
+        return $type->forbidsLoops() ? $this->withLinkLock($source, $remove) : $remove();
     }
 
     /**
