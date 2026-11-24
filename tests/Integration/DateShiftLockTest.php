@@ -40,3 +40,32 @@ test('a precedes link committed between the read and the locks refuses the updat
 
     expect($issue(1)->due_date->format('Y-m-d'))->toBe('2026-12-09')->and($issue(2)->start_date->format('Y-m-d'))->toBe('2026-12-10')->and($issue(3)->version)->toBe(1);
 });
+
+test('a shifting update waits for the workspace link lock and is refused when it times out; a link made meanwhile is shifted afterwards', function () {
+    $owner = User::factory()->create(['date_shift' => 'always']);
+    $workspace = makeWorkspace($owner, 'acme');
+    $web = makeProject($owner, 'WEB');
+    makeIssue($web, $owner, ['title' => 'One', 'due_date' => '2026-12-09']);
+    makeIssue($web, $owner, ['title' => 'Two', 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+    makeIssue($web, $owner, ['title' => 'Three', 'start_date' => '2026-12-10', 'due_date' => '2026-12-12']);
+    $issue = fn (int $n) => Issue::where('number', $n)->with('project')->sole();
+    $links = app(LinkService::class);
+    $links->link($issue(1), 'precedes', $issue(2), $owner);
+    config(['database.connections.locker' => config('database.connections.'.config('database.default')), 'pm.link_lock_timeout' => 1]);
+    $this->locker = DB::connection('locker');
+    $name = "pm:links:{$workspace->id}";
+
+    // Another request is adding a precedes link (it holds the lock).
+    $this->locker->select('SELECT GET_LOCK(?, 0)', [$name]);
+    expect(fn () => app(IssueService::class)->update($issue(1), $owner, ['due_date' => '2026-12-14']))
+        ->toThrow(ValidationException::class, 'Links are being changed in this workspace; try again.');
+    expect($issue(1)->due_date->format('Y-m-d'))->toBe('2026-12-09');
+    // The other way round: while a shift holds the lock, a link waits (and times out the same way).
+    expect(fn () => $links->link($issue(1), 'precedes', $issue(3), $owner))->toThrow(ValidationException::class, 'Links are being changed in this workspace; try again.');
+    $this->locker->select('SELECT RELEASE_LOCK(?)', [$name]);
+
+    // The link goes in, and the next shift sees it.
+    $links->link($issue(1), 'precedes', $issue(3), $owner);
+    app(IssueService::class)->update($issue(1), $owner, ['due_date' => '2026-12-14']);
+    expect($issue(2)->start_date->format('Y-m-d'))->toBe('2026-12-14')->and($issue(3)->start_date->format('Y-m-d'))->toBe('2026-12-14');
+});

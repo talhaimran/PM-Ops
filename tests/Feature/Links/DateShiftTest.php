@@ -386,6 +386,23 @@ test('web: a refused update leaves the remembered choice unchanged', function ()
     expect($this->admin->fresh()->date_shift)->toBe('ask');
 
     config(['pm.shift_limit' => 0]);
-    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'shift_successors' => true, 'remember_date_shift' => true])->assertSessionHasErrors('due_date');
+    $this->patch(w('/issues/WEB-1'), ['version' => 1, 'due_date' => '2026-12-14', 'shift_successors' => true, 'remember_date_shift' => true])->assertSessionHasErrors('due_date');
     expect($this->admin->fresh()->date_shift)->toBe('ask');
+});
+
+test('the limit counts only the issues that would move: a big fan-out that doesn\'t conflict saves, and moves nothing', function () {
+    foreach (range(6, 17) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Issue {$n}", 'start_date' => '2026-12-20', 'due_date' => '2026-12-22']);
+        ($this->precedes)(1, $n);
+    }
+    ($this->pref)('always');
+    config(['pm.shift_limit' => 3]);
+
+    // WEB-2 conflicts (one mover, under the limit); the twelve others start after the 14th.
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'due_date' => '2026-12-14'])->assertOk();
+    expect(($this->dates)(2))->toBe(['2026-12-14', '2026-12-16'])->and(($this->dates)(6))->toBe(['2026-12-20', '2026-12-22']);
+
+    // Nothing conflicts at all: still saved, with no 422.
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 2, 'due_date' => '2026-12-15', 'shift_successors' => true])->assertOk();
+    expect(($this->dates)(1))->toBe([null, '2026-12-15']);
 });

@@ -98,11 +98,18 @@ class IssueService
     {
         // Spec 7.5: a due date that moves (or shift_successors: true) may shift successors. Their projects, then their rows
         // and this one, are locked first, in id order, as every other writer takes them; read before the transaction so the
-        // snapshot it opens comes after those locks; the set is read again once they are held (a new link is a 409).
-        $may = $this->mayShift($data, $actor, $action);
-        $reach = $may ? $this->links->shiftable($issue, $actor) : [];
+        // snapshot it opens comes after those locks. Only the issues that would move are locked. The whole thing runs under
+        // the workspace's link lock (taken first, holding no row), so no precedes link is added meanwhile; the set is read
+        // again once the rows are held, and a change in it (a date edited meanwhile) is a 409.
+        return ($may = $this->mayShift($data, $actor, $action)) ? $this->links->withLinkLock($issue, fn () => $this->save($issue, $actor, $data, $action, $may)) : $this->save($issue, $actor, $data, $action, $may);
+    }
 
-        return DB::transaction(function () use ($issue, $actor, $data, $action, $reach, $may) {
+    private function save(Issue $issue, User $actor, array $data, string $action, bool $may): Issue
+    {
+        $due = fn (Issue $current) => array_key_exists('due_date', $data) ? $data['due_date'] : $current->due_date?->format('Y-m-d');
+        $reach = $may ? $this->links->shiftable($issue, $actor, $due($issue)) : [];
+
+        return DB::transaction(function () use ($issue, $actor, $data, $action, $reach, $may, $due) {
             // The project row first (as moves and column changes do), so the status read can't race a column delete.
             $projects = [...(isset($data['status']) || isset($data['resolution']) ? [$issue->project_id] : []), ...array_values($reach)];
             if ($projects) {
@@ -110,10 +117,6 @@ class IssueService
             }
             if ($reach) {
                 Issue::withTrashed()->whereIn('id', [$issue->id, ...array_keys($reach)])->orderBy('id')->lockForUpdate()->get(['id']);
-            }
-            if ($may && array_diff_key($this->links->shiftable($issue, $actor), $reach)) {
-                // A link was added after the set was read, so some successor isn't locked: nothing is saved.
-                throw ValidationException::withMessages(['due_date' => 'Links or dates changed while shifting. Try again.'])->status(409);
             }
             // Then the issue row, and the issue as it is now: a copy loaded earlier may be stale, and the version check
             // and the bump below can't interleave with another save (Review Focus 3).
@@ -125,6 +128,10 @@ class IssueService
             }
             if (isset($data['version']) && (int) $data['version'] !== $issue->version) {
                 throw EditConflict::issue($issue, (int) $data['version'], $actor);
+            }
+            if ($may && array_diff_key($this->links->shiftable($issue, $actor, $due($issue)), $reach)) {
+                // Another issue would move now that the rows are held (a date was edited meanwhile): one isn't locked, so nothing is saved.
+                throw ValidationException::withMessages(['due_date' => 'Links or dates changed while shifting. Try again.'])->status(409);
             }
             $issue->loadMissing(self::DISPLAY);
             $before = $this->snapshot($issue);
