@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -65,9 +66,22 @@ test('2-D1: a Duplicate\'s recorded original becomes a duplicates link; missing 
     expect($links())->toBe($expected)
         ->and($output)->toContain('Duplicate links: 3 created, 3 skipped (original not recorded, purged, missing or in another workspace).');
 
-    // Re-runnable: up() starts by dropping what an earlier run made.
+    // Re-runnable without losing anything: links made since survive, and the backfill adds only what's missing.
+    $made = ['created_by' => $user, 'via' => 'web', 'created_at' => '2026-11-20 10:00:00'];
+    DB::table('issue_links')->insert([
+        ['source_issue_id' => $original, 'target_issue_id' => $dup, 'type' => 'blocks', ...$made],
+        ['source_issue_id' => $original, 'target_issue_id' => $purged, 'type' => 'relates to', ...$made],
+    ]);
     ob_start();
     (require $migration)->up();
-    ob_end_clean();
-    expect($links())->toBe($expected);
+    $rerun = ob_get_clean();
+    expect($links())->toBe([
+        ...$expected,
+        [$original, $dup, 'blocks', $user, null, 'web', '2026-11-20 10:00:00'],
+        [$original, $purged, 'relates to', $user, null, 'web', '2026-11-20 10:00:00'],
+    ])->and($rerun)->toContain('Duplicate links: 0 created, 3 skipped');
+
+    // MySQL holds the one-original rule: a second duplicates link from the same issue fails on its index.
+    expect(fn () => DB::table('issue_links')->insert(['source_issue_id' => $dup, 'target_issue_id' => $purged, 'type' => 'duplicates', ...$made]))
+        ->toThrow(UniqueConstraintViolationException::class, 'duplicate_source_id');
 });

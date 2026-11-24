@@ -19,9 +19,11 @@ use Throwable;
  * Spec 7.5: issue links, shared by web, REST and MCP. Callers resolve both issues with IssueService::resolve (so an
  * issue the actor can't see is the usual 404) and authorize (IssuePolicy update / unlink) first.
  *
- * Locks (2-R4): link writes run in a short transaction that takes no row locks of its own. The insert share-locks
- * both issue rows through the foreign keys, so it never runs while this request holds another issue row
- * (IssueService defers the Duplicate link until after its commit).
+ * Locks (2-R4, owner review): link writes run in a short transaction that holds no issue row locks of its own. The
+ * insert share-locks both issue rows through the foreign keys, so it never runs while this request holds another issue
+ * row (IssueService defers the Duplicate link until after its commit). blocks and precedes links are added one at a
+ * time per workspace under a MySQL named lock, taken before the transaction, so the loop check and the insert can't
+ * interleave with another request's. One original per Duplicate is held by a unique index (duplicate_source_id).
  */
 class LinkService
 {
@@ -43,17 +45,36 @@ class LinkService
         if ($this->find($source, $type, $target)) {
             throw $this->exists($source, $type, $target);
         }
-        if ($type->forbidsLoops() && $path = $this->path($target, $source, $type, $actor)) {
-            throw ValidationException::withMessages(['to' => 'That would make a loop: '.implode(' → ', [...$path, $target->key]).". \"{$type->value}\" links can't loop."]);
+        if (! $type->forbidsLoops()) {
+            return $this->insert($source, $type, $target, $actor);
         }
 
+        // Strict loop prevention: one blocks/precedes link at a time per workspace, checked and inserted under the lock.
+        $lock = "pm:links:{$source->project->workspace_id}";
+        if ((int) DB::scalar('SELECT GET_LOCK(?, ?)', [$lock, config('pm.link_lock_timeout')]) !== 1) {
+            throw ValidationException::withMessages(['type' => 'Links are being changed in this workspace; try again.'])->status(409);
+        }
+        try {
+            return $this->insert($source, $type, $target, $actor);
+        } finally {
+            DB::select('SELECT RELEASE_LOCK(?)', [$lock]);
+        }
+    }
+
+    /** The loop check, the replaced original (duplicates) and the insert, in one transaction. */
+    private function insert(Issue $source, LinkType $type, Issue $target, User $actor, bool $retry = true): IssueLink
+    {
         try {
             return DB::transaction(function () use ($source, $type, $target, $actor) {
+                if ($type->forbidsLoops() && $path = $this->path($target, $source, $type, $actor)) {
+                    throw ValidationException::withMessages(['to' => 'That would make a loop: '.implode(' → ', [...$path, $target->key]).". \"{$type->value}\" links can't loop."]);
+                }
                 if ($type === LinkType::Duplicates) {
-                    // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs.
+                    // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs. A locking
+                    // read, so a retry sees what a concurrent replacement committed.
                     // shortcut: web Undo of a hand-made link removes the new one but doesn't bring back the one it replaced;
                     // carry the replaced key in the undo data if people rely on it.
-                    IssueLink::where('source_issue_id', $source->id)->where('type', $type)
+                    IssueLink::where('source_issue_id', $source->id)->where('type', $type)->lockForUpdate()
                         ->with(['source.project', 'target' => fn ($q) => $q->withTrashed()->with('project')])->get()
                         ->each(fn (IssueLink $old) => $this->remove($old, $actor));
                 }
@@ -66,7 +87,11 @@ class LinkService
 
                 return $link->setRelation('source', $source)->setRelation('target', $target);
             });
-        } catch (UniqueConstraintViolationException) {
+        } catch (UniqueConstraintViolationException $e) {
+            if ($retry && $type === LinkType::Duplicates && str_contains($e->getMessage(), 'duplicate_source_id')) {
+                // Another request set this issue's original at the same instant: replace it again, so the last writer wins.
+                return $this->insert($source, $type, $target, $actor, retry: false);
+            }
             // The same link, sent twice at the same instant.
             throw $this->exists($source, $type, $target);
         }
@@ -210,11 +235,11 @@ class LinkService
 
     /**
      * Keys on a $type path from $from to $to, or null: a breadth-first walk with a visited set, over issues $viewer can
-     * see, deleted ones included (restoring one must not complete a loop).
-     * shortcut: no lock (2-R4), so two links closing a loop at the same instant can both commit, and a loop through an
-     * issue the linker can't see isn't found (refusing it would hint at the hidden link); such a loop then shows to
-     * people who can see the whole chain. Every walk keeps a visited set, so a loop never hangs anything. Lock the link
-     * graph per workspace if loops start showing up.
+     * see, deleted ones included (restoring one must not complete a loop). Runs under the workspace's link lock, with
+     * locking reads, so it sees every link committed before it, whatever snapshot an outer transaction holds.
+     * shortcut: a loop through an issue the linker can't see isn't found (refusing it would hint at the hidden link);
+     * such a loop then shows to people who can see the whole chain. Every walk keeps a visited set, so a loop never
+     * hangs anything. Walk the whole workspace graph with a generic refusal if hidden loops start showing up.
      *
      * @return list<string>|null
      */
@@ -225,7 +250,7 @@ class LinkService
         while ($frontier && ! array_key_exists($to->id, $parent)) {
             $next = [];
             $edges = IssueLink::where('type', $type)->whereIn('source_issue_id', $frontier)
-                ->whereHas('target', fn ($q) => $q->withTrashed()->visibleTo($viewer))->orderBy('id')->get(['source_issue_id', 'target_issue_id']);
+                ->whereHas('target', fn ($q) => $q->withTrashed()->visibleTo($viewer))->orderBy('id')->sharedLock()->get(['source_issue_id', 'target_issue_id']);
             foreach ($edges as $edge) {
                 if (! array_key_exists($edge->target_issue_id, $parent)) {
                     $parent[$edge->target_issue_id] = $edge->source_issue_id;
