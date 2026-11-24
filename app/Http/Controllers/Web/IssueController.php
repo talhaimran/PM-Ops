@@ -195,7 +195,7 @@ class IssueController extends Controller
     public function unwatch(WatcherRequest $request, string $key): RedirectResponse
     {
         $issue = $this->issues->resolve($request->user(), $key);
-        $user = $this->watchers->target($issue, $request->validated('user'), $request->user());
+        $user = $this->watchers->target($issue, $request->validated('user'), $request->user(), 'unwatch');
         Gate::authorize('unwatch', [$issue, $user]);
         $this->watchers->unwatch($issue, $user, $request->user());
 

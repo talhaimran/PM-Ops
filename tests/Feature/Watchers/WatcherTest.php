@@ -183,3 +183,38 @@ test('a watcher who left the project disappears from the list and count; a non-m
         ->assertDontSee('cat@example.com');
     expect(mcpJson(makeAgent($this->bob, AgentLevel::Read)[1], 'get_issue', ['issue' => 'WEB-1'])['watchers_count'])->toBe(2);
 });
+
+test('an unknown email from someone who may not add or remove others is a 403 with no member emails', function () {
+    $this->watchers->watch($this->issue, $this->cat, $this->cat);
+    [, $read] = makeAgent($this->bob, AgentLevel::Read);
+    [, $write] = makeAgent($this->bob, AgentLevel::Write);
+    $leaks = fn ($r) => expect($r->getContent())->not->toContain('@example.com');
+
+    // Viewer, REST and web.
+    $leaks($this->actingAs($this->vic)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    $leaks($this->actingAs($this->vic)->post(w('/issues/WEB-1/watchers'), ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    // Read-only and write-level agents, REST and MCP.
+    $leaks(asToken($read)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    $leaks(asToken($write)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    foreach ([[$read, 'watch_issue'], [$write, 'watch_issue'], [$read, 'unwatch_issue'], [$write, 'unwatch_issue']] as [$token, $tool]) {
+        $text = asToken($token, ['Accept' => 'application/json, text/event-stream'])
+            ->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => $tool, 'arguments' => ['issue' => 'WEB-1', 'user' => 'nobody@elsewhere.test']]])->getContent();
+        expect($text)->not->toContain('ann@example.com')->not->toContain('cat@example.com');
+    }
+    // A member removing someone unknown: only admins may remove others.
+    $leaks($this->actingAs($this->bob)->deleteJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    $leaks($this->actingAs($this->bob)->delete(w('/issues/WEB-1/watchers'), ['user' => 'nobody@elsewhere.test'])->assertForbidden());
+    // Allowed callers still get the options.
+    $this->actingAs($this->bob)->postJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertUnprocessable();
+    $this->actingAs($this->ann)->deleteJson('/api/v1/issues/WEB-1/watchers', ['user' => 'nobody@elsewhere.test'])->assertUnprocessable();
+});
+
+test('a manual watch upgrades an auto row, and auto-watching never downgrades a manual one', function () {
+    $source = fn () => DB::table('issue_watchers')->where('issue_id', $this->issue->id)->where('user_id', $this->bob->id)->value('source');
+    $this->watchers->autoWatch($this->issue, $this->bob);
+    expect($source())->toBe('auto');
+    $this->watchers->watch($this->issue, $this->bob, $this->bob);
+    expect($source())->toBe('manual');
+    $this->watchers->autoWatch($this->issue, $this->bob);
+    expect($source())->toBe('manual');
+});

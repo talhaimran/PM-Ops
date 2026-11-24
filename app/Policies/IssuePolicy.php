@@ -51,4 +51,16 @@ class IssuePolicy
     {
         return $target->is($user) ? ($this->projects->writable($user) ?? Response::allow()) : $this->projects->manage($user, $issue->project);
     }
+
+    /** Checked before an email naming someone else is looked up, so the "not a member" answer (which lists members) only reaches who may add them. */
+    public function watchOthers(User $user, Issue $issue): Response
+    {
+        return $this->projects->writable($user) ?? ($user->viaToken() ? Response::deny('Agents watch as their owner; they can\'t add other people.') : $this->projects->contribute($user, $issue->project));
+    }
+
+    /** As watchOthers, for removing someone else: project admins. */
+    public function unwatchOthers(User $user, Issue $issue): Response
+    {
+        return $this->projects->manage($user, $issue->project);
+    }
 }

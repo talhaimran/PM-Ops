@@ -13,18 +13,18 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // MySQL DDL isn't transactional: drop what a failed earlier run left. The table is new, so nothing is lost.
-        Schema::dropIfExists('issue_watchers');
-
-        Schema::create('issue_watchers', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('issue_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->string('source', 6)->default('manual');
-            $table->timestamps();
-            $table->unique(['issue_id', 'user_id']);
-            $table->index('user_id');
-        });
+        // MySQL DDL isn't transactional: a retry after a failed run must not fail (or wipe rows) on what exists.
+        if (! Schema::hasTable('issue_watchers')) {
+            Schema::create('issue_watchers', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('issue_id')->constrained()->cascadeOnDelete();
+                $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+                $table->string('source', 6)->default('manual');
+                $table->timestamps();
+                $table->unique(['issue_id', 'user_id']);
+                $table->index('user_id');
+            });
+        }
 
         if (! Schema::hasColumn('users', 'auto_watch')) {
             Schema::table('users', fn (Blueprint $table) => $table->boolean('auto_watch')->default(true));
