@@ -11,6 +11,9 @@ Artisan::command('inspire', function () {
 // Soft-deleted issues and comments are removed for good after 30 days (spec 5.1, leaning).
 Schedule::command('issues:purge')->daily();
 
+// Spec 7.5: a Close as Duplicate whose after-commit link failed gets it from the activity log.
+Schedule::command('links:reconcile-duplicates')->daily();
+
 // D2: workspaces scheduled for deletion go for good after 7 days.
 Schedule::command('workspaces:purge')->daily();
 

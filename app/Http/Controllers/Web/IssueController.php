@@ -11,6 +11,7 @@ use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
 use App\Http\Resources\ActivityResource;
+use App\Models\Issue;
 use App\Models\Project;
 use App\Services\ActivityLogger;
 use App\Services\CommentService;
@@ -118,12 +119,15 @@ class IssueController extends Controller
         $from = $this->issues->resolve($request->user(), $key);
         Gate::authorize('update', $from);
         $link = $this->links->link($from, $request->validated('type'), $this->issues->resolve($request->user(), $request->validated('to')), $request->user());
+        // A replaced original goes back on Undo; its key only if this person can see it ("?" finds nothing, so Undo says
+        // it couldn't be restored without naming it).
+        $replaced = $link->replaced ? (Issue::visibleKeys($request->user(), [$link->replaced->key])->isNotEmpty() ? $link->replaced->key : '?') : null;
 
         return $request->filled('undo_of') ? back() : back()->with('undo', [
             'message' => "{$link->source->key} {$link->type->value} {$link->target->key}",
             'method' => 'delete',
             'url' => route('issues.links.destroy', $from->key),
-            'data' => [...$request->validated(), 'undo_of' => $from->version],
+            'data' => [...$request->validated(), 'undo_of' => $from->version, ...($replaced ? ['restore' => $replaced] : [])],
         ]);
     }
 
@@ -132,7 +136,12 @@ class IssueController extends Controller
         $issue = $this->issues->resolve($request->user(), $key);
         $other = $this->issues->resolve($request->user(), $request->validated('to'));
         Gate::authorize('unlink', [$issue, $other]);
-        $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
+        $restore = $request->validate(['restore' => ['nullable', 'string', 'max:30']])['restore'] ?? null;
+        $removed = $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
+
+        if ($restore !== null && ! $this->links->restoreOriginal($removed->source, $this->issues->peek($request->user(), $restore), $request->user())) {
+            return back()->withErrors(['undo' => "Undone. The earlier original couldn't be restored."]);
+        }
 
         return $request->filled('undo_of') ? back() : back()->with('undo', [
             'message' => 'Link removed',

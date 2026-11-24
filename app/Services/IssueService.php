@@ -585,8 +585,9 @@ class IssueService
      * "Close as Duplicate" makes a duplicates link (spec 7.5), after the commit: the insert share-locks the original's
      * row, which must not wait while this transaction holds the duplicate's row (2-R4: two issues closed as duplicates
      * of each other at once would deadlock).
-     * shortcut: not atomic with the close; a failure after the commit leaves the Duplicate without its link, and Undo
-     * then can't restore duplicate_of. Fold it into the transaction if links get a lock order of their own.
+     * shortcut: not atomic with the close; a failure after the commit (reported) leaves the Duplicate without its link
+     * until links:reconcile-duplicates repairs it the same day, and Undo meanwhile puts it back as Done. Fold it into the
+     * transaction if links get a lock order of their own.
      */
     private function linkDuplicate(Issue $issue, ?Issue $original, User $actor): void
     {

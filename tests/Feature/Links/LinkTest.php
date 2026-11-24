@@ -255,6 +255,34 @@ test('web: Undo of a move off Duplicate restores duplicate_of from the link', fu
     expect(web(1)->resolution->value)->toBe('duplicate')->and(IssueLink::count())->toBe(1);
 });
 
+test('web: Undo of a duplicates link that replaced another original puts the old one back', function () {
+    foreach (range(6, 9) as $n) {
+        makeIssue($this->web, $this->admin, ['title' => "Issue {$n}"]);
+    }
+    $this->postJson('/api/v1/issues/WEB-5/links', ['type' => 'duplicates', 'to' => 'WEB-3'])->assertCreated();
+    $this->actingAs($this->admin);
+
+    $this->post(w('/issues/WEB-5/links'), ['type' => 'duplicates', 'to' => 'WEB-9'])->assertSessionHasNoErrors();
+    $undo = session('undo');
+    expect($undo['data'])->toMatchArray(['restore' => 'WEB-3'])->and(linkRow(web(5), web(9)))->not->toBeNull();
+
+    $this->delete($undo['url'], $undo['data'])->assertSessionHasNoErrors();
+    expect(IssueLink::where('source_issue_id', web(5)->id)->pluck('target_issue_id')->all())->toBe([web(3)->id])
+        ->and(Activity::where('issue_id', web(3)->id)->whereIn('action', ['linked', 'unlinked'])->orderBy('id')->pluck('action')->all())
+        ->toBe(['linked', 'unlinked', 'linked']);
+});
+
+test('web: when the replaced original can\'t come back, Undo removes the new link and says so without naming it', function () {
+    $this->postJson('/api/v1/issues/WEB-5/links', ['type' => 'duplicates', 'to' => 'WEB-3'])->assertCreated();
+    $this->actingAs($this->admin);
+    $this->post(w('/issues/WEB-5/links'), ['type' => 'duplicates', 'to' => 'WEB-4'])->assertSessionHasNoErrors();
+    $undo = session('undo');
+    app(IssueService::class)->delete(web(3), $this->admin);
+
+    $this->delete($undo['url'], $undo['data'])->assertSessionHasErrors(['undo' => 'Undone. The earlier original couldn\'t be restored.']);
+    expect(IssueLink::count())->toBe(0);
+});
+
 test('web: adding and removing a link flash Undo', function () {
     $this->actingAs($this->admin);
 

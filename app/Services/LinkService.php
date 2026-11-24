@@ -8,6 +8,7 @@ use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\Status;
 use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -66,15 +67,13 @@ class LinkService
     {
         try {
             return DB::transaction(function () use ($source, $type, $target, $actor) {
-                if ($type->forbidsLoops() && $path = $this->path($target, $source, $type, $actor)) {
-                    throw ValidationException::withMessages(['to' => 'That would make a loop: '.implode(' → ', [...$path, $target->key]).". \"{$type->value}\" links can't loop."]);
+                if ($type->forbidsLoops()) {
+                    $this->refuseLoop($source, $type, $target, $actor);
                 }
                 if ($type === LinkType::Duplicates) {
                     // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs. A locking
                     // read, so a retry sees what a concurrent replacement committed.
-                    // shortcut: web Undo of a hand-made link removes the new one but doesn't bring back the one it replaced;
-                    // carry the replaced key in the undo data if people rely on it.
-                    IssueLink::where('source_issue_id', $source->id)->where('type', $type)->lockForUpdate()
+                    $replaced = IssueLink::where('source_issue_id', $source->id)->where('type', $type)->lockForUpdate()
                         ->with(['source.project', 'target' => fn ($q) => $q->withTrashed()->with('project')])->get()
                         ->each(fn (IssueLink $old) => $this->remove($old, $actor));
                 }
@@ -84,6 +83,8 @@ class LinkService
                     'created_by' => $attribution['user_id'], 'agent_id' => $attribution['agent_id'], 'via' => $attribution['via'],
                 ]);
                 $this->logBoth('linked', $source, $type, $target, $actor);
+                // For the web Undo, which puts it back (restoreOriginal).
+                $link->replaced = ($replaced ?? null)?->first()?->target;
 
                 return $link->setRelation('source', $source)->setRelation('target', $target);
             });
@@ -97,14 +98,35 @@ class LinkService
         }
     }
 
-    /** Remove the link between $a and $b ($type may be the reverse name, as for link()). */
-    public function unlink(Issue $a, string $type, Issue $b, User $actor): void
+    /** Remove the link between $a and $b ($type may be the reverse name, as for link()); returns it, as it was stored. */
+    public function unlink(Issue $a, string $type, Issue $b, User $actor): IssueLink
     {
         [$type, $source, $target] = $this->stored($a, $type, $b);
         $link = $this->find($source, $type, $target)
             ?? throw ValidationException::withMessages(['type' => "No link \"{$source->key} {$type->value} {$target->key}\" to remove."]);
 
         DB::transaction(fn () => $this->remove($link, $actor));
+
+        return $link;
+    }
+
+    /**
+     * Web Undo of a duplicates link that replaced another original: link $duplicate to $original again. False, changing
+     * nothing, when $original is gone or hidden from $actor (null), the issue has another original by now, or $actor
+     * may no longer make the link.
+     */
+    public function restoreOriginal(Issue $duplicate, ?Issue $original, User $actor): bool
+    {
+        if (! $original || IssueLink::where('source_issue_id', $duplicate->id)->where('type', LinkType::Duplicates)->exists()) {
+            return false;
+        }
+        try {
+            $this->link($duplicate, LinkType::Duplicates->value, $original, $actor);
+
+            return true;
+        } catch (ValidationException|AuthorizationException) {
+            return false;
+        }
     }
 
     /**
@@ -234,23 +256,40 @@ class LinkService
     }
 
     /**
-     * Keys on a $type path from $from to $to, or null: a breadth-first walk with a visited set, over issues $viewer can
-     * see, deleted ones included (restoring one must not complete a loop). Runs under the workspace's link lock, with
-     * locking reads, so it sees every link committed before it, whatever snapshot an outer transaction holds.
-     * shortcut: a loop through an issue the linker can't see isn't found (refusing it would hint at the hidden link);
-     * such a loop then shows to people who can see the whole chain. Every walk keeps a visited set, so a loop never
-     * hangs anything. Walk the whole workspace graph with a generic refusal if hidden loops start showing up.
-     *
-     * @return list<string>|null
+     * No loops for blocks and precedes (spec 7.5), through any issue of the workspace, deleted ones included (restoring
+     * one must not complete a loop). A loop the actor can see is named; one through an issue they can't see is refused
+     * without naming, counting or hinting at it (owner decision, narrowing 2-D2 for this case).
      */
-    private function path(Issue $from, Issue $to, LinkType $type, User $viewer): ?array
+    private function refuseLoop(Issue $source, LinkType $type, Issue $target, User $actor): void
+    {
+        $loop = $this->path($target, $source, $type, $actor);
+        if ($loop) {
+            $keys = Issue::withTrashed()->whereKey($loop)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]);
+
+            throw ValidationException::withMessages(['to' => 'That would make a loop: '.implode(' → ', [...array_map(fn ($id) => $keys[$id], $loop), $target->key]).". \"{$type->value}\" links can't loop."]);
+        }
+        if ($this->path($target, $source, $type)) {
+            throw ValidationException::withMessages(['to' => "That link would make a loop through issues you can't see. \"{$type->value}\" links can't loop."]);
+        }
+    }
+
+    /**
+     * Issue ids on a $type path from $from to $to, or null: a breadth-first walk with a visited set, deleted issues
+     * included, over issues $viewer can see (or every issue, without $viewer; links never leave a workspace). Runs under
+     * the workspace's link lock with locking reads, so it sees every link committed before it, whatever snapshot an
+     * outer transaction holds.
+     *
+     * @return list<int>|null
+     */
+    private function path(Issue $from, Issue $to, LinkType $type, ?User $viewer = null): ?array
     {
         $parent = [$from->id => null];
         $frontier = [$from->id];
         while ($frontier && ! array_key_exists($to->id, $parent)) {
             $next = [];
             $edges = IssueLink::where('type', $type)->whereIn('source_issue_id', $frontier)
-                ->whereHas('target', fn ($q) => $q->withTrashed()->visibleTo($viewer))->orderBy('id')->sharedLock()->get(['source_issue_id', 'target_issue_id']);
+                ->when($viewer, fn ($q) => $q->whereHas('target', fn ($t) => $t->withTrashed()->visibleTo($viewer)))
+                ->orderBy('id')->sharedLock()->get(['source_issue_id', 'target_issue_id']);
             foreach ($edges as $edge) {
                 if (! array_key_exists($edge->target_issue_id, $parent)) {
                     $parent[$edge->target_issue_id] = $edge->source_issue_id;
@@ -267,9 +306,8 @@ class LinkService
         for ($id = $to->id; $id !== null; $id = $parent[$id]) {
             array_unshift($ids, $id);
         }
-        $keys = Issue::withTrashed()->whereKey($ids)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]);
 
-        return array_map(fn ($id) => $keys[$id], $ids);
+        return $ids;
     }
 
     private function logBoth(string $action, Issue $source, LinkType $type, Issue $target, User $actor): void

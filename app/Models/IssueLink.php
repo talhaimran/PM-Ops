@@ -13,6 +13,9 @@ class IssueLink extends Model
 {
     public const UPDATED_AT = null;
 
+    /** Set by LinkService::link when this duplicates link replaced another original (for the web Undo); never stored. */
+    public ?Issue $replaced = null;
+
     protected function casts(): array
     {
         return ['type' => LinkType::class];

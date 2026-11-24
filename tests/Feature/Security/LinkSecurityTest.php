@@ -8,6 +8,7 @@ use App\Mcp\Tools\GetIssueActivity;
 use App\Mcp\Tools\LinkIssues;
 use App\Mcp\Tools\SearchIssues;
 use App\Mcp\Tools\UnlinkIssues;
+use App\Models\Activity;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\IssueLink;
@@ -189,4 +190,20 @@ test('scan F1: "is duplicated by" can\'t repoint the original of an issue the ca
 
     expect(IssueLink::where('type', 'duplicates')->where('source_issue_id', ($this->issue)('OPS', 1)->id)->sole()->target_issue_id)
         ->toBe(($this->issue)('OPS', 2)->id);
+});
+
+test('a loop through an issue the linker can\'t see is refused without naming, counting or hinting at it (owner review 2)', function () {
+    $links = app(LinkService::class);
+    $links->link(($this->issue)('WEB', 1), 'blocks', ($this->issue)('OPS', 1), $this->admin);
+    $links->link(($this->issue)('OPS', 1), 'blocks', ($this->issue)('WEB', 2), $this->admin);
+    $text = 'That link would make a loop through issues you can\'t see. "blocks" links can\'t loop.';
+    $before = Activity::count();
+
+    apiAsPerson($this->member);
+    $rest = $this->postJson('/api/v1/issues/WEB-2/links', ['type' => 'blocks', 'to' => 'WEB-1'])->assertUnprocessable()->assertJsonPath('errors.to', [$text]);
+    expect($rest->getContent())->not->toContain('OPS');
+    apiAs($this->member);
+    PmServer::tool(LinkIssues::class, ['from' => 'WEB-1', 'type' => 'is blocked by', 'to' => 'WEB-2'])->assertHasErrors([$text])->assertDontSee('OPS');
+
+    expect(IssueLink::count())->toBe(2)->and(Activity::count())->toBe($before);
 });
