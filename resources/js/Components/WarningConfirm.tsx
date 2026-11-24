@@ -14,6 +14,7 @@ export default function WarningConfirm({
     title,
     warnings,
     confirmLabel,
+    cancelLabel = 'Cancel',
     onConfirm,
     onCancel,
     processing = false,
@@ -23,6 +24,7 @@ export default function WarningConfirm({
     title: string;
     warnings: { text: string; reason?: string }[];
     confirmLabel: string;
+    cancelLabel?: string;
     onConfirm: () => void;
     onCancel: () => void;
     processing?: boolean;
@@ -55,7 +57,7 @@ export default function WarningConfirm({
                 {children}
                 <div className="flex justify-end gap-2">
                     <SecondaryButton ref={cancel} onClick={onCancel}>
-                        Cancel
+                        {cancelLabel}
                     </SecondaryButton>
                     <PrimaryButton disabled={processing}>{confirmLabel}</PrimaryButton>
                 </div>

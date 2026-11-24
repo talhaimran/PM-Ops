@@ -94,6 +94,12 @@ class IssueController extends Controller
      *
      * Moving into an In Progress-category status while the issue is blocked, or before an issue it follows is resolved,
      * is a 422 with `errors.confirm` saying why, and nothing is saved; resend with `confirm: true` to go ahead.
+     *
+     * Moving `due_date` later can leave successors (issues this one precedes) starting before it. `shift_successors: true`
+     * moves each by just enough, keeping its duration, down the chain (resolved issues and ones you can't edit never move);
+     * `false` leaves them; absent, the owner's saved `date_shift` decides. With "ask" the date is saved, nothing moves, and the
+     * issue carries `proposed_shifts` (`key`, `start_date`, `due_date`, `note`) and a `warning`: resend with `shift_successors: true`.
+     * `start_date` may not be after `due_date` (422).
      */
     public function update(UpdateIssueRequest $request, string $key): IssueResource|JsonResponse
     {

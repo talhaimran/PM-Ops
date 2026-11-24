@@ -34,7 +34,9 @@ class UpdateIssue extends Tool
             return $this->held($issue);
         }
 
-        return $this->result("Updated {$issue->key}.", new IssueResource($issue));
+        $resource = new IssueResource($issue);
+
+        return $this->result($issue->proposedShifts === null ? "Updated {$issue->key}." : "Updated {$issue->key}. ".$resource->resolve()['warning'], $resource);
     }
 
     public function schema(JsonSchema $schema): array
@@ -45,6 +47,7 @@ class UpdateIssue extends Tool
             'title' => $schema->string()->max(255),
             ...$this->issueFields($schema),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to a Done-category status.'),
+            'shift_successors' => $schema->boolean()->description('When a due date moves: true shifts the successors that would start before it, keeping their durations; false leaves them. Without it the owner\'s saved choice applies; with "ask every time" the date is saved, nothing shifts and the answer lists proposed_shifts. Report them to your user and send true (with the version you now have) if they agree.'),
             'confirm' => $schema->boolean()->description('Move although the issue is blocked or follows an unresolved issue; without it such a move is refused with the reason.'),
         ];
     }

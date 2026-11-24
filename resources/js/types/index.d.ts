@@ -3,6 +3,8 @@ export interface User {
     name: string;
     email: string;
     email_verified_at?: string;
+    /** Spec 7.5: what to do with successors when a due date moves. */
+    date_shift: 'ask' | 'always' | 'never';
 }
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member';
@@ -119,6 +121,9 @@ export interface Issue {
     labels: string[];
     story_points: number | null;
     due_date: string | null;
+    start_date: string | null;
+    /** Only on the single issue: a successor starting before its predecessor's due date, on both issues (spec 7.5). */
+    schedule_warning?: string | null;
     epic: IssueLink | null;
     parent: IssueLink | null;
     sprint: { id: number; name: string; state: string } | null;

@@ -8,6 +8,7 @@ use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\Status;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
@@ -222,6 +223,180 @@ class LinkService
             ($blockers = $this->blockers($issue, $viewer))->isNotEmpty() ? $sentence('is blocked by', $blockers) : null,
             ($predecessors = $this->unresolvedPredecessors($issue, $viewer))->isNotEmpty() ? $sentence('follows', $predecessors) : null,
         ]));
+    }
+
+    /** Most successors one date shift walks; a longer chain is cut off here. shortcut: a plain cap, raise it when a real chain needs more. */
+    private const SHIFT_LIMIT = 500;
+
+    /** Ids (and projects) of the successors of $moved that $actor could shift: what IssueService locks before it shifts. @return array<int, int> */
+    public function shiftable(Issue $moved, User $actor): array
+    {
+        $graph = $this->graph($moved, $actor);
+
+        return collect($graph['kind'])->filter(fn ($kind) => $kind === 'ok')->map(fn ($kind, $id) => $graph['nodes'][$id]->project_id)->all();
+    }
+
+    /**
+     * Spec 7.5 (2-R6): where each conflicting successor of $moved would go, for "ask": the ones $actor can shift, then the
+     * ones they can see but not edit, with a note. Successors they can't see are left out.
+     *
+     * @return list<array{key: string, start_date: ?string, due_date: ?string, note: ?string}>
+     */
+    public function proposedShifts(Issue $moved, User $actor): array
+    {
+        [$moves, $cant, $nodes] = $this->plan($moved, $actor);
+        $row = fn (int $id, array $to, ?string $note = null) => [
+            'key' => $nodes[$id]->key, 'start_date' => $to['start']?->format('Y-m-d'), 'due_date' => $to['due']?->format('Y-m-d'), 'note' => $note,
+        ];
+
+        return [
+            ...array_map(fn ($id) => $row($id, $moves[$id]), array_keys($moves)),
+            ...array_map(fn ($id) => $row($id, $cant[$id], "can't shift: you can't edit {$nodes[$id]->key}"), array_keys($cant)),
+        ];
+    }
+
+    /** The sentence that goes with proposedShifts(): nothing moved, and how to move it. @param list<array{key: string, start_date: ?string, due_date: ?string, note: ?string}> $shifts */
+    public static function shiftWarning(Issue $moved, array $shifts): string
+    {
+        $list = collect($shifts)->map(fn ($s) => $s['note'] ? "{$s['key']} ({$s['note']})" : "{$s['key']} to ".match (true) {
+            $s['start_date'] && $s['due_date'] => "{$s['start_date']} – {$s['due_date']}",
+            (bool) $s['due_date'] => "due {$s['due_date']}",
+            default => "start {$s['start_date']}",
+        })->implode(', ');
+
+        return "{$moved->key}'s due date now falls after the start of its successors; their dates were not shifted. Proposed: {$list}. Send shift_successors: true to apply them.";
+    }
+
+    /**
+     * Spec 7.5: move each conflicting successor of $moved later by just enough, keeping its duration, down the chain.
+     * Runs inside IssueService::update's transaction (which has locked the rows, in id order); each one goes through
+     * update() like any other change, so its version, activity and attribution are written. Returns how many moved.
+     */
+    public function shift(Issue $moved, User $actor): int
+    {
+        [$moves, , $nodes] = $this->plan($moved, $actor);
+        ksort($moves);
+        foreach ($moves as $id => $to) {
+            // false: this walk already covers the chain, so the successor doesn't start another.
+            $data = ['due_date' => $to['due']?->format('Y-m-d'), 'shift_successors' => false, 'shifted_by' => $moved->key];
+            if ($nodes[$id]->start_date) {
+                $data['start_date'] = $to['start']->format('Y-m-d');
+            }
+            app(IssueService::class)->update($nodes[$id], $actor, $data);
+        }
+
+        return count($moves);
+    }
+
+    /**
+     * Spec 7.5: "a successor scheduled to start before its predecessor's due date warns on both". One sentence naming each
+     * such pair $viewer can see, or null. A resolved issue, or a resolved other side, has nothing to schedule.
+     */
+    public function scheduleWarning(Issue $issue, User $viewer): ?string
+    {
+        if ($issue->status->isDone()) {
+            return null;
+        }
+        $date = fn (?Carbon $d) => $d?->format('Y-m-d');
+        $start = $issue->start_date ?? $issue->due_date;
+        $sentences = [];
+        if ($start) {
+            foreach ($issue->predecessors()->open()->visibleTo($viewer)->whereNotNull('issues.due_date')->with('project')->orderBy('issues.id')->get() as $p) {
+                $p->due_date->gt($start) && $sentences[] = "{$issue->key} starts on {$date($start)}, before {$p->key} is due on {$date($p->due_date)}.";
+            }
+        }
+        if ($issue->due_date) {
+            foreach ($issue->successors()->open()->visibleTo($viewer)->with('project')->orderBy('issues.id')->get() as $s) {
+                $from = $s->start_date ?? $s->due_date;
+                $from?->lt($issue->due_date) && $sentences[] = "{$s->key} starts on {$date($from)}, before {$issue->key} is due on {$date($issue->due_date)}.";
+            }
+        }
+
+        return $sentences ? implode(' ', $sentences) : null;
+    }
+
+    /**
+     * The successors of $moved through precedes links, among issues $actor can see (2-D2): a breadth-first walk with a
+     * visited set, so a loop ends it. Each is `ok` (open and editable by $actor: it can move and the walk goes on through
+     * it), `resolved` (never moves, the walk stops) or `cant` (visible, not editable: listed, the walk stops).
+     *
+     * @return array{nodes: array<int, Issue>, next: array<int, list<int>>, kind: array<int, string>}
+     */
+    private function graph(Issue $moved, User $actor): array
+    {
+        $nodes = $next = $kind = [];
+        $seen = [$moved->id => true];
+        $frontier = [$moved->id];
+        while ($frontier && count($seen) <= self::SHIFT_LIMIT) {
+            $edges = IssueLink::where('type', LinkType::Precedes)->whereIn('source_issue_id', $frontier)->orderBy('id')->get(['source_issue_id', 'target_issue_id']);
+            $found = Issue::whereIn('id', $edges->pluck('target_issue_id')->unique())->visibleTo($actor)->with(['project', 'status'])->get()->keyBy('id');
+            $frontier = [];
+            foreach ($edges as $edge) {
+                $successor = $found[$edge->target_issue_id] ?? null;
+                if (! $successor) {
+                    continue;
+                }
+                $next[$edge->source_issue_id][] = $successor->id;
+                if (isset($seen[$successor->id])) {
+                    continue;
+                }
+                $seen[$successor->id] = true;
+                $nodes[$successor->id] = $successor;
+                $kind[$successor->id] = match (true) {
+                    $successor->status->isDone() => 'resolved',
+                    Gate::forUser($actor)->allows('update', $successor) => 'ok',
+                    default => 'cant',
+                };
+                if ($kind[$successor->id] === 'ok') {
+                    $frontier[] = $successor->id;
+                }
+            }
+        }
+
+        return ['nodes' => $nodes, 'next' => $next, 'kind' => $kind];
+    }
+
+    /**
+     * 2-R5: a successor conflicts when its start (its due date without a start) is before its predecessor's due date;
+     * it moves by the gap, and its own successors are checked against its new due date. A successor behind two moved
+     * ones is checked again against each, so it ends up after both. Bounded by one round per issue, so a loop can't run on.
+     *
+     * @return array{0: array<int, array{start: ?Carbon, due: ?Carbon}>, 1: array<int, array{start: ?Carbon, due: ?Carbon}>, 2: array<int, Issue>} the moves, the ones $actor can't make, and the issues
+     */
+    private function plan(Issue $moved, User $actor): array
+    {
+        $graph = $this->graph($moved, $actor);
+        $moves = $cant = [];
+        $frontier = [$moved->id];
+        for ($round = 0; $frontier && $round <= count($graph['nodes']); $round++) {
+            $changed = [];
+            foreach ($frontier as $id) {
+                $due = $id === $moved->id ? $moved->due_date : $moves[$id]['due'];
+                foreach ($due ? ($graph['next'][$id] ?? []) : [] as $successorId) {
+                    $kind = $graph['kind'][$successorId] ?? null;
+                    if (! $kind || $kind === 'resolved') {
+                        continue;
+                    }
+                    $successor = $graph['nodes'][$successorId];
+                    $now = $moves[$successorId] ?? $cant[$successorId] ?? ['start' => $successor->start_date, 'due' => $successor->due_date];
+                    $from = $now['start'] ?? $now['due'];
+                    if (! $from || $from->gte($due)) {
+                        continue;
+                    }
+                    $days = (int) round($from->diffInDays($due, true));
+                    $to = ['start' => $now['start']?->copy()->addDays($days), 'due' => $now['due']?->copy()->addDays($days)];
+                    if ($kind === 'ok') {
+                        $moves[$successorId] = $to;
+                        $changed[$successorId] = $successorId;
+                    } else {
+                        $cant[$successorId] = $to;
+                    }
+                }
+            }
+            $frontier = array_values($changed);
+        }
+
+        return [$moves, $cant, $graph['nodes']];
     }
 
     /**

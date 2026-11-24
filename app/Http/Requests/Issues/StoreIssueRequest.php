@@ -26,6 +26,8 @@ class StoreIssueRequest extends FormRequest
             'labels.*' => ['string', 'max:50'],
             'story_points' => ['nullable', 'integer', 'min:0', 'max:1000'],
             'due_date' => ['nullable', 'date_format:Y-m-d'],
+            // Spec 7.5: not after the due date (IssueService checks it against the stored one too).
+            'start_date' => ['nullable', 'date_format:Y-m-d'],
             'epic' => ['nullable', 'string', 'max:30'],
             'parent' => ['nullable', 'string', 'max:30'],
             'sprint' => ['nullable', 'string', 'max:100'],
@@ -39,6 +41,7 @@ class StoreIssueRequest extends FormRequest
             'priority.enum' => 'The priority must be one of: '.implode(', ', IssuePriority::values()).'.',
             'resolution.enum' => 'The resolution must be one of: '.implode(', ', Resolution::values()).'.',
             'due_date.date_format' => 'The due date must be a date like 2026-12-31.',
+            'start_date.date_format' => 'The start date must be a date like 2026-12-31.',
         ];
     }
 }

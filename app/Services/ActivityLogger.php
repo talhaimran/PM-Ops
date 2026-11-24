@@ -82,19 +82,19 @@ class ActivityLogger
     }
 
     /**
-     * 2-D2: drop each `duplicate_of` change naming an issue $viewer can't see, in place, with one query for all $rows.
-     * Redacted rather than hidden: the same row holds the status and resolution change, which the reader may see.
+     * 2-D2: drop each `duplicate_of` and `shifted_by` change naming an issue $viewer can't see, in place, with one query for all $rows.
+     * Redacted rather than hidden: the same row holds the status, resolution or date changes, which the reader may see.
      * Keys are matched as stored, so one whose project was renamed since is dropped too.
      *
      * @param  iterable<Activity>  $rows
      */
     public static function hideUnseenOriginals(iterable $rows, User $viewer): void
     {
-        $named = collect($rows)->filter(fn (Activity $a) => isset($a->changes['duplicate_of']['to']));
-        $seen = Issue::visibleKeys($viewer, $named->map(fn (Activity $a) => $a->changes['duplicate_of']['to']));
-        foreach ($named as $a) {
-            if (! $seen->contains(strtoupper((string) $a->changes['duplicate_of']['to']))) {
-                $a->changes = Arr::except($a->changes, 'duplicate_of');
+        $named = collect($rows)->flatMap(fn (Activity $a) => collect(['duplicate_of', 'shifted_by'])->filter(fn ($f) => isset($a->changes[$f]['to']))->map(fn ($f) => [$a, $f]));
+        $seen = Issue::visibleKeys($viewer, $named->map(fn ($n) => $n[0]->changes[$n[1]]['to']));
+        foreach ($named as [$a, $field]) {
+            if (! $seen->contains(strtoupper((string) $a->changes[$field]['to']))) {
+                $a->changes = Arr::except($a->changes, $field);
             }
         }
     }
