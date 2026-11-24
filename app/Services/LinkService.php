@@ -1,0 +1,324 @@
+<?php
+
+namespace App\Services;
+
+use App\Enums\LinkType;
+use App\Enums\StatusCategory;
+use App\Models\Issue;
+use App\Models\IssueLink;
+use App\Models\Status;
+use App\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
+use Throwable;
+
+/**
+ * Spec 7.5: issue links, shared by web, REST and MCP. Callers resolve both issues with IssueService::resolve (so an
+ * issue the actor can't see is the usual 404) and authorize (IssuePolicy update / unlink) first.
+ *
+ * Locks (2-R4, owner review): link writes run in a short transaction that holds no issue row locks of its own. The
+ * insert share-locks both issue rows through the foreign keys, so it never runs while this request holds another issue
+ * row (IssueService defers the Duplicate link until after its commit). blocks and precedes links are added one at a
+ * time per workspace under a MySQL named lock, taken before the transaction, so the loop check and the insert can't
+ * interleave with another request's. One original per Duplicate is held by a unique index (duplicate_source_id).
+ */
+class LinkService
+{
+    public function __construct(private ActivityLogger $activity) {}
+
+    /** Link $from to $to; a reverse name ("is blocked by") is stored the other way round. */
+    public function link(Issue $from, string $type, Issue $to, User $actor): IssueLink
+    {
+        [$type, $source, $target] = $this->stored($from, $type, $to);
+
+        if ($source->is($target)) {
+            throw ValidationException::withMessages(['to' => "An issue can't be linked to itself."]);
+        }
+        // A duplicates link sets the source's original (and replaces its old one), so it changes the source issue: the caller
+        // must be able to edit it even when they named it as the target ("is duplicated by"), scan F1.
+        if ($type === LinkType::Duplicates) {
+            Gate::forUser($actor)->authorize('update', $source);
+        }
+        if ($this->find($source, $type, $target)) {
+            throw $this->exists($source, $type, $target);
+        }
+        if (! $type->forbidsLoops()) {
+            return $this->insert($source, $type, $target, $actor);
+        }
+
+        // Strict loop prevention: one blocks/precedes link at a time per workspace, checked and inserted under the lock.
+        $lock = "pm:links:{$source->project->workspace_id}";
+        if ((int) DB::scalar('SELECT GET_LOCK(?, ?)', [$lock, config('pm.link_lock_timeout')]) !== 1) {
+            throw ValidationException::withMessages(['type' => 'Links are being changed in this workspace; try again.'])->status(409);
+        }
+        try {
+            return $this->insert($source, $type, $target, $actor);
+        } finally {
+            DB::select('SELECT RELEASE_LOCK(?)', [$lock]);
+        }
+    }
+
+    /** The loop check, the replaced original (duplicates) and the insert, in one transaction. */
+    private function insert(Issue $source, LinkType $type, Issue $target, User $actor, bool $retry = true): IssueLink
+    {
+        try {
+            return DB::transaction(function () use ($source, $type, $target, $actor) {
+                if ($type->forbidsLoops()) {
+                    $this->refuseLoop($source, $type, $target, $actor);
+                }
+                if ($type === LinkType::Duplicates) {
+                    // One original per Duplicate (Should 3): a new one replaces the old, logged on both pairs. A locking
+                    // read, so a retry sees what a concurrent replacement committed.
+                    $replaced = IssueLink::where('source_issue_id', $source->id)->where('type', $type)->lockForUpdate()
+                        ->with(['source.project', 'target' => fn ($q) => $q->withTrashed()->with('project')])->get()
+                        ->each(fn (IssueLink $old) => $this->remove($old, $actor));
+                }
+                $attribution = ActivityLogger::attribution($actor);
+                $link = IssueLink::create([
+                    'source_issue_id' => $source->id, 'target_issue_id' => $target->id, 'type' => $type,
+                    'created_by' => $attribution['user_id'], 'agent_id' => $attribution['agent_id'], 'via' => $attribution['via'],
+                ]);
+                $this->logBoth('linked', $source, $type, $target, $actor);
+                // For the web Undo, which puts it back (restoreOriginal).
+                $link->replaced = ($replaced ?? null)?->first()?->target;
+
+                return $link->setRelation('source', $source)->setRelation('target', $target);
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            if ($retry && $type === LinkType::Duplicates && str_contains($e->getMessage(), 'duplicate_source_id')) {
+                // Another request set this issue's original at the same instant: replace it again, so the last writer wins.
+                return $this->insert($source, $type, $target, $actor, retry: false);
+            }
+            // The same link, sent twice at the same instant.
+            throw $this->exists($source, $type, $target);
+        }
+    }
+
+    /** Remove the link between $a and $b ($type may be the reverse name, as for link()); returns it, as it was stored. */
+    public function unlink(Issue $a, string $type, Issue $b, User $actor): IssueLink
+    {
+        [$type, $source, $target] = $this->stored($a, $type, $b);
+        $link = $this->find($source, $type, $target)
+            ?? throw ValidationException::withMessages(['type' => "No link \"{$source->key} {$type->value} {$target->key}\" to remove."]);
+
+        DB::transaction(fn () => $this->remove($link, $actor));
+
+        return $link;
+    }
+
+    /**
+     * Web Undo of a duplicates link that replaced another original: link $duplicate to $original again. False, changing
+     * nothing, when $original is gone or hidden from $actor (null), the issue has another original by now, or $actor
+     * may no longer make the link.
+     */
+    public function restoreOriginal(Issue $duplicate, ?Issue $original, User $actor): bool
+    {
+        if (! $original || IssueLink::where('source_issue_id', $duplicate->id)->where('type', LinkType::Duplicates)->exists()) {
+            return false;
+        }
+        try {
+            $this->link($duplicate, LinkType::Duplicates->value, $original, $actor);
+
+            return true;
+        } catch (ValidationException|AuthorizationException) {
+            return false;
+        }
+    }
+
+    /**
+     * "Close as Duplicate" (spec 7.4, 7.5): the duplicates link to $original (link() replaces one to another original).
+     * It runs after the close committed (IssueService::linkDuplicate), so it never fails the close:
+     * an error is reported and the Duplicate stays without its link.
+     */
+    public function ensureDuplicate(Issue $duplicate, Issue $original, User $actor): void
+    {
+        try {
+            if (! $this->find($duplicate, LinkType::Duplicates, $original)) {
+                $this->link($duplicate, LinkType::Duplicates->value, $original, $actor);
+            }
+        } catch (Throwable $e) {
+            // A ValidationException here is the same link made by a request at the same instant: nothing to report.
+            if (! $e instanceof ValidationException) {
+                report($e);
+            }
+        }
+    }
+
+    /** The original a Duplicate points at, when $viewer can see it (2-D2), for Undo. */
+    public function original(Issue $duplicate, User $viewer): ?Issue
+    {
+        return IssueLink::where('source_issue_id', $duplicate->id)->where('type', LinkType::Duplicates)
+            ->whereHas('target', fn ($q) => $q->visibleTo($viewer))->latest('id')->with('target.project')->first()?->target;
+    }
+
+    /**
+     * $issue's links that $viewer can see, grouped by the name read from $issue ("blocks", "is blocked by"…) in
+     * LinkType::names() order. Links to deleted issues and to projects $viewer can't open are left out (2-D2).
+     *
+     * @return array<string, list<array{key: string, title: string, type: string, status: string, category: string, status_color: ?string}>>
+     */
+    public function visibleLinks(Issue $issue, User $viewer): array
+    {
+        $other = fn ($q) => $q->visibleTo($viewer);
+        $links = IssueLink::where(fn ($q) => $q->where('source_issue_id', $issue->id)->whereHas('target', $other))
+            ->orWhere(fn ($q) => $q->where('target_issue_id', $issue->id)->whereHas('source', $other))
+            ->with(['source.project', 'source.status', 'target.project', 'target.status'])
+            ->orderBy('id')
+            ->get();
+
+        $grouped = [];
+        foreach ($links as $link) {
+            $outgoing = $link->source_issue_id === $issue->id;
+            $linked = $outgoing ? $link->target : $link->source;
+            $grouped[$outgoing ? $link->type->value : $link->type->reverse()][] = [
+                'key' => $linked->key,
+                'title' => $linked->title,
+                'type' => $linked->type->value,
+                'status' => $linked->status->name,
+                'category' => $linked->status->category->value,
+                'status_color' => $linked->status->color,
+            ];
+        }
+
+        return array_filter(array_map(fn ($name) => $grouped[$name] ?? null, array_combine(LinkType::names(), LinkType::names())));
+    }
+
+    /** Unresolved (not Done-category) issues blocking $issue that $viewer can see. @return Collection<int, Issue> */
+    public function blockers(Issue $issue, User $viewer): Collection
+    {
+        return $issue->blockers()->open()->visibleTo($viewer)->with(['project', 'status'])->orderBy('issues.project_id')->orderBy('issues.number')->get();
+    }
+
+    /** Unresolved issues $issue follows that $viewer can see. @return Collection<int, Issue> */
+    public function unresolvedPredecessors(Issue $issue, User $viewer): Collection
+    {
+        return $issue->predecessors()->open()->visibleTo($viewer)->with(['project', 'status'])->orderBy('issues.project_id')->orderBy('issues.number')->get();
+    }
+
+    /**
+     * 2-D4: why moving $issue into $to deserves a confirm. Only entering an In Progress-category status warns: a blocked
+     * issue, or a successor whose predecessor isn't resolved.
+     *
+     * @return list<string>
+     */
+    public function warnings(Issue $issue, Status $to, User $viewer): array
+    {
+        if ($to->category !== StatusCategory::InProgress || $issue->status?->category === StatusCategory::InProgress) {
+            return [];
+        }
+
+        $sentence = function (string $verb, Collection $others) use ($issue) {
+            $names = $others->map(fn (Issue $o) => "{$o->key} ({$o->status->name})");
+            $list = $names->count() > 1 ? $names->slice(0, -1)->implode(', ').' and '.$names->last() : $names->first();
+
+            return "{$issue->key} {$verb} {$list}, which ".($names->count() > 1 ? "aren't" : "isn't").' resolved.';
+        };
+
+        return array_values(array_filter([
+            ($blockers = $this->blockers($issue, $viewer))->isNotEmpty() ? $sentence('is blocked by', $blockers) : null,
+            ($predecessors = $this->unresolvedPredecessors($issue, $viewer))->isNotEmpty() ? $sentence('follows', $predecessors) : null,
+        ]));
+    }
+
+    /**
+     * The type and the issues as stored: a reverse name swaps them, and relates to (no direction) puts the lower id
+     * first, so the unique index also catches the opposite pair.
+     *
+     * @return array{0: LinkType, 1: Issue, 2: Issue}
+     */
+    private function stored(Issue $from, string $name, Issue $to): array
+    {
+        [$type, $reversed] = LinkType::parse($name);
+        $swap = $type === LinkType::RelatesTo ? $from->id > $to->id : $reversed;
+
+        return [$type, ...($swap ? [$to, $from] : [$from, $to])];
+    }
+
+    private function find(Issue $source, LinkType $type, Issue $target): ?IssueLink
+    {
+        return IssueLink::where('type', $type)->where('source_issue_id', $source->id)->where('target_issue_id', $target->id)
+            ->with(['source.project', 'target.project'])->first();
+    }
+
+    private function exists(Issue $source, LinkType $type, Issue $target): ValidationException
+    {
+        return ValidationException::withMessages(['type' => "{$source->key} already {$type->value} {$target->key}."]);
+    }
+
+    private function remove(IssueLink $link, User $actor): void
+    {
+        $link->delete();
+        $this->logBoth('unlinked', $link->source, $link->type, $link->target, $actor);
+    }
+
+    /**
+     * No loops for blocks and precedes (spec 7.5), through any issue of the workspace, deleted ones included (restoring
+     * one must not complete a loop). A loop the actor can see is named; one through an issue they can't see is refused
+     * without naming, counting or hinting at it (owner decision, narrowing 2-D2 for this case).
+     */
+    private function refuseLoop(Issue $source, LinkType $type, Issue $target, User $actor): void
+    {
+        $loop = $this->path($target, $source, $type, $actor);
+        if ($loop) {
+            $keys = Issue::withTrashed()->whereKey($loop)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]);
+
+            throw ValidationException::withMessages(['to' => 'That would make a loop: '.implode(' → ', [...array_map(fn ($id) => $keys[$id], $loop), $target->key]).". \"{$type->value}\" links can't loop."]);
+        }
+        if ($this->path($target, $source, $type)) {
+            throw ValidationException::withMessages(['to' => "That link would make a loop through issues you can't see. \"{$type->value}\" links can't loop."]);
+        }
+    }
+
+    /**
+     * Issue ids on a $type path from $from to $to, or null: a breadth-first walk with a visited set, deleted issues
+     * included, over issues $viewer can see (or every issue, without $viewer; links never leave a workspace). Runs under
+     * the workspace's link lock with locking reads, so it sees every link committed before it, whatever snapshot an
+     * outer transaction holds.
+     *
+     * @return list<int>|null
+     */
+    private function path(Issue $from, Issue $to, LinkType $type, ?User $viewer = null): ?array
+    {
+        $parent = [$from->id => null];
+        $frontier = [$from->id];
+        while ($frontier && ! array_key_exists($to->id, $parent)) {
+            $next = [];
+            $edges = IssueLink::where('type', $type)->whereIn('source_issue_id', $frontier)
+                ->when($viewer, fn ($q) => $q->whereHas('target', fn ($t) => $t->withTrashed()->visibleTo($viewer)))
+                ->orderBy('id')->sharedLock()->get(['source_issue_id', 'target_issue_id']);
+            foreach ($edges as $edge) {
+                if (! array_key_exists($edge->target_issue_id, $parent)) {
+                    $parent[$edge->target_issue_id] = $edge->source_issue_id;
+                    $next[] = $edge->target_issue_id;
+                }
+            }
+            $frontier = $next;
+        }
+        if (! array_key_exists($to->id, $parent)) {
+            return null;
+        }
+
+        $ids = [];
+        for ($id = $to->id; $id !== null; $id = $parent[$id]) {
+            array_unshift($ids, $id);
+        }
+
+        return $ids;
+    }
+
+    private function logBoth(string $action, Issue $source, LinkType $type, Issue $target, User $actor): void
+    {
+        $change = fn (string $text, Issue $other) => ['link' => [
+            'from' => $action === 'linked' ? null : $text,
+            'to' => $action === 'linked' ? $text : null,
+            // The other issue, so the entry is shown only to those who can see it (Activity::visibleTo).
+            'issue_id' => $other->id,
+        ]];
+        $this->activity->log($source, $actor, $action, $change("{$type->value} {$target->key}", $target));
+        $this->activity->log($target, $actor, $action, $change("{$type->reverse()} {$source->key}", $source));
+    }
+}

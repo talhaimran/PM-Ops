@@ -19,14 +19,15 @@ class BoardService
     public function __construct(private IssueService $issues, private RankService $ranks) {}
 
     /**
-     * Columns in order, each with its non-epic issues sorted by rank.
+     * Columns in order, each with its non-epic issues sorted by rank; each card knows whether $viewer sees it blocked.
      *
      * @return array{columns: Collection, truncated: bool}
      */
-    public function board(Project $project, array $filters): array
+    public function board(Project $project, array $filters, User $viewer): array
     {
         $issues = $this->issues
-            ->filter($project->issues()->where('type', '!=', IssueType::Epic->value)->getQuery(), $filters)
+            ->filter($project->issues()->where('type', '!=', IssueType::Epic->value)->getQuery(), $filters, $viewer)
+            ->withBlocked($viewer)
             ->with(['assignee', 'labels', 'parent', 'status'])
             ->orderBy('rank')
             ->limit(self::LIMIT + 1)
@@ -53,7 +54,8 @@ class BoardService
             Project::whereKey($issue->project_id)->lockForUpdate()->first();
 
             if (isset($input['status']) || isset($input['resolution']) || isset($input['duplicate_of'])) {
-                $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of', 'version']), $action);
+                // confirm: 2-D4, the move goes ahead although the issue is blocked (IssueService::update asks).
+                $issue = $this->issues->update($issue, $actor, Arr::only($input, ['status', 'reason', 'resolution', 'duplicate_of', 'version', 'confirm']), $action);
             }
             // An agent's move to Done waits for a person (A2): the issue stays where it was.
             if ($issue->heldApproval) {

@@ -45,6 +45,7 @@ class UpdateIssue extends Tool
             'title' => $schema->string()->max(255),
             ...$this->issueFields($schema),
             'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to a Done-category status.'),
+            'confirm' => $schema->boolean()->description('Move although the issue is blocked or follows an unresolved issue; without it such a move is refused with the reason.'),
         ];
     }
 }

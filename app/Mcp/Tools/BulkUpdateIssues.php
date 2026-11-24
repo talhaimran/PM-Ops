@@ -47,6 +47,7 @@ class BulkUpdateIssues extends Tool
                     'title' => $schema->string()->max(255),
                     ...$this->issueFields($schema),
                     'reason' => $schema->string()->max(200)->description('Why, when asking a person to approve a move to Done.'),
+                    'confirm' => $schema->boolean()->description('Move although the issue is blocked or follows an unresolved issue; without it such a move is refused with the reason.'),
                 ]))
                 ->min(1)->max(BulkStoreIssueRequest::MAX)
                 ->description('Each item names an issue key and the version you read, plus only the fields to change.')

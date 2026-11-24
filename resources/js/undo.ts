@@ -1,7 +1,7 @@
 // Toast state for the Undo pattern (spec 5.1, design system Toast). Pure functions, so they run under `node --test`.
 
 /** What the server flashes after a reversible change: the request that reverses it (see App\Services\UndoService). */
-export type UndoFlash = { message: string; method: 'patch' | 'post'; url: string; data: Record<string, unknown> };
+export type UndoFlash = { message: string; method: 'patch' | 'post' | 'delete'; url: string; data: Record<string, unknown> };
 
 export type Toast = { id: number; message: string; tone: 'plain' | 'good' | 'bad'; undo?: UndoFlash };
 

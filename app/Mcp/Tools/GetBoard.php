@@ -29,7 +29,7 @@ class GetBoard extends Tool
         $request->validate(['project' => 'required|string']);
         $project = $projects->resolve($request->user(), $request->get('project'));
         $rules = new BoardFilterRequest;
-        $data = (new BoardResource($board->board($project, $request->validate($rules->rules(), $rules->messages()))))->resolve();
+        $data = (new BoardResource($board->board($project, $request->validate($rules->rules(), $rules->messages()), $request->user())))->resolve();
 
         $summary = collect($data['columns'])->map(fn ($c) => "{$c['name']}: ".count($c['issues']))->implode(', ');
 

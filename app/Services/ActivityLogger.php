@@ -7,6 +7,7 @@ use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\User;
+use Illuminate\Support\Arr;
 use Laravel\Sanctum\PersonalAccessToken;
 
 class ActivityLogger
@@ -41,19 +42,23 @@ class ActivityLogger
 
     /**
      * Spec 7.11: what changed on $issue after $version, one entry per field: the value it had first, the value it has
-     * now, and who made that last change ("{Owner}'s agent" when an agent did). Only $issue's own rows are read.
+     * now, and who made that last change ("{Owner}'s agent" when an agent did). Only $issue's own rows are read, and only
+     * what $viewer may see (hideUnseenOriginals).
      *
      * @return list<array{field: string, from: mixed, to: mixed, by: ?string, agent: ?string, via: string, at: string}>
      */
-    public function changesSince(Issue $issue, int $version, ?bool &$truncated = null): array
+    public function changesSince(Issue $issue, int $version, User $viewer, ?bool &$truncated = null): array
     {
         $changes = [];
         // Only the newest CHANGES_CAP rows are read; $truncated says older ones were left out, so a field's `from` is then
         // its value before the oldest row read. The conflict itself is decided by the version, never by this list.
         $rows = $issue->activities()->with(['user', 'agent.owner'])->where('issue_version', '>', $version)->whereNotNull('changes')
+            // Links aren't fields of the issue (and name another issue the reader may not see, 2-D2).
+            ->whereNotIn('action', ['linked', 'unlinked'])
             ->orderByDesc('id')->limit(self::CHANGES_CAP + 1)->get();
         $truncated = $rows->count() > self::CHANGES_CAP;
         $rows = $rows->take(self::CHANGES_CAP)->reverse();
+        self::hideUnseenOriginals($rows, $viewer);
         foreach ($rows as $row) {
             // approval_request is the link to an agent's request (A2), not a field; a person decided it, so no agent acted.
             $approval = isset($row->changes['approval_request']);
@@ -74,6 +79,24 @@ class ActivityLogger
         }
 
         return array_values($changes);
+    }
+
+    /**
+     * 2-D2: drop each `duplicate_of` change naming an issue $viewer can't see, in place, with one query for all $rows.
+     * Redacted rather than hidden: the same row holds the status and resolution change, which the reader may see.
+     * Keys are matched as stored, so one whose project was renamed since is dropped too.
+     *
+     * @param  iterable<Activity>  $rows
+     */
+    public static function hideUnseenOriginals(iterable $rows, User $viewer): void
+    {
+        $named = collect($rows)->filter(fn (Activity $a) => isset($a->changes['duplicate_of']['to']));
+        $seen = Issue::visibleKeys($viewer, $named->map(fn (Activity $a) => $a->changes['duplicate_of']['to']));
+        foreach ($named as $a) {
+            if (! $seen->contains(strtoupper((string) $a->changes['duplicate_of']['to']))) {
+                $a->changes = Arr::except($a->changes, 'duplicate_of');
+            }
+        }
     }
 
     /** "Alex's agent": the owner's first name, as the UI's AgentLabel shows it (spec 5.1). */

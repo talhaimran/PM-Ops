@@ -109,6 +109,8 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::patch('/issues/{key}', [IssueController::class, 'update'])->name('issues.update');
     Route::delete('/issues/{key}', [IssueController::class, 'destroy'])->name('issues.destroy');
     Route::post('/issues/{key}/restore', [IssueController::class, 'restore'])->name('issues.restore');
+    Route::post('/issues/{key}/links', [IssueController::class, 'link'])->name('issues.links.store');
+    Route::delete('/issues/{key}/links', [IssueController::class, 'unlink'])->name('issues.links.destroy');
     Route::post('/comments/{comment}/restore', [IssueController::class, 'restoreComment'])->name('comments.restore');
     Route::post('/issues/{key}/move', [BoardController::class, 'move'])->name('issues.move');
     Route::post('/issues/{key}/rank', [SprintController::class, 'rank'])->name('issues.rank');

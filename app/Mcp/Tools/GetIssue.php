@@ -23,7 +23,7 @@ class GetIssue extends Tool
     public function handle(Request $request, IssueService $issues): Response
     {
         $data = $request->validate(['issue' => 'required|string', 'fields' => 'nullable|string|max:500']);
-        $issue = $issues->loadFull($issues->resolve($request->user(), $request->get('issue')));
+        $issue = $issues->loadFull($issues->resolve($request->user(), $request->get('issue')), $request->user());
 
         return $this->result(
             "{$issue->key} [{$issue->type->value}, {$issue->status->name}, {$issue->priority->value}]: {$issue->title}",

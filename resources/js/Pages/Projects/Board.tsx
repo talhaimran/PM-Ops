@@ -14,11 +14,13 @@ import EmptyState from '@/Components/EmptyState';
 import IssueDrawer from '@/Components/IssueDrawer';
 import ResolutionChip, { resolutionLabels } from '@/Components/ResolutionChip';
 import { categoryDot } from '@/Components/StatusLozenge';
+import { useWarningConfirm } from '@/Components/WarningConfirm';
 import { transition } from '@/motion';
-import { Calendar, CircleAlert, Inbox } from 'lucide-react';
+import { Ban, Calendar, CircleAlert, Inbox } from 'lucide-react';
 import { motion } from 'motion/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { UNDO_LIFETIME } from '@/undo';
+import { dropAnnouncement } from '@/board';
 import { IssueOptions, Project, Resolution, StatusCategory } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -42,6 +44,8 @@ export interface Card {
     parent: string | null;
     /** Spec 7.11: what an edit from the card (the resolution chip) sends back. */
     version: number;
+    /** Spec 7.5: an unresolved blocker you can see. */
+    blocked?: boolean;
 }
 
 interface BoardData {
@@ -75,19 +79,42 @@ export default function Board({
     const [busy, setBusy] = useState<string | null>(null);
     const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
     useEffect(() => () => clearTimeout(timer.current), []);
+    // 2-D4: dropping a blocked card into an In Progress column comes back as `confirm`; the card waits there until answered.
+    const [ask, warning] = useWarningConfirm();
     const { lanes, active, sensors, reset, handlers } = useSortableLanes(source, (key, lane, laneChanged, index, cards) => {
-        setMoved(`${key} moved to ${lane}, position ${index + 1} of ${cards.length}`);
+        const say = (state: Parameters<typeof dropAnnouncement>[4]) => setMoved(dropAnnouncement(key, lane, index, cards.length, state));
         if (laneChanged && board.columns.find((c) => c.name === lane)!.statuses[0].category === 'done') {
             setFresh(key);
             clearTimeout(timer.current);
             timer.current = setTimeout(() => setFresh((now) => (now === key ? null : now)), UNDO_LIFETIME);
         }
-        router.post(
-            route('issues.move', key),
-            // Spec 7.4: a drop takes the column's first status (lanes are keyed by column name).
-            { ...(laneChanged ? { status: board.columns.find((c) => c.name === lane)!.statuses[0].name } : {}), ...placement(index, cards) },
-            { preserveScroll: true, preserveState: true, onError: reset },
-        );
+        // Spec 7.4: a drop takes the column's first status (lanes are keyed by column name).
+        const status = laneChanged ? board.columns.find((c) => c.name === lane)!.statuses[0].name : undefined;
+        const move = (confirm: boolean) =>
+            router.post(
+                route('issues.move', key),
+                { ...(status ? { status } : {}), ...placement(index, cards), ...(confirm ? { confirm } : {}) },
+                {
+                    preserveScroll: true,
+                    preserveState: true,
+                    onSuccess: () => say('moved'),
+                    onError: (failed) => {
+                        if (!failed.confirm) return reset();
+                        say('confirm');
+                        ask({
+                            title: `Move ${key} to ${status}?`,
+                            warnings: [{ text: failed.confirm }],
+                            confirmLabel: `Move to ${status}`,
+                            run: () => move(true),
+                            cancel: () => {
+                                reset();
+                                say('kept');
+                            },
+                        });
+                    },
+                },
+            );
+        move(false);
     });
     const [creating, setCreating] = useState(false);
     const [completing, setCompleting] = useState(false);
@@ -189,6 +216,7 @@ export default function Board({
             {can.contribute && (
                 <IssueFormModal show={creating} onClose={() => setCreating(false)} projectKey={project.key} options={options} />
             )}
+            {warning}
             <IssueDrawer />
         </AuthenticatedLayout>
     );
@@ -292,6 +320,12 @@ function CardView({ card, dragging = false, chip }: { card: Card; dragging?: boo
                         {due === 'overdue' ? <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" /> : <Calendar className="h-3.5 w-3.5" aria-hidden="true" />}
                         {due === 'overdue' ? 'Overdue ' : 'Due '}
                         {new Date(`${card.due_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                )}
+                {card.blocked && (
+                    <span className="flex items-center gap-1 text-t-bad">
+                        <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+                        Blocked
                     </span>
                 )}
                 {card.assignee && <Avatar name={card.assignee.name} email={card.assignee.email} className="ms-auto" />}

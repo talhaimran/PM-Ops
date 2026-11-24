@@ -18,6 +18,8 @@ class MoveIssueRequest extends FormRequest
             'after' => ['nullable', 'string', 'max:30'],
             // A-L5: why an agent asks to move to Done, shown to the person who decides.
             'reason' => ['nullable', 'string', 'max:200'],
+            // 2-D4: move although the issue is blocked or a predecessor isn't resolved.
+            'confirm' => ['sometimes', 'boolean'],
         ];
     }
 

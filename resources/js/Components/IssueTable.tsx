@@ -6,7 +6,7 @@ import StatusLozenge from '@/Components/StatusLozenge';
 import { issueUrl, onPeekClick } from '@/issueUrl';
 import { Issue } from '@/types';
 import { Link } from '@inertiajs/react';
-import { ArrowDown, ArrowUp } from 'lucide-react';
+import { ArrowDown, ArrowUp, Ban } from 'lucide-react';
 
 type Column = { sort?: string; label: string; className?: string; cell: (i: Issue, peek?: boolean) => React.ReactNode };
 
@@ -41,6 +41,12 @@ const columns: Column[] = [
             <span className="flex flex-col items-start gap-0.5">
                 <StatusLozenge status={i.status} category={i.category} color={i.status_color} />
                 {i.resolution && i.resolution !== 'done' && <span className="text-xs text-muted">{resolutionLabels[i.resolution]}</span>}
+                {i.blocked && (
+                    <span className="flex items-center gap-1 text-xs text-t-bad">
+                        <Ban className="h-3 w-3" aria-hidden="true" />
+                        Blocked
+                    </span>
+                )}
             </span>
         ),
     },

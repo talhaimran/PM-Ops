@@ -65,6 +65,9 @@ function isolationRouteCases(): array
         'POST api/v1/issues/{key}/comments' => ['api/v1/issues/{I}/comments', ['body' => 'x']],
         'POST api/v1/issues/{key}/move' => ['api/v1/issues/{I}/move', ['status' => '{COLN}']],
         'POST api/v1/issues/{key}/rank' => ['api/v1/issues/{I}/rank', ['sprint' => '{SN}']],
+        // Links: B's issue as the target (from A's WEB-1), and as the issue in the URL.
+        'POST api/v1/issues/{key}/links' => ['api/v1/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
+        'DELETE api/v1/issues/{key}/links' => ['api/v1/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
         'GET api/v1/me/issues' => ['api/v1/me/issues', []],
         // Take no id: whoami names only the token's own workspace; updates are only the calling agent's, in A.
         // Not compared: the rate-limit counter it reports differs between any two calls.
@@ -117,6 +120,8 @@ function isolationRouteCases(): array
         'POST {workspace}/issues/{key}/move' => ['alpha/issues/{I}/move', ['status' => '{COLN}']],
         'POST {workspace}/issues/{key}/rank' => ['alpha/issues/{I}/rank', ['sprint' => '{SN}']],
         'POST {workspace}/issues/{key}/restore' => ['alpha/issues/{I}/restore', []],
+        'POST {workspace}/issues/{key}/links' => ['alpha/issues/WEB-1/links', ['type' => 'blocks', 'to' => '{I}']],
+        'DELETE {workspace}/issues/{key}/links' => ['alpha/issues/{I}/links', ['type' => 'blocks', 'to' => 'WEB-1']],
         'GET {workspace}/projects' => ['alpha/projects', []],
         'POST {workspace}/projects' => ['alpha/projects', ['key' => '{P}', 'name' => 'x'], false],
         'GET {workspace}/projects/{project}' => ['alpha/projects/{P}', []],
@@ -240,6 +245,8 @@ function isolationToolCases(): array
         Tools\UpdateIssue::class => ['issue' => '{I}', 'title' => 'x'],
         Tools\DeleteIssue::class => ['issue' => '{I}', ...$confirm],
         Tools\GetIssueActivity::class => ['issue' => '{I}'],
+        Tools\LinkIssues::class => ['from' => 'WEB-1', 'type' => 'blocks', 'to' => '{I}'],
+        Tools\UnlinkIssues::class => ['from' => '{I}', 'type' => 'blocks', 'to' => 'WEB-1'],
         Tools\AddComment::class => ['issue' => '{I}', 'body' => 'x'],
         Tools\UpdateComment::class => ['comment_id' => '{C}', 'body' => 'x'],
         Tools\DeleteComment::class => ['comment_id' => '{C}', ...$confirm],
@@ -325,6 +332,7 @@ function workspaceSnapshot(Workspace $w): string
     return md5(json_encode([
         Project::whereIn('id', $projects)->orderBy('id')->get(), $issues,
         Comment::withTrashed()->whereIn('issue_id', $issues->pluck('id'))->orderBy('id')->get(),
+        DB::table('issue_links')->whereIn('source_issue_id', $issues->pluck('id'))->orWhereIn('target_issue_id', $issues->pluck('id'))->orderBy('id')->get(),
         Label::whereIn('project_id', $projects)->orderBy('id')->get(), Column::whereIn('project_id', $projects)->orderBy('id')->get(),
         Sprint::whereIn('project_id', $projects)->orderBy('id')->get(),
         DB::table('project_user')->whereIn('project_id', $projects)->orderBy('id')->get(),

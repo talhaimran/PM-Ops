@@ -45,6 +45,10 @@ class IssueResource extends JsonResource
             'epic' => $link($this->epic),
             'parent' => $link($this->parent),
             'sprint' => $this->sprint ? ['id' => $this->sprint->id, 'name' => $this->sprint->name, 'state' => $this->sprint->state->value] : null,
+            // Spec 7.5: an unresolved blocker the viewer can see; set on lists (Issue::withBlocked) and the single issue.
+            'blocked' => $this->when(array_key_exists('blocked', $this->resource->getAttributes()), fn () => (bool) $this->resource->getAttributes()['blocked']),
+            // Grouped by type name as read from this issue ("is blocked by"); only on the single issue (IssueService::loadFull).
+            'links' => $this->when($this->resource->links !== null, fn () => (object) $this->resource->links),
             'subtasks' => $this->whenLoaded('subtasks', fn () => $this->subtasks->map($child)->all()),
             'epic_issues' => $this->whenLoaded('epicIssues', fn () => $this->epicIssues->map($child)->all()),
             'comments' => $this->whenLoaded('comments', fn () => CommentResource::collection($this->comments)->resolve()),

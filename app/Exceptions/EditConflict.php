@@ -6,6 +6,7 @@ use App\Http\Resources\CommentResource;
 use App\Http\Resources\IssueResource;
 use App\Models\Comment;
 use App\Models\Issue;
+use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\IssueService;
 use App\Services\UndoService;
@@ -26,11 +27,11 @@ class EditConflict extends AuthorizationException
         parent::__construct($payload['message']."\n\n".json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     }
 
-    /** What changed on $issue since $sent (ActivityLogger::changesSince); `changes_truncated` only when older changes were left out. */
-    public static function issue(Issue $issue, int $sent): self
+    /** What changed on $issue since $sent, as $viewer may see it (ActivityLogger::changesSince); `changes_truncated` only when older changes were left out. */
+    public static function issue(Issue $issue, int $sent, User $viewer): self
     {
         $issue->loadMissing(IssueService::DISPLAY);
-        $changes = app(ActivityLogger::class)->changesSince($issue, $sent, $truncated);
+        $changes = app(ActivityLogger::class)->changesSince($issue, $sent, $viewer, $truncated);
 
         return new self([
             'error' => 'conflict',
@@ -81,7 +82,7 @@ class EditConflict extends AuthorizationException
         $last = collect($this->payload['changes'] ?? [])->last();
         $theirs = $this->subject instanceof Comment
             ? ['body' => $this->subject->body]
-            : app(UndoService::class)->forUpdate($this->subject, array_keys($request->except(['version', 'overwrite'])));
+            : app(UndoService::class)->forUpdate($this->subject, array_keys($request->except(['version', 'overwrite'])), $request->user());
         if (array_key_exists('resolution', $theirs)) {
             // The real resolution (forUpdate puts a Duplicate back as Done, for Undo).
             $theirs['resolution'] = $this->subject->resolution?->value;

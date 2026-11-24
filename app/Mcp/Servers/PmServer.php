@@ -25,6 +25,7 @@ use App\Mcp\Tools\GetIssue;
 use App\Mcp\Tools\GetIssueActivity;
 use App\Mcp\Tools\GetProject;
 use App\Mcp\Tools\GetUpdates;
+use App\Mcp\Tools\LinkIssues;
 use App\Mcp\Tools\ListColumns;
 use App\Mcp\Tools\ListLabels;
 use App\Mcp\Tools\ListProjects;
@@ -35,6 +36,7 @@ use App\Mcp\Tools\ProjectSummary;
 use App\Mcp\Tools\RankBacklog;
 use App\Mcp\Tools\SearchIssues;
 use App\Mcp\Tools\StartSprint;
+use App\Mcp\Tools\UnlinkIssues;
 use App\Mcp\Tools\UpdateColumn;
 use App\Mcp\Tools\UpdateComment;
 use App\Mcp\Tools\UpdateIssue;
@@ -84,6 +86,8 @@ class PmServer extends Server
         UpdateIssue::class,
         DeleteIssue::class,
         GetIssueActivity::class,
+        LinkIssues::class,
+        UnlinkIssues::class,
         AddComment::class,
         UpdateComment::class,
         DeleteComment::class,

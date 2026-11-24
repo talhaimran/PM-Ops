@@ -5,6 +5,7 @@ import Dropdown from '@/Components/Dropdown';
 import EmptyState from '@/Components/EmptyState';
 import InputError from '@/Components/InputError';
 import IssueFormModal, { selectClass } from '@/Components/IssueFormModal';
+import IssueLinks from '@/Components/IssueLinks';
 import IssueTypeIcon from '@/Components/IssueTypeIcon';
 import PriorityIcon from '@/Components/PriorityIcon';
 import PrimaryButton from '@/Components/PrimaryButton';
@@ -13,11 +14,12 @@ import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge from '@/Components/StatusLozenge';
 import StatusMenu from '@/Components/StatusMenu';
 import TextInput from '@/Components/TextInput';
+import { useWarningConfirm } from '@/Components/WarningConfirm';
 import { advanceBase, CONFLICT_SETTLED, ConflictFlash } from '@/conflict';
 import { issueUrl } from '@/issueUrl';
 import { ActivityEntry, Comment, Issue, IssueLink, IssueOptions } from '@/types';
 import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { Ellipsis } from 'lucide-react';
+import { Ban, Ellipsis } from 'lucide-react';
 import { ElementType, ReactNode, useEffect, useState } from 'react';
 
 // Minimal Markdown styling without @tailwindcss/typography.
@@ -63,9 +65,21 @@ export default function IssueView({
     // editors read it when they open, so a change that arrives while someone types is caught, not overwritten.
     // One per editor; the page's own saves move them on (advanceBase).
     const [bases, setBases] = useState({ title: issue.version, description: issue.version });
-    const save = (data: Record<string, unknown>, onSuccess?: () => void, version = issue.version) =>
+    // 2-D4: a move into In Progress while blocked comes back as `confirm`; asked first, then sent again with confirm.
+    const [ask, warning] = useWarningConfirm();
+    const save = (data: Record<string, unknown>, onSuccess?: () => void, version = issue.version): void =>
         router.patch(route('issues.update', issue.key), { ...data, version } as never, {
             preserveScroll: true,
+            // The page stays mounted on a refusal, so the confirm below can open.
+            preserveState: 'errors',
+            onError: (failed) =>
+                failed.confirm &&
+                ask({
+                    title: `Move ${issue.key} to ${String(data.status)}?`,
+                    warnings: [{ text: failed.confirm }],
+                    confirmLabel: `Move to ${String(data.status)}`,
+                    run: () => save({ ...data, confirm: true }, onSuccess, version),
+                }),
             onSuccess: (next) => {
                 const props = next.props as { issue?: Issue; peek?: IssueViewData | null };
                 const saved = (props.issue?.key === issue.key ? props.issue : props.peek?.issue)?.version;
@@ -204,6 +218,12 @@ export default function IssueView({
                             onChange={(status) => save({ status })}
                         />
                         {issue.resolution && <ResolutionChip issueKey={issue.key} version={issue.version} resolution={issue.resolution} editable={can.contribute} />}
+                        {issue.blocked && (
+                            <span className="inline-flex h-control-h-sm items-center gap-1 rounded-pill tint-bad px-2.5 text-xs">
+                                <Ban className="h-3.5 w-3.5" aria-hidden="true" />
+                                Blocked
+                            </span>
+                        )}
                         {can.contribute && (
                             <div className="ms-auto">
                                 <Dropdown>
@@ -417,6 +437,8 @@ export default function IssueView({
                     </section>
 
 
+                {issue.links && <IssueLinks issue={issue} canEdit={can.contribute} />}
+
                 {full && linkList('Issues in this epic', issue.epic_issues)}
                 {full && linkList('Sub-tasks', issue.subtasks, true)}
 
@@ -481,6 +503,7 @@ export default function IssueView({
                 )}
             </div>
 
+            {warning}
             {can.contribute && (
                 <IssueFormModal show={addingSubtask} onClose={() => setAddingSubtask(false)} projectKey={issue.project} options={options} parent={issue.key} />
             )}

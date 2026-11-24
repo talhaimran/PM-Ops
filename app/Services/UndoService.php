@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Resolution;
 use App\Models\Issue;
+use App\Models\User;
 
 /**
  * Undo for the web UI (spec 5.1): a new change in the opposite direction through the same services.
@@ -11,6 +12,8 @@ use App\Models\Issue;
  */
 class UndoService
 {
+    public function __construct(private LinkService $links) {}
+
     /**
      * The marker an undo carries: the issue's version right after the change. The undo sends it back as the version it
      * read (spec 5.1, 7.11), so IssueService stops it with "Can't undo: …" (EditConflict) if the issue changed since;
@@ -28,7 +31,7 @@ class UndoService
      * @param  list<string>  $fields
      * @return array<string, mixed>
      */
-    public function forUpdate(Issue $issue, array $fields): array
+    public function forUpdate(Issue $issue, array $fields, User $viewer): array
     {
         $issue->loadMissing(IssueService::DISPLAY);
         $key = fn (?Issue $linked) => $linked ? "{$issue->project->key}-{$linked->number}" : null;
@@ -39,7 +42,7 @@ class UndoService
             'type' => $issue->type->value,
             'priority' => $issue->priority->value,
             'status' => $issue->status->name,
-            'resolution' => $this->resolution($issue),
+            'resolution' => $issue->resolution?->value,
             'assignee' => $issue->assignee?->email,
             'labels' => $issue->labels->pluck('name')->values()->all(),
             'story_points' => $issue->story_points,
@@ -51,13 +54,8 @@ class UndoService
 
         // A status change takes the resolution with it: reopening clears it, so the undo must say what it was.
         $data = array_intersect_key($current, array_flip(in_array('status', $fields, true) ? [...$fields, 'resolution'] : $fields));
-        if (isset($data['resolution']) && $issue->resolution === Resolution::Duplicate) {
-            $data['resolution'] = Resolution::Duplicate->value;
-            // The original's key lives only in the activity log until duplicate links (step 2).
-            $data['duplicate_of'] = $issue->activities()->latest('id')->get()->map(fn ($a) => $a->changes['duplicate_of']['to'] ?? null)->filter()->first();
-        }
 
-        return $data;
+        return isset($data['resolution']) ? [...$data, ...$this->resolution($issue, $viewer)] : $data;
     }
 
     /**
@@ -65,7 +63,7 @@ class UndoService
      *
      * @return array<string, mixed>
      */
-    public function forMove(Issue $issue): array
+    public function forMove(Issue $issue, User $viewer): array
     {
         $issue->loadMissing(IssueService::DISPLAY);
         $previous = Issue::where('project_id', $issue->project_id)
@@ -75,7 +73,7 @@ class UndoService
             ->orderByDesc('rank')
             ->first();
 
-        return ['status' => $issue->status->name, ...($issue->resolution ? ['resolution' => $this->resolution($issue)] : [])] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
+        return ['status' => $issue->status->name, ...$this->resolution($issue, $viewer)] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
     }
 
     /**
@@ -101,9 +99,19 @@ class UndoService
         return ['sprint' => $issue->sprint?->name ?? 'backlog'] + ($previous ? ['after' => "{$issue->project->key}-{$previous->number}"] : ['position' => 0]);
     }
 
-    /** shortcut: a Duplicate is put back as Done, because the original's key isn't stored until duplicate links (step 2); the activity keeps it. */
-    private function resolution(Issue $issue): ?string
+    /** The resolution to put back, and for a Duplicate the original it points at (2-R10: from its duplicates link). */
+    private function resolution(Issue $issue, User $viewer): array
     {
-        return ($issue->resolution === Resolution::Duplicate ? Resolution::Done : $issue->resolution)?->value;
+        if (! $issue->resolution) {
+            return [];
+        }
+        if ($issue->resolution !== Resolution::Duplicate) {
+            return ['resolution' => $issue->resolution->value];
+        }
+        $original = $this->links->original($issue, $viewer);
+
+        // No link $viewer can see (its original was purged or is hidden, 2-D2, or the step 2 migration couldn't find it):
+        // put it back as Done rather than fail or name it.
+        return $original ? ['resolution' => Resolution::Duplicate->value, 'duplicate_of' => $original->key] : ['resolution' => Resolution::Done->value];
     }
 }

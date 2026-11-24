@@ -58,16 +58,18 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `update_project` | People only (as above) | project | name, description |
 | `delete_project` | People only (as above) | project, confirm | |
 | `create_issue` | Create an issue, sub-task (`parent`) or epic | project, title | description, type, priority, status, resolution, duplicate_of, assignee, labels, story_points, due_date, epic, parent, sprint |
-| `get_issue` | Issue with sub-tasks, epic issues, comments and `pending_approvals`; its `version` (and each comment's) is what edits send | issue | fields |
-| `update_issue` | Change only the fields you send; `null` clears. Send the `version` you read: if it changed since, nothing is saved and the error lists what changed. A Done-category status waits for a person's approval. `resolution` (and `duplicate_of`) go with a Done status, or change an issue that is already Done | issue, version | title, description, type, priority, status, resolution, duplicate_of, assignee, labels, story_points, due_date, epic, parent, sprint, reason |
+| `get_issue` | Issue with sub-tasks, epic issues, comments, `pending_approvals`, `links` (grouped by type as read from this issue, e.g. `"is blocked by": [{key, title, status, category…}]`; only issues you can see) and `blocked`; its `version` (and each comment's) is what edits send | issue | fields |
+| `update_issue` | Change only the fields you send; `null` clears. Send the `version` you read: if it changed since, nothing is saved and the error lists what changed. A Done-category status waits for a person's approval. `resolution` (and `duplicate_of`) go with a Done status, or change an issue that is already Done; Duplicate also makes a `duplicates` link. Moving into an In Progress-category status while the issue is blocked, or before an issue it follows is resolved, is refused with the reason until you resend with `confirm: true` | issue, version | title, description, type, priority, status, resolution, duplicate_of, assignee, labels, story_points, due_date, epic, parent, sprint, reason, confirm |
 | `delete_issue` | Delete an issue and its sub-tasks. Soft: they disappear from every tool and response; a person can restore them in the web app for 30 days | issue, confirm | |
 | `get_issue_activity` | Change history, newest first | issue | page, per_page, cursor |
+| `link_issues` | Link two issues: `{"from":"WEB-12","type":"blocks","to":"WEB-15"}`. Types: blocks, precedes, relates to, duplicates, clones; reverse names (is blocked by, follows, is duplicated by, is cloned by) work too. Across projects in the workspace; blocks and precedes can't loop. Write level | from, type, to | |
+| `unlink_issues` | Remove a link; the same arguments. Write level | from, type, to | |
 | `add_comment` | Markdown comment | issue, body | |
 | `update_comment` | Edit your own comment; send its `version` (from `get_issue`), a stale one saves nothing | comment_id, body, version | |
 | `delete_comment` | Delete your comment (admins: any). Soft, like issues | comment_id | |
 | `list_labels` / `create_label` / `update_label` / `delete_label` | Manage labels (by name) | project (+ name or label) | color, name |
 | `get_board` | Columns with their statuses and issue cards in rank order (epics hidden); cards carry `category`, `resolution`, `resolved_at` | project | assignee, type, priority, label, category, resolution, q, sprint |
-| `move_issue` | Change status and/or position on the board. Moving to a Done-category status waits for a person's approval; `resolution` says how it ended (default `done`) | issue | status, resolution, duplicate_of, position, after, reason |
+| `move_issue` | Change status and/or position on the board. Moving to a Done-category status waits for a person's approval; `resolution` says how it ended (default `done`). A blocked issue (or one whose predecessor isn't resolved) needs `confirm: true` to enter In Progress, as for `update_issue` | issue | status, resolution, duplicate_of, position, after, reason, confirm |
 | `list_columns` | Columns with their statuses (name, category) and issue counts | project | |
 | `create_column` / `update_column` / `delete_column` | People only (as above) | project (+ name or column) | position, name, status, category, move_issues_to |
 | `list_sprints` | Sprints with dates and points | project | state, page, per_page, cursor |
@@ -78,15 +80,17 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `complete_sprint` | Close the active sprint and move unfinished issues | project, sprint, move_open_issues_to, confirm | |
 | `get_backlog` | Open sprints and backlog in rank order | project | |
 | `rank_backlog` | Reorder within, or move between, backlog and sprints | issue | sprint, position, after |
-| `search_issues` | Filter and sort issues across projects | | q, project, assignee, type, priority, label, category, resolution, sprint, sort, page, per_page, cursor, fields |
+| `search_issues` | Filter and sort issues across projects; each issue carries `blocked`. `blocked: true` = has an unresolved blocker, `blocked_by: "WEB-12"` = the issues WEB-12 blocks | | q, project, assignee, type, priority, label, category, resolution, sprint, blocked, blocked_by, sort, page, per_page, cursor, fields |
 | `my_issues` | Your assigned issues that aren't done (pass `category` or `resolution` to see others), by priority then due date | | limit, category, resolution, fields |
 | `project_summary` | Counts per column and type, open (not done)/overdue, sprint progress | project | |
 | `bulk_create_issues` | Up to 50 creates, all or nothing | project, issues[] | |
-| `bulk_update_issues` | Up to 50 updates by key, each with the `version` you read; all or nothing, so one stale item saves nothing and the error names every stale key (Done waits for approval, as above) | updates[] | |
+| `bulk_update_issues` | Up to 50 updates by key, each with the `version` you read; all or nothing, so one stale item saves nothing and the error names every stale key (Done waits for approval, as above); likewise every item that needs `confirm` (blocked, as above) is named and nothing is saved | updates[] | |
 
 **Filters:** `assignee` is an email or `"unassigned"`, and `sprint` is a name, `"active"` or `"backlog"`. `q` matches title text or an exact key. **Sort** (`search_issues`) takes one of `key, title, type, priority, status, assignee, story_points, due_date, created, updated`; prefix with `-` for descending (default `-key`, newest first).
 
 **Resolution:** every issue in a Done-category status has a `resolution`: `done`, `wont_do`, `duplicate` or `cannot_reproduce` (responses also carry `resolved_at`; both are `null` while the issue is open). Moving into a Done-category status without one resolves it as `done`. `resolution` only goes with a Done status, or on an issue that is already Done (changing it needs no approval); sent alone on an open issue it is a 422 listing the Done statuses. `duplicate` needs `duplicate_of` with the original's key (an issue you can open, else the same "not found" error). A waiting approval request carries the resolution, and the person approving applies status and resolution together. Only `done` counts as completed in sprint points. `category` (`to_do`, `in_progress`, `done`) and `resolution` filter `search_issues`, `get_board`, `my_issues` and the REST lists.
+
+**Links:** `link_issues` / `unlink_issues` (REST `POST` / `DELETE /api/v1/issues/{key}/links` with `{"type", "to"}`). A link is stored once, forward (`WEB-12 blocks WEB-15`); `get_issue` shows it on WEB-15 as `"is blocked by"`. An issue is `blocked` while a blocker you can see isn't in a Done-category status. Moving a blocked issue into an In Progress-category status, or starting one that `follows` an unresolved issue, is a 422 with the reason ("WEB-15 is blocked by WEB-12 (In Progress), which isn't resolved. Send confirm: true to move it anyway."): tell your user, and resend with `confirm: true` only if they agree. Links to issues you can't see are left out everywhere.
 
 **Placement** (`move_issue`, `rank_backlog`): `position` is a 0-based index in the destination (default: bottom), or use `after: "WEB-7"` to sit directly below that issue. Send one or the other, not both.
 

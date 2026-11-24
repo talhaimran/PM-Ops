@@ -41,6 +41,8 @@ class BoardResource extends JsonResource
             'parent' => $issue->parent ? $issue->project->key.'-'.$issue->parent->number : null,
             // Spec 7.11: what an edit from a list sends back (the board's resolution chip, an agent's update_issue).
             'version' => $issue->version,
+            // Spec 7.5: only where the query asked for it (Issue::withBlocked).
+            ...(array_key_exists('blocked', $issue->getAttributes()) ? ['blocked' => (bool) $issue->getAttributes()['blocked']] : []),
         ];
     }
 }

@@ -6,12 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Issues\BulkStoreIssueRequest;
 use App\Http\Requests\Issues\BulkUpdateIssueRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
+use App\Http\Requests\Issues\LinkRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
 use App\Http\Resources\ActivityResource;
 use App\Http\Resources\ApprovalRequestResource;
 use App\Http\Resources\IssueResource;
+use App\Services\ActivityLogger;
 use App\Services\IssueService;
+use App\Services\LinkService;
 use App\Services\Pagination;
 use App\Services\ProjectService;
 use Illuminate\Http\JsonResponse;
@@ -22,7 +25,7 @@ use Illuminate\Support\Facades\Gate;
 
 class IssueController extends Controller
 {
-    public function __construct(private ProjectService $projects, private IssueService $issues) {}
+    public function __construct(private ProjectService $projects, private IssueService $issues, private LinkService $links) {}
 
     /**
      * Create an issue in a project.
@@ -58,6 +61,7 @@ class IssueController extends Controller
      * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
      * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
      * An agent's moves to a Done-category status wait for a person: 202 with `status: pending_approval` and `approval_requests`.
+     * Items that need `confirm` (a blocked issue entering In Progress) are all named as `updates.{index}.confirm`, and nothing is saved.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse
     {
@@ -70,12 +74,12 @@ class IssueController extends Controller
             ->response()->setStatusCode(202);
     }
 
-    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues and comments. `fields` (comma-separated keys) trims the answer; `key` always stays. */
+    /** Get an issue by key (e.g. WEB-12) with sub-tasks, epic issues, comments, `links` (by type, as read from this issue) and `blocked`. `fields` (comma-separated keys) trims the answer; `key` always stays. */
     public function show(Request $request, string $key): IssueResource
     {
         $fields = $request->validate(['fields' => ['nullable', 'string', 'max:500']])['fields'] ?? null;
 
-        return (new IssueResource($this->issues->loadFull($this->issues->resolve($request->user(), $key))))->fields($fields);
+        return (new IssueResource($this->issues->loadFull($this->issues->resolve($request->user(), $key), $request->user())))->fields($fields);
     }
 
     /**
@@ -87,6 +91,9 @@ class IssueController extends Controller
      *
      * An agent moving the issue to a Done-category status gets 202 `{"status": "pending_approval", "approval_request": {...},
      * "issue": {...}}`: a person must approve the move; the other fields are applied. `reason` (optional) says why.
+     *
+     * Moving into an In Progress-category status while the issue is blocked, or before an issue it follows is resolved,
+     * is a 422 with `errors.confirm` saying why, and nothing is saved; resend with `confirm: true` to go ahead.
      */
     public function update(UpdateIssueRequest $request, string $key): IssueResource|JsonResponse
     {
@@ -107,6 +114,34 @@ class IssueController extends Controller
         return response()->noContent();
     }
 
+    /**
+     * Link this issue to another (spec 7.5): `{"type": "blocks", "to": "WEB-15"}`.
+     *
+     * Types: blocks, precedes, relates to, duplicates, clones; the reverse names (is blocked by, follows, is duplicated
+     * by, is cloned by) are accepted and stored the other way round. Links may cross projects in your workspace. blocks
+     * and precedes can't loop (422 naming the loop). Needs write access to this issue's project and sight of the other
+     * issue (404 otherwise). Answers 201 with the link as stored, e.g. `{"from": "WEB-12", "type": "blocks", "to": "WEB-15"}`.
+     */
+    public function link(LinkRequest $request, string $key): JsonResponse
+    {
+        $from = $this->issues->resolve($request->user(), $key);
+        Gate::authorize('update', $from);
+        $link = $this->links->link($from, $request->validated('type'), $this->issues->resolve($request->user(), $request->validated('to')), $request->user());
+
+        return response()->json(['data' => ['from' => $link->source->key, 'type' => $link->type->value, 'to' => $link->target->key]], 201);
+    }
+
+    /** Remove a link: the same body as adding it (`type` may be the reverse name). Needs write access to either issue's project. */
+    public function unlink(LinkRequest $request, string $key): Response
+    {
+        $issue = $this->issues->resolve($request->user(), $key);
+        $other = $this->issues->resolve($request->user(), $request->validated('to'));
+        Gate::authorize('unlink', [$issue, $other]);
+        $this->links->unlink($issue, $request->validated('type'), $other, $request->user());
+
+        return response()->noContent();
+    }
+
     /** Activity log for an issue, newest first. `via` is web, api or mcp; `token_name` names the API token used. */
     public function activity(Request $request, string $key): AnonymousResourceCollection
     {
@@ -114,6 +149,9 @@ class IssueController extends Controller
 
         [$perPage, $page] = Pagination::resolve($request->validate(['cursor' => ['nullable', 'string', 'max:100']])['cursor'] ?? null, $request->integer('per_page'), $request->integer('page'), 50);
 
-        return Pagination::collection(ActivityResource::class, $issue->activities()->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $page));
+        $rows = $issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->paginate($perPage, page: $page);
+        ActivityLogger::hideUnseenOriginals($rows->getCollection(), $request->user());
+
+        return Pagination::collection(ActivityResource::class, $rows);
     }
 }

@@ -38,11 +38,15 @@ export default function Toaster() {
         (toast: Toast) => {
             if (!toast.undo) return;
             dismiss(toast.id);
-            router[toast.undo.method](toast.undo.url, toast.undo.data as Record<string, string>, {
+            const options = {
                 preserveScroll: true,
                 // Validation errors other than `undo` (e.g. the old column no longer exists) also end up in a toast.
-                onError: (failed) => !failed.undo && add({ message: Object.values(failed)[0] ?? "Can't undo.", tone: 'bad' }),
-            });
+                onError: (failed: Record<string, string>) => !failed.undo && add({ message: Object.values(failed)[0] ?? "Can't undo.", tone: 'bad' }),
+            };
+            const data = toast.undo.data as Record<string, string>;
+            // A delete carries its data in the options (removing a link, 2-R10).
+            if (toast.undo.method === 'delete') router.delete(toast.undo.url, { ...options, data });
+            else router[toast.undo.method](toast.undo.url, data, options);
         },
         [add, dismiss],
     );

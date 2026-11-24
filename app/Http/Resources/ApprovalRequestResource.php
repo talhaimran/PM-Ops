@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\ApprovalRequest;
+use App\Models\Issue;
 use App\Models\Status;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,7 +41,9 @@ class ApprovalRequestResource extends JsonResource
             'reason' => $this->action['reason'] ?? null,
             // Spec 7.4: how the agent says it ended; the person approving applies it with the move.
             'resolution' => $this->action['resolution'] ?? null,
-            'duplicate_of' => $this->action['duplicate_of'] ?? null,
+            // 2-D2: null for a reader who can't see the original (the same rule as the activity log's).
+            // shortcut: one query per request that names an original; batch it if approval lists grow.
+            'duplicate_of' => ($original = $this->action['duplicate_of'] ?? null) && auth()->user() && Issue::visibleKeys(auth()->user(), [$original])->isNotEmpty() ? $original : null,
             'agent' => IssueResource::agent($this->agent),
             'expires_at' => $this->expires_at,
             'created_at' => $this->created_at,
