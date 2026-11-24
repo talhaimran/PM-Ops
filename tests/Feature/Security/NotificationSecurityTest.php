@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
 use App\Models\InboxItem;
 use App\Models\User;
@@ -9,6 +10,16 @@ use App\Services\NotificationService;
 use App\Services\WatcherService;
 
 // Step 3 Review Focus 1: the inbox never shows what the reader can no longer see.
+
+/** What get_updates answers $user's agent (REST and MCP alike), optionally scoped to project keys. */
+function updatesOf(User $user, array $projects = []): array
+{
+    [, $token] = makeAgent($user, AgentLevel::Write, $projects);
+    $rest = asToken($token)->getJson('/api/v1/me/updates')->assertOk()->json('data');
+    expect(collect(mcpJson($token, 'get_updates')['updates'])->pluck('id')->all())->toBe(collect($rest)->pluck('id')->all());
+
+    return $rest;
+}
 
 beforeEach(function () {
     $this->ann = User::factory()->create();
@@ -37,6 +48,21 @@ test('a deleted issue takes its notifications out of the inbox, count and get_up
     app(IssueService::class)->delete($this->issue, $this->ann);
 
     expect($this->notes->inbox($this->bob, $this->ws)->total())->toBe(0)->and($this->notes->unreadCount($this->bob, $this->ws))->toBe(0);
+    $this->travel(2)->seconds();
+    expect(updatesOf($this->bob))->toBe([]);
+});
+
+test('get_updates leaves out a project the token is scoped away from', function () {
+    $api = makeProject($this->ann, 'API');
+    addMember($api, $this->bob, ProjectRole::Member);
+    $other = makeIssue($api, $this->ann);
+    app(WatcherService::class)->watch($other, $this->bob, $this->bob);
+    app(CommentService::class)->add($other, $this->ann, 'Hi');
+    app(CommentService::class)->add($this->issue, $this->ann, 'Hello');
+    $this->travel(2)->seconds();
+
+    expect(collect(updatesOf($this->bob))->pluck('issue')->sort()->values()->all())->toBe(['API-1', 'WEB-1'])
+        ->and(collect(updatesOf($this->bob, ['WEB']))->pluck('issue')->all())->toBe(['WEB-1']);
 });
 
 test("another workspace's notifications never show, and another user's cannot be marked read", function () {

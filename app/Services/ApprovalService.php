@@ -217,13 +217,13 @@ class ApprovalService
      * for issues $user can still see. A request's last change is its end, so updated_at is when it happened; ties break
      * by kind (approvals first) and id. Reading marks nothing read.
      * Only complete seconds are read (before this second), so an item can't land behind a cursor: it shows up at most ~1s late, never skipped.
-     * shortcut: a notification that batches a later change keeps its place (created_at), the new change isn't re-sent; use updated_at if agents need that.
+     * A notification streams by updated_at, so a row a later change batched into is sent again with its new count and text.
      *
      * @return array{updates: list<array>, next_cursor: ?string}
      */
     public function updatesFor(User $user, ?Agent $agent, ?string $cursor, int $perPage = 25, ?string $since = null): array
     {
-        [$at, $id, $notified] = $cursor ? $this->decodeUpdateCursor($cursor) : [$since ? Carbon::parse($since) : null, 0, false];
+        [$at, $id, $notified] = $cursor ? $this->decodeUpdateCursor($cursor) : [$since ? Carbon::parse($since)->setTimezone(config('app.timezone')) : null, 0, false];
         // Items at the cursor's own second: those of the same kind after its id, all of a later kind, none of an earlier one (approvals come first).
         $after = fn ($q, string $column, string $idColumn, string $tie) => $q->when($at, fn ($q) => $q->where(fn ($q) => $q->where($column, $cursor ? '>' : '>=', $at)
             ->when($cursor && $tie !== 'none', fn ($q) => $q->orWhere(fn ($q) => $q->where($column, $at)->when($tie === 'id', fn ($q) => $q->where($idColumn, '>', $id))))));
@@ -247,11 +247,11 @@ class ApprovalService
 
         $workspace = $this->current->get();
         $notes = InboxItem::visibleTo($user, $workspace->id)->whereNotIn('notifications.event', ['agent_summary', 'approval_request'])
-            ->where('notifications.created_at', '<', now()->startOfSecond())
-            ->tap(fn ($q) => $after($q, 'notifications.created_at', 'notifications.id', $notified ? 'id' : 'all'))
+            ->where('notifications.updated_at', '<', now()->startOfSecond())
+            ->tap(fn ($q) => $after($q, 'notifications.updated_at', 'notifications.id', $notified ? 'id' : 'all'))
             ->with(['issue.project', 'actor', 'agent.owner'])
-            ->orderBy('notifications.created_at')->orderBy('notifications.id')->limit($perPage)->get()
-            ->map(fn (InboxItem $n) => ['rank' => 1, 'ts' => $n->created_at->timestamp, 'id' => $n->id, 'item' => [
+            ->orderBy('notifications.updated_at')->orderBy('notifications.id')->limit($perPage)->get()
+            ->map(fn (InboxItem $n) => ['rank' => 1, 'ts' => $n->updated_at->timestamp, 'id' => $n->id, 'item' => [
                 'id' => "notification:{$n->id}",
                 'kind' => "notification.{$n->event}",
                 'notification_id' => $n->id,
@@ -259,7 +259,7 @@ class ApprovalService
                 'text' => NotificationService::describe($n),
                 'by' => $n->agent ? ActivityLogger::agentLabel($n->agent) : $n->actor?->name,
                 'count' => $n->count,
-                'at' => $n->created_at->toIso8601String(),
+                'at' => $n->updated_at->toIso8601String(),
             ]]);
 
         $rows = $approvals->concat($notes)->sortBy([['ts', 'asc'], ['rank', 'asc'], ['id', 'asc']])->take($perPage)->values();

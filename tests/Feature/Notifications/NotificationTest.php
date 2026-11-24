@@ -11,6 +11,7 @@ use App\Services\ApprovalService;
 use App\Services\CommentService;
 use App\Services\IssueService;
 use App\Services\NotificationService;
+use App\Services\StatusService;
 use App\Services\WatcherService;
 use Illuminate\Support\Collection;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -86,15 +87,61 @@ test('an agent asking for Done notifies its owner at once, never an Admin, and a
     expect($row->event)->toBe('approval_request')->and($row->read_at)->toBeNull()
         ->and(inboxOf($this->ann)->where('event', 'approval_request'))->toHaveCount(0);
 
+    // Exactly once: asking again returns the open request and tells nobody.
+    asToken($token)->postJson('/api/v1/issues/WEB-1/move', ['status' => 'Done'])->assertStatus(202);
+    expect(inboxOf($this->bob)->where('event', 'approval_request'))->toHaveCount(1);
+});
+
+test('a first-time request notifies only once its transaction commits, and a rolled-back one nobody', function () {
+    [$agent] = makeAgent($this->bob, AgentLevel::Write, name: 'helper');
+    $fresh = makeIssue($this->project, $this->ann, ['title' => 'Fresh']);
+    $status = app(StatusService::class)->resolveFor($this->project, 'Done');
+    $ask = function () use ($fresh, $agent, $status) {
+        app(ApprovalService::class)->requestDone($fresh, $this->bob, $agent, $status, null);
+        // Still inside the transaction: nothing may be sent yet.
+        expect(inboxOf($this->bob)->where('event', 'approval_request'))->toHaveCount(0);
+    };
+
     try {
-        DB::transaction(function () {
-            $status = $this->project->statuses()->where('name', 'Done')->first();
-            app(ApprovalService::class)->requestDone($this->issue, $this->cat, Agent::firstOrFail(), $status, null);
+        DB::transaction(function () use ($ask) {
+            $ask();
             throw new RuntimeException('boom');
         });
     } catch (RuntimeException) {
     }
-    expect(inboxOf($this->cat)->where('event', 'approval_request'))->toHaveCount(0);
+    expect(ApprovalRequest::count())->toBe(0)->and(inboxOf($this->bob)->where('event', 'approval_request'))->toHaveCount(0);
+
+    DB::transaction($ask);
+    expect(inboxOf($this->bob)->where('event', 'approval_request'))->toHaveCount(1);
+});
+
+test('get_updates re-sends a row that later changes batched into, with its new count', function () {
+    [, $token] = makeAgent($this->ann, AgentLevel::Write, name: 'mine');
+    app(IssueService::class)->update($this->issue, $this->bob, ['status' => 'In Progress']);
+    $this->travel(2)->seconds();
+    $first = asToken($token)->getJson('/api/v1/me/updates')->assertOk()->json();
+    expect($first['data'])->toHaveCount(1)->and($first['data'][0]['count'])->toBe(1);
+
+    app(IssueService::class)->update($this->issue->refresh(), $this->bob, ['status' => 'In Review']);
+    $this->travel(2)->seconds();
+    $second = asToken($token)->getJson('/api/v1/me/updates?cursor='.$first['meta']['next_cursor'])->assertOk()->json('data');
+
+    expect($second)->toHaveCount(1)->and($second[0]['count'])->toBe(2)->and($second[0]['text'])->toBe('Bob Builder made 2 changes to WEB-1');
+    // Reading it (web) doesn't re-stream it.
+    $this->actingAs($this->ann)->post(w('/notifications/read-all'));
+    $cursor = asToken($token)->getJson('/api/v1/me/updates?cursor='.$first['meta']['next_cursor'])->json('meta.next_cursor');
+    $this->travel(2)->seconds();
+    expect(asToken($token)->getJson('/api/v1/me/updates?cursor='.$cursor)->json('data'))->toBe([]);
+});
+
+test('since honours its own UTC offset', function () {
+    [, $token] = makeAgent($this->ann, AgentLevel::Write, name: 'mine');
+    app(IssueService::class)->update($this->issue, $this->bob, ['status' => 'In Progress']);
+    $this->travel(2)->seconds();
+    $at = fn ($minutes) => urlencode(now()->addMinutes($minutes)->setTimezone('+05:00')->format('Y-m-d\TH:i:sP'));
+
+    expect(asToken($token)->getJson('/api/v1/me/updates?since='.$at(-1))->json('data'))->toHaveCount(1)
+        ->and(asToken($token)->getJson('/api/v1/me/updates?since='.$at(1))->json('data'))->toBe([]);
 });
 
 test('mark read, mark all read and the unread count', function () {

@@ -88,7 +88,8 @@ class NotificationService
     {
         return InboxItem::where('user_id', $user->id)->where('workspace_id', $this->current->id() ?? 0)->whereNull('read_at')
             ->when($ids !== 'all', fn ($q) => $q->whereIn('id', (array) $ids))
-            ->update(['read_at' => now()]);
+            // Not touching updated_at: reading a row mustn't make get_updates send it again.
+            ->toBase()->update(['read_at' => now()]);
     }
 
     /**
