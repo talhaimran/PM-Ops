@@ -5,7 +5,7 @@ A lightweight, self-hosted, Jira-like project tracker that people use through a 
 - **Workspaces** hold projects and people, with roles Owner, Admin and Member, an audit log, plan limits, two-factor authentication and Google or GitHub sign-in. Every page lives under the workspace's address (`/acme/projects/WEB`).
 - **Projects** with short keys (`WEB`) and issues numbered per project (`WEB-12`). Roles per project: Admin, Member, Viewer.
 - **Issues:** Task, Bug, Story and Epic types, priorities, assignee, labels, story points, due dates, epics and one level of sub-tasks. Descriptions and comments are Markdown, and an activity log records who changed what and whether it came via web, API or MCP (with the token name).
-- **Kanban board** with drag and drop and per-project columns. **Backlog** with drag-to-rank. **Sprints:** create, start and complete, with unfinished issues moved to the backlog or the next sprint.
+- **Kanban board** with drag and drop and per-project columns. Each column shows one or more **statuses** from the workspace's status library; a status has a category (To do, In progress, Done), and Done means "category Done", wherever its column sits. **Backlog** with drag-to-rank. **Sprints:** create, start and complete, with unfinished issues moved to the backlog or the next sprint.
 - **List view**, cross-project **search**, and a **dashboard** with my issues, status counts and sprint progress.
 - **For agents:** 38 MCP tools over HTTP or stdio, a REST API with OpenAPI docs, agents with read, write or delete levels and project-scoped tokens, Idempotency-Key, per-agent rate limits, bulk create/update, and errors that list the valid options.
 
@@ -154,6 +154,13 @@ npm run build             # TypeScript check + production build
 
 `tests/Integration` spawns the real stdio MCP server, so it uses `DatabaseTruncation` instead of transactions.
 
+## Statuses, resolutions and edit conflicts
+
+- **Statuses** belong to the workspace and every project's columns map to them. Workspace Owners and Admins rename, recolour, merge and delete statuses at **Settings → Statuses**; a status's category can't change. Project Admins attach or create statuses in a column from the project's settings, and anyone who can edit an issue changes its status from the menu on the issue page.
+- **Resolution:** an issue in a Done-category status has a resolution: Done, Won't do, Duplicate (with the original's key) or Cannot reproduce. Moving into Done sets it (Done unless you pick another) and moving out clears it. Only Done counts as completed work in sprint progress.
+- **Edit conflicts:** issues and comments carry a `version`. A save based on an old version is refused with the changes made meanwhile; on the web you can reload or save yours over theirs. REST and MCP edits must send the `version` they read (see REST API).
+- **History:** status changes, sprint scope changes and estimate changes are recorded with who made them (and the agent and `via`, when there was one).
+
 ## Agents
 
 Create an agent at **sidebar → Agents** (`/demo/settings/agents`, under your workspace's address). Each agent has one token:
@@ -168,7 +175,7 @@ Create an agent at **sidebar → Agents** (`/demo/settings/agents`, under your w
 
 ### Approvals
 
-An agent's move into a project's last column (Done) doesn't happen at once. It opens an approval request and the agent is told `pending_approval` (REST 202). The agent's owner, or an Admin of the project who could make the move, decides on the dashboard under **Pending approvals** or in the **AI box** on the issue. If the issue changed since the request, approving needs a second confirm. A request goes stale if the issue or column is deleted or the agent is revoked, and expires after 7 days. Agents learn the outcome with `get_updates`.
+An agent's move into a Done-category status doesn't happen at once. It opens an approval request and the agent is told `pending_approval` (REST 202). The agent's owner, or an Admin of the project who could make the move, decides on the dashboard under **Pending approvals** or in the **AI box** on the issue. If the issue changed since the request, approving needs a second confirm. A request goes stale if the issue is deleted, the status is no longer in the project, or the agent is revoked, and expires after 7 days. Agents learn the outcome with `get_updates`.
 
 ### Settings → AI
 
@@ -189,7 +196,7 @@ Residual risk: an agent with legitimate access to several projects can be talked
 The base URL is `/api/v1`, documented at `/docs/api`. Highlights:
 
 - Issues are addressed by key everywhere: `GET /api/v1/issues/WEB-12`.
-- Fields take names, not ids: `status` is a column name, `assignee` an email, `labels` label names, `epic`/`parent` issue keys, `sprint` a sprint name. Wrong values return 422 with the valid options listed.
+- Fields take names, not ids: `status` is a status name (or a column name when that column has one status), `assignee` an email, `labels` label names, `epic`/`parent` issue keys, `sprint` a sprint name. Wrong values return 422 with the valid options listed.
 - Destructive calls need `"confirm": true`: deleting a project or issue, and completing a sprint.
 - **Idempotency:** send `Idempotency-Key: <uuid>` on any POST. A retry with the same key and body returns the original response (header `Idempotent-Replayed: true`). The same key with a different body gets 422.
 - **Bulk:** `POST /api/v1/projects/WEB/issues/bulk` and `PATCH /api/v1/issues/bulk`, up to 50 items, all or nothing.

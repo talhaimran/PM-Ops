@@ -157,3 +157,15 @@ test('a project Member and an agent cannot attach or detach', function () {
     $this->delete(w("/projects/WEB/columns/{$col->id}/statuses/".($this->st)('In Review')->id))->assertForbidden();
     expect(Status::where('name', 'QA')->exists())->toBeFalse();
 });
+
+test('attaching a status the column already has changes nothing: its position stays', function () {
+    $col = ($this->col)('In Review');
+    foreach (['QA', 'Blocked'] as $name) {
+        app(StatusService::class)->create($this->ws, $this->owner, $name, StatusCategory::InProgress);
+        $this->actingAs($this->owner)->post(w("/projects/WEB/columns/{$col->id}/statuses"), ['status' => $name])->assertSessionHasNoErrors();
+    }
+
+    $this->post(w("/projects/WEB/columns/{$col->id}/statuses"), ['status' => 'In Review'])->assertSessionHasNoErrors();
+
+    expect($col->statuses()->pluck('name')->all())->toBe(['In Review', 'QA', 'Blocked']);
+});

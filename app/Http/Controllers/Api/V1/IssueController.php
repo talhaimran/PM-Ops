@@ -57,7 +57,7 @@ class IssueController extends Controller
      *
      * Body: `{"updates": [{"key": "WEB-1", "version": 3, ...fields to change}, ...]}`. Errors are keyed `updates.{index}.{field}`.
      * Each item sends the `version` it read; if any changed since, nothing is saved: 409 with `conflicts` naming each one.
-     * An agent's moves to the last column wait for a person: 202 with `status: pending_approval` and `approval_requests`.
+     * An agent's moves to a Done-category status wait for a person: 202 with `status: pending_approval` and `approval_requests`.
      */
     public function bulkUpdate(BulkUpdateIssueRequest $request): AnonymousResourceCollection|JsonResponse
     {

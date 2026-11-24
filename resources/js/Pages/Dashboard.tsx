@@ -28,11 +28,13 @@ interface Summary {
 
 export default function Dashboard({
     myIssues,
+    assignedOpen,
     pendingApprovals,
     projects,
     filters,
 }: {
     myIssues: Issue[];
+    assignedOpen: number;
     filters: { category?: string; resolution?: string };
     pendingApprovals: ApprovalRequest[];
     projects: { key: string; name: string; my_role: ProjectRole; summary: Summary }[];
@@ -45,7 +47,7 @@ export default function Dashboard({
                 {/* Design system KPI tiles: a label and one number with its unit. */}
                 <dl className="grid gap-4 sm:grid-cols-3">
                     {[
-                        ['Assigned to you', `${myIssues.length} ${myIssues.length === 1 ? 'issue' : 'issues'}`],
+                        ['Assigned to you', `${assignedOpen} ${assignedOpen === 1 ? 'issue' : 'issues'}`],
                         ['Open in your projects', `${projects.reduce((n, p) => n + p.summary.open, 0)} issues`],
                         ['Overdue', `${projects.reduce((n, p) => n + p.summary.overdue, 0)} issues`],
                     ].map(([label, value]) => (

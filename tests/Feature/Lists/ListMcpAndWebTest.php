@@ -58,3 +58,11 @@ test('dashboard shows my issues and project summaries', function () {
             ->where('projects.0.key', 'WEB')
             ->where('projects.0.summary.open', 1));
 });
+
+test('the Assigned to you tile counts open assigned issues whatever the filter shows', function () {
+    makeIssue($this->project, $this->me, ['assignee' => 'me@example.com']);
+    makeIssue($this->project, $this->me, ['assignee' => 'me@example.com', 'status' => 'Done']);
+
+    $this->actingAs($this->me)->get(w('/dashboard'))->assertInertia(fn (Assert $page) => $page->where('assignedOpen', 1)->has('myIssues', 1));
+    $this->get(w('/dashboard?category=done'))->assertInertia(fn (Assert $page) => $page->where('assignedOpen', 1)->has('myIssues', 1)->where('myIssues.0.key', 'WEB-2'));
+});

@@ -131,3 +131,35 @@ test('backfill: left keeps the estimate from before the activity, joined takes t
     // Status rows: the initial row, then the move, in created_at order.
     expect(DB::table('issue_status_history')->where('issue_id', $issue)->orderBy('id')->pluck('created_at')->all())->toEqual([$t(1), $t(6)]);
 });
+
+test('backfill: old activity rows hold column names, so a status renamed to "Done (API)" by the library migration still gets its history', function () {
+    $paths = collect(File::files(database_path('migrations')))->map(fn ($f) => $f->getPathname())
+        ->filter(fn ($p) => basename($p) < '2026_11_26')->sort()->values()->all();
+    Artisan::call('migrate:fresh', ['--path' => $paths, '--realpath' => true, '--force' => true]);
+
+    $this->freezeTime();
+    $now = now()->toDateTimeString();
+    $user = DB::table('users')->insertGetId(['name' => 'demo', 'email' => 'demo@example.com', 'password' => 'x', 'created_at' => $now, 'updated_at' => $now]);
+    $ws = DB::table('workspaces')->insertGetId(['name' => 'Acme', 'slug' => 'acme', 'created_at' => $now, 'updated_at' => $now]);
+    $project = DB::table('projects')->insertGetId(['workspace_id' => $ws, 'key' => 'API', 'name' => 'Api', 'created_at' => $now, 'updated_at' => $now]);
+    $statuses = [];
+    foreach (['To Do' => ['To Do', 'to_do'], 'Done' => ['Done (API)', 'done']] as $column => [$name, $category]) {
+        $statuses[$column] = DB::table('statuses')->insertGetId(['workspace_id' => $ws, 'name' => $name, 'category' => $category, 'created_at' => $now, 'updated_at' => $now]);
+        $id = DB::table('columns')->insertGetId(['project_id' => $project, 'name' => $column, 'position' => count($statuses), 'created_at' => $now, 'updated_at' => $now]);
+        DB::table('column_statuses')->insert(['column_id' => $id, 'status_id' => $statuses[$column], 'position' => 0]);
+    }
+    $issue = DB::table('issues')->insertGetId([
+        'project_id' => $project, 'number' => 1, 'title' => 'i', 'type' => 'task', 'priority' => 'medium', 'status_id' => $statuses['Done'],
+        'rank' => 1024, 'reporter_id' => $user, 'created_at' => $now, 'updated_at' => $now,
+    ]);
+    DB::table('activities')->insert(['issue_id' => $issue, 'user_id' => $user, 'action' => 'updated', 'changes' => json_encode(['status' => ['from' => 'To Do', 'to' => 'Done']]), 'via' => 'web', 'created_at' => $now]);
+
+    ob_start();
+    Artisan::call('migrate', ['--force' => true]);
+    $output = ob_get_clean();
+
+    expect(DB::table('issue_status_history')->where('issue_id', $issue)->orderBy('id')->get(['from_status_id', 'to_status_id'])->map(fn ($r) => (array) $r)->all())->toEqual([
+        ['from_status_id' => null, 'to_status_id' => $statuses['To Do']],
+        ['from_status_id' => $statuses['To Do'], 'to_status_id' => $statuses['Done']],
+    ])->and($output)->toContain('skipped 0');
+});

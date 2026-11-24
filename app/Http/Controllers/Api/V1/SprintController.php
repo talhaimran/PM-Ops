@@ -80,7 +80,7 @@ class SprintController extends Controller
     /**
      * Complete the active sprint (requires confirm: true).
      *
-     * Unfinished issues (not in the last column) move to `move_open_issues_to`: "backlog" or a planned sprint name.
+     * Unfinished issues (whose status isn't Done-category) move to `move_open_issues_to`: "backlog" or a planned sprint name.
      */
     public function complete(CompleteSprintRequest $request, string $key, string $sprint): SprintResource
     {

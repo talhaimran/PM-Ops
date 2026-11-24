@@ -249,3 +249,30 @@ test('the dashboard filters never show issues from projects the user cannot open
 
     expect($mine)->not->toContain('secret');
 });
+
+test('web: undo of a reopen from the issue page puts a Won\'t do back, not Done', function () {
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'wont_do'])->assertOk();
+    $this->actingAs($this->admin);
+
+    $this->patch(w('/issues/WEB-1'), ['version' => 2, 'status' => 'In Progress'])->assertSessionHasNoErrors();
+    expect(Issue::where('number', 1)->sole()->resolution)->toBeNull();
+    $undo = session('undo');
+
+    $this->{$undo['method']}($undo['url'], $undo['data'])->assertSessionHasNoErrors();
+
+    expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('wont_do');
+});
+
+test('web: undo of a reopen keeps a Duplicate and the issue it duplicates', function () {
+    $this->patchJson('/api/v1/issues/WEB-1', ['version' => 1, 'status' => 'Done', 'resolution' => 'duplicate', 'duplicate_of' => 'WEB-2'])->assertOk();
+    $this->actingAs($this->admin);
+
+    $this->patch(w('/issues/WEB-1'), ['version' => 2, 'status' => 'In Progress'])->assertSessionHasNoErrors();
+    $undo = session('undo');
+    expect($undo['data'])->toMatchArray(['resolution' => 'duplicate', 'duplicate_of' => 'WEB-2']);
+
+    $this->{$undo['method']}($undo['url'], $undo['data'])->assertSessionHasNoErrors();
+
+    expect(Issue::where('number', 1)->sole()->resolution->value)->toBe('duplicate')
+        ->and(Activity::where('action', 'undid')->latest('id')->first()->changes)->toMatchArray(['duplicate_of' => ['from' => null, 'to' => 'WEB-2']]);
+});

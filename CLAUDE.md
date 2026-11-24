@@ -51,11 +51,18 @@ Spec section 5 lists the conventions for all new code; these are how step 0 buil
 ## Agents (step A)
 - `User::agent()` returns the agent behind the current token (Sanctum or OAuth); `User::canDelete()` is true for people and for agents at the Delete level. A-D1: the Sanctum token stays on the owner and carries `agent_id`; OAuth tokens and auth codes carry `agent_id` too.
 - `AgentService::ensureUsable` is the per-call check (status, expiry, workspace switch, owner membership) for REST, HTTP MCP, stdio and OAuth. A new entry point must call it.
-- Done is one rule: `ApprovalService::needsApproval` with `Project::doneColumnId()` (the last column). Every agent move path calls it and opens a request via `requestDone`; don't compare column positions elsewhere.
+- Done is one rule: `ApprovalService::needsApproval` (an agent moving into a Done-category status). Every agent move path calls it and opens a request via `requestDone`; don't compare column positions elsewhere.
 - Deletes go through `ProjectPolicy::remove` / `removeColumn` and `canDelete()`. Project settings, columns, members and invitations are people-only for agents (A-D2).
 - `AiSettingsService::key()` is the only reader of the AI key; `AiEndpoint` holds the endpoint rules and ranges. `PM_AI_*` env is used only when complete (`envWarning()` says why not).
 - MCP OAuth: `config/mcp.php` allowlists redirects (`PM_MCP_REDIRECT_DOMAINS` / `_SCHEMES`); consent applies the workspace's rules. Keep the allowlist narrow.
 - Demo seed: the "Demo token" agent and one pending approval (WEB-5 to Done) are made through the services, so keep it that way.
+
+## Statuses (step 1)
+- Statuses are a workspace library (`StatusService`); columns map to them (`column_statuses`) and issues hold `status_id`. Done means the status category: `Issue::scopeOpen`, `scopeCompleted` (resolution Done) and `Status::isDone`; never a column position.
+- Written in one place: status, resolution and `resolved_at` in `IssueService::create/update` (`resolution()`); `issues.version` / `comments.version` bumped there and in `CommentService`; history rows (`issue_status_history`, `sprint_scope_events`, `estimate_history`) only through `HistoryRecorder`, who/agent/via from `ActivityLogger::attribution()`.
+- API/MCP issue and comment edits require `version` (stale = `EditConflict`, 409); moves don't. `overwrite` and Undo's version check are web-only.
+- Lock order: approval request, then project rows (id order), then the workspace row, then issue. Status library work (merge, column status changes) takes its projects before the workspace row: an insert with a `workspace_id` FK (an agent's Done request) share-locks the workspace row while holding its project.
+- Inertia dialogs that must show a refusal need `preserveState: true` on the visit, else the page remounts and the dialog closes.
 
 ## UI rules (step U)
 - Tokens: `tailwind.config.js` reads `docs/design-system/tokens.json`; use the token classes (`bg-card`, `text-muted`, `tint-amber`, `rounded-ctl`, `h-control-h`…). No hex colours, no default Tailwind colours, no `/40`-style opacity on token colours (they are CSS variables). `tests/Feature/Ui/DesignTokensTest.php` enforces this.

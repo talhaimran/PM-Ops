@@ -80,3 +80,46 @@ test('a merge does not wait on projects that use neither status', function () {
     $this->locker->table('projects')->where('id', $ops->id)->lockForUpdate()->first();
     expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0);
 });
+
+test('a merge does not wait on a pending request it does not change, and still repoints the ones it does', function () {
+    [$agent] = makeAgent($this->owner);
+    $issue = Issue::sole();
+    $ask = fn (int $to) => DB::table('approval_requests')->insertGetId([
+        'workspace_id' => $this->web->workspace_id, 'issue_id' => $issue->id, 'agent_id' => $agent->id, 'owner_user_id' => $this->owner->id,
+        'action' => json_encode(['to_status_id' => $to, 'to_status' => 'x', 'from_status_id' => $issue->status_id]),
+        'status' => 'pending', 'expires_at' => now()->addDay(), 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $unrelated = $ask(Status::where('name', 'Done')->value('id'));
+    $related = $ask($this->review->id);
+    // A person is deciding the unrelated request, so another connection holds its row. The old range scan waited on it,
+    // and its gap locks also held up an agent's new request while the agent held a project row the merge needs.
+    $this->locker->table('approval_requests')->where('id', $unrelated)->lockForUpdate()->first();
+
+    expect($this->statuses->merge($this->review, 'In Review', $this->owner))->toBe(0)
+        ->and(json_decode(DB::table('approval_requests')->find($related)->action, true)['to_status_id'])->toBe(Status::where('name', 'In Review')->value('id'));
+});
+
+test('merge and column changes take the project row before the workspace row, so an agent asking for Done cannot deadlock them', function () {
+    $qa = $this->web->columns()->create(['name' => 'QA', 'position' => 4]);
+    // The agent's move holds WEB's row; its approval request insert checks the workspace FK with a shared lock on the workspace row.
+    $this->locker->table('projects')->where('id', $this->web->id)->lockForUpdate()->first();
+    $this->locker->table('workspaces')->where('id', $this->web->workspace_id)->sharedLock()->first();
+
+    // Each waits on the project row (where the agent finishes first), never holding the workspace row the agent needs.
+    expect(fn () => $this->statuses->merge($this->review, 'In Review', $this->owner))->toThrow(QueryException::class, 'from `projects`');
+    expect(fn () => app(ColumnService::class)->addStatus($qa->setRelation('project', $this->web), $this->owner, ['status' => 'Review']))
+        ->toThrow(QueryException::class, 'from `projects`');
+});
+
+test('a merge whose target was deleted meanwhile is a 404, not a merge into a missing status', function () {
+    // REPEATABLE READ: our transaction has already read (as the merge's name lookup does), then another admin's delete commits.
+    $this->locker->rollBack();
+    $gone = $this->statuses->create($this->web->workspace, $this->owner, 'Gone', StatusCategory::InProgress);
+
+    expect(fn () => DB::transaction(function () use ($gone) {
+        Status::count();
+        DB::connection('locker')->table('statuses')->where('id', $gone->id)->delete();
+        $this->statuses->merge($this->review, 'Gone', $this->owner);
+    }))->toThrow(ValidationException::class, 'Gone no longer exists.');
+    expect(Status::find($this->review->id))->not->toBeNull();
+});
