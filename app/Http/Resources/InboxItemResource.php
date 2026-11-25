@@ -25,7 +25,8 @@ class InboxItemResource extends JsonResource
             'actor' => $this->actor?->only(['name', 'email']),
             // The keys a daily summary names.
             'keys' => $this->event === 'agent_summary' ? array_slice($this->summary_keys ?? [], 0, NotificationService::SUMMARY_KEYS) : [],
-            'count' => $this->count,
+            // A summary counts only what its reader can still see; the stored count may include lost issues.
+            'count' => $this->event === 'agent_summary' ? count($this->summary_keys ?? []) : $this->count,
             'read' => $this->read_at !== null,
             'created_at' => $this->created_at->toIso8601String(),
         ];

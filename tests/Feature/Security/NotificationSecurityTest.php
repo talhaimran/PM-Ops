@@ -100,7 +100,7 @@ test('a summary names only the issues its reader can still see, with the count o
     $ops->members()->detach($this->bob->id);
 
     $page = $this->actingAs($this->bob)->get(w('/notifications'));
-    $page->assertInertia(fn ($p) => $p->has('items.data', 1)->where('items.data.0.keys', ['WEB-1'])
+    $page->assertInertia(fn ($p) => $p->has('items.data', 1)->where('items.data.0.keys', ['WEB-1'])->where('items.data.0.count', 1)
         ->where('items.data.0.text', fn ($t) => str_contains($t, 'updated 1 issue ')));
     expect($page->getContent())->not->toContain('OPS-1');
     expect(json_encode(asToken($token)->getJson('/api/v1/me/updates')->json()))->not->toContain('OPS-1')
