@@ -19,6 +19,7 @@ import EmptyState from '@/Components/EmptyState';
 import { useWarningConfirm } from '@/Components/WarningConfirm';
 import { issueUrl } from '@/issueUrl';
 import { transition } from '@/motion';
+import { useLiveReload, useProjectChannel } from '@/useLiveReload';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { IssueOptions, Project } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
@@ -80,6 +81,8 @@ export default function Backlog({
         ),
     );
 
+    // 3-R15: others' changes reload the backlog, never under a row being dragged.
+    useLiveReload(useProjectChannel(project.id), ['backlog'], { paused: () => active !== null });
     const [ask, confirmDialog] = useWarningConfirm();
     const hasActive = backlog.sprints.some((s) => s.state === 'active');
     const sprintRoute = (name: string, sprint: SprintSection) => route(name, [project.key, sprint.id]);

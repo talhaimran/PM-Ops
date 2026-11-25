@@ -8,6 +8,7 @@ import { useCreateShortcut } from '@/Components/useCreateShortcut';
 import IssueDrawer from '@/Components/IssueDrawer';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Issue, IssueOptions, Project } from '@/types';
+import { useLiveReload, useProjectChannel } from '@/useLiveReload';
 import { Head, router } from '@inertiajs/react';
 import { useCallback, useState } from 'react';
 
@@ -27,6 +28,8 @@ export default function Issues({
     const [creating, setCreating] = useState(false);
     const openCreate = useCallback(() => setCreating(true), []);
     useCreateShortcut(openCreate, can.contribute);
+    // 3-R15: others' changes reload the list and an open peek.
+    useLiveReload(useProjectChannel(project.id), ['issues', 'peek']);
 
     // Changing filters or sort always returns to page 1.
     const apply = (next: Filters) =>

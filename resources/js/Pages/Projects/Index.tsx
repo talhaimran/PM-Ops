@@ -8,6 +8,7 @@ import { ProjectAvatar } from '@/Components/ProjectNav';
 import TextInput from '@/Components/TextInput';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Invitation, Project } from '@/types';
+import { useLiveReload } from '@/useLiveReload';
 import { Head, Link, router, useForm, usePage } from '@inertiajs/react';
 import { FormEventHandler, useState } from 'react';
 
@@ -25,6 +26,8 @@ export default function Index({
         name: '',
     });
     const verified = Boolean(usePage().props.auth.user.email_verified_at);
+    // 3-R15: no channel covers the workspace's project list, so it polls every 30 s.
+    useLiveReload(null, ['projects', 'invitations']);
     const [linkSent, setLinkSent] = useState(false);
 
     const create: FormEventHandler = (e) => {

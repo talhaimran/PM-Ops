@@ -123,14 +123,39 @@ How it behaves:
 ## Running
 
 ```bash
-composer run dev          # app server, queue worker and Vite with hot reload
+composer run dev          # app server, queue worker, Vite with hot reload, and Reverb when configured
 ```
 
 Or separately: `php artisan serve` and `npm run dev`.
 
+### Live updates (Reverb)
+
+Boards, backlogs, issue lists, issue pages and the inbox bell update while you look at them: a card someone moves slides to its new place, new comments and reactions appear, and the bell count goes up. Text you are typing is never replaced and a card you are dragging is never moved. Without Reverb, pages check for changes every 30 seconds instead.
+
+To turn it on, set `BROADCAST_CONNECTION=reverb` and give `REVERB_APP_ID`, `REVERB_APP_KEY` and `REVERB_APP_SECRET` random values in `.env` (the `VITE_REVERB_*` lines copy them for the browser; run `npm run build` again after changing them). `composer run dev` then also starts `php artisan reverb:start`. Changes are sent through the queue, so the queue worker must run too.
+
+In production, Reverb and a queue worker each need their own long-running process. Point `REVERB_HOST`, `REVERB_PORT` and `REVERB_SCHEME` at the address browsers reach (usually your domain on 443 over `https`, with your web server proxying WebSocket traffic to Reverb on port 8080). A Supervisor example:
+
+```ini
+[program:pm-reverb]
+command=php /var/www/pm/artisan reverb:start --host=127.0.0.1 --port=8080
+autostart=true
+autorestart=true
+user=www-data
+stdout_logfile=/var/log/pm-reverb.log
+
+[program:pm-queue]
+command=php /var/www/pm/artisan queue:work --tries=3
+autostart=true
+autorestart=true
+user=www-data
+stdout_logfile=/var/log/pm-queue.log
+```
+
 For production, run `npm run build` and serve `public/` with any PHP host over HTTPS. Then:
 - Set `APP_ENV=production` and `APP_DEBUG=false`. With debug on, API and MCP errors include internal details.
 - Set `SESSION_SECURE_COOKIE=true`.
+- For live updates, run Reverb and a queue worker as their own processes (see Live updates above).
 - Configure real SMTP so verification and invitation emails arrive.
 - Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge` and `workspaces:purge` daily.
 - On `cloud`, registration is open to anyone. On `self_hosted`, only the first person and invited people can register.
