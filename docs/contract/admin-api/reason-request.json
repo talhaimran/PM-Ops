@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "reason-request.json",
+  "title": "A write with a reason",
+  "description": "DELETE …/entitlements/{key} (removes an override: back to the plan value, or no row), and POST …/suspend, …/unsuspend, …/archive, …/restore. Suspended means read-only with a notice; archived shows members the archived page.",
+  "type": "object",
+  "required": ["reason"],
+  "additionalProperties": false,
+  "properties": {
+    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "staff": { "$ref": "staff.json" }
+  },
+  "examples": [{ "reason": "Chargeback" }, { "reason": "Customer asked", "staff": { "name": "Sue Staff", "email": "sue@pmops.test" } }]
+}

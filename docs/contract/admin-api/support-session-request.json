@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "support-session-request.json",
+  "title": "Start a support session (POST /internal/v1/workspaces/{id}/support-sessions)",
+  "description": "Staff view the app as target_user_id (a member of the workspace, else 422), read-only, for minutes from now.",
+  "type": "object",
+  "required": ["staff", "target_user_id", "reason", "minutes"],
+  "additionalProperties": false,
+  "properties": {
+    "staff": { "$ref": "staff.json" },
+    "target_user_id": { "type": "integer", "minimum": 1 },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "minutes": { "type": "integer", "minimum": 1, "maximum": 60 }
+  },
+  "examples": [{ "staff": { "name": "Sue Staff", "email": "sue@pmops.test" }, "target_user_id": 7, "reason": "Ticket 4821: board won't load", "minutes": 30 }]
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "entitlements-request.json",
+  "title": "Replace plan entitlements (PUT /internal/v1/workspaces/{id}/entitlements)",
+  "description": "The whole plan. Each key becomes source plan, except a key under an override, which keeps its value and only takes the new plan_value. Plan keys left out are removed. null or an empty string means no value. Unknown keys and values of the wrong type are a 422 naming entitlements.{key}, and nothing changes.",
+  "type": "object",
+  "required": ["entitlements"],
+  "additionalProperties": false,
+  "properties": {
+    "entitlements": {
+      "type": "object",
+      "additionalProperties": { "type": ["integer", "boolean", "string", "null"] }
+    },
+    "staff": { "$ref": "staff.json" }
+  },
+  "examples": [
+    { "entitlements": { "billed_users": 10, "projects": 20, "webhooks": true, "plan": "paid", "trial_ends_at": null } },
+    { "entitlements": { "plan": "trial", "trial_ends_at": "2026-12-09" }, "staff": { "name": "Sue Staff", "email": "sue@pmops.test" } }
+  ]
+}

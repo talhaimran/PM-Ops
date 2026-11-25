@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "staff.json",
+  "title": "Staff (optional on every write)",
+  "description": "Who at Platform management made the call. With it the audit row's actor type is staff with these details; without it, system.",
+  "type": "object",
+  "required": ["name", "email"],
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+    "email": { "type": "string", "format": "email", "maxLength": 255 }
+  },
+  "examples": [{ "name": "Sue Staff", "email": "sue@pmops.test" }]
+}

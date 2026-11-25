@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "support-session.json",
+  "title": "Support session started (201)",
+  "description": "A one-time sign-in URL, valid for 5 minutes. Logged as staff.support_session_started.",
+  "type": "object",
+  "required": ["data"],
+  "properties": {
+    "data": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": { "url": { "type": "string", "format": "uri" } }
+    }
+  },
+  "examples": [{ "data": { "url": "https://app.pmops.test/support/0123456789abcdefABCDEF0123456789abcdefABCDEF0123456789abcdefABCD" } }]
+}

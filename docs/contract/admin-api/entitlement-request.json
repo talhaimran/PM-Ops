@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "entitlement-request.json",
+  "title": "Set an override (PUT /internal/v1/workspaces/{id}/entitlements/{key})",
+  "description": "Sets source override and keeps the plan_value under it. An unknown key is a 404 listing the valid keys; a value of the wrong type is a 422 on value.",
+  "type": "object",
+  "required": ["value", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "value": { "type": ["integer", "boolean", "string"] },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "staff": { "$ref": "staff.json" }
+  },
+  "examples": [{ "value": 10, "reason": "Goodwill after an outage", "staff": { "name": "Sue Staff", "email": "sue@pmops.test" } }]
+}
