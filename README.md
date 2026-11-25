@@ -134,7 +134,7 @@ Boards, backlogs, issue lists, issue pages and the inbox bell update while you l
 
 To turn it on, set `BROADCAST_CONNECTION=reverb` and give `REVERB_APP_ID`, `REVERB_APP_KEY` and `REVERB_APP_SECRET` random values in `.env` (the `VITE_REVERB_*` lines copy them for the browser; run `npm run build` again after changing them). `composer run dev` then also starts `php artisan reverb:start`. Changes are sent through the queue, so the queue worker must run too.
 
-In production, Reverb and a queue worker each need their own long-running process. Point `REVERB_HOST`, `REVERB_PORT` and `REVERB_SCHEME` at the address browsers reach (usually your domain on 443 over `https`, with your web server proxying WebSocket traffic to Reverb on port 8080). A Supervisor example:
+In production, Reverb and a queue worker each need their own long-running process. Point `REVERB_HOST`, `REVERB_PORT` and `REVERB_SCHEME` at the address browsers reach (usually your domain on 443 over `https`, with your web server proxying WebSocket traffic to Reverb on port 8080). Reverb accepts sockets only from the `APP_URL` host; if the app is served from other hosts too, list them in `REVERB_ALLOWED_ORIGINS` (comma separated, `*.example.com` wildcards). A Supervisor example:
 
 ```ini
 [program:pm-reverb]
