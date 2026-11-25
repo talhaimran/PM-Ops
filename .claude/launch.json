@@ -19,6 +19,26 @@
         "--port=8000"
       ],
       "port": 8000
+    },
+    {
+      "name": "reverb",
+      "runtimeExecutable": "php",
+      "runtimeArgs": [
+        "artisan",
+        "reverb:start",
+        "--port=8080"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "queue",
+      "runtimeExecutable": "php",
+      "runtimeArgs": [
+        "artisan",
+        "queue:work",
+        "--sleep=1"
+      ],
+      "port": 8090
     }
   ]
 }
