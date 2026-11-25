@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Entitlement;
 use App\Exceptions\PlanLimitReached;
 use App\Models\Workspace;
+use App\Models\WorkspaceEntitlement;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -44,12 +45,7 @@ class Entitlements
     {
         $value = $workspace->entitlements()->where('key', $key->value)->value('value');
 
-        return match (true) {
-            $value === null => null,
-            $key->type() === 'int' => (int) $value,
-            $key->type() === 'bool' => $value === '1',
-            default => $value,
-        };
+        return $value === null ? null : $key->cast($value);
     }
 
     /**
@@ -96,27 +92,98 @@ class Entitlements
         }
     }
 
-    /** Stores a value (validated for the key's type) and logs entitlement.changed when it changes. */
-    public function set(Workspace $workspace, Entitlement $key, string $value, string $source): void
+    /**
+     * Stores a value (validated for the key's type) and logs entitlement.changed when it changes. An override keeps the
+     * row's plan_value. $staff ({name, email}) makes the audit actor staff, else system (3-R18).
+     */
+    public function set(Workspace $workspace, Entitlement $key, string|int|bool $value, string $source, ?array $staff = null, ?string $reason = null): void
     {
         [$normalized, $error] = $key->normalize($value);
         if ($error) {
             throw ValidationException::withMessages(['value' => $error]);
         }
-        $before = $workspace->entitlements()->where('key', $key->value)->value('value');
+        $before = $workspace->entitlements()->where('key', $key->value)->first();
         $workspace->entitlements()->updateOrCreate(['key' => $key->value], ['value' => $normalized, 'source' => $source]);
-        if ($before !== $normalized) {
-            $this->audit->system('entitlement.changed', null, $workspace, ['key' => $key->value, 'before' => $before, 'after' => $normalized, 'source' => $source]);
+        $this->logChange($workspace, $key, $before, $normalized, $source, $staff, $reason);
+    }
+
+    /** Removes the row (unlimited); an override with a plan value under it falls back to that instead. */
+    public function unset(Workspace $workspace, Entitlement $key, ?array $staff = null, ?string $reason = null): void
+    {
+        $row = $workspace->entitlements()->where('key', $key->value)->first();
+        if (! $row) {
+            return;
+        }
+        $before = clone $row;
+        if ($row->source === 'override' && $row->plan_value !== null) {
+            $row->update(['value' => $row->plan_value, 'source' => 'plan']);
+            $this->logChange($workspace, $key, $before, $row->plan_value, 'plan', $staff, $reason);
+        } else {
+            $row->delete();
+            $this->logChange($workspace, $key, $before, null, null, $staff, $reason);
         }
     }
 
-    public function unset(Workspace $workspace, Entitlement $key): void
+    /**
+     * Platform management's PUT …/entitlements: $values (key => value; null or '' means none) become the plan. Overrides
+     * keep their value and only take the new plan_value; plan rows missing from $values go. Unknown keys and bad values
+     * are a 422 on entitlements.{key} before anything changes.
+     *
+     * @param  array<string, scalar|null>  $values
+     */
+    public function replacePlan(Workspace $workspace, array $values, ?array $staff = null): void
     {
-        $before = $workspace->entitlements()->where('key', $key->value)->value('value');
-        if ($before !== null) {
-            $workspace->entitlements()->where('key', $key->value)->delete();
-            $this->audit->system('entitlement.changed', null, $workspace, ['key' => $key->value, 'before' => $before, 'after' => null, 'source' => null]);
+        $plan = [];
+        $errors = [];
+        foreach ($values as $name => $value) {
+            $key = Entitlement::tryFrom((string) $name);
+            if (! $key) {
+                $errors["entitlements.{$name}"] = Entitlement::unknown((string) $name);
+            } elseif ($value !== null && $value !== '') {
+                [$plan[$key->value], $error] = $key->normalize($value);
+                if ($error) {
+                    $errors["entitlements.{$name}"] = $error;
+                }
+            }
         }
+        if ($errors) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        DB::transaction(function () use ($workspace, $plan, $staff) {
+            Workspace::whereKey($workspace->id)->lockForUpdate()->first();
+            $rows = $workspace->entitlements()->get()->keyBy('key');
+            foreach ($plan as $name => $value) {
+                $row = $rows[$name] ?? null;
+                if ($row?->source === 'override') {
+                    $row->update(['plan_value' => $value]);
+                } else {
+                    $workspace->entitlements()->updateOrCreate(['key' => $name], ['value' => $value, 'plan_value' => $value, 'source' => 'plan']);
+                    $this->logChange($workspace, Entitlement::from($name), $row, $value, 'plan', $staff);
+                }
+            }
+            foreach ($rows as $name => $row) {
+                if (array_key_exists($name, $plan)) {
+                    continue;
+                }
+                if ($row->source === 'plan') {
+                    $row->delete();
+                    $this->logChange($workspace, Entitlement::from($name), $row, null, null, $staff);
+                } elseif ($row->plan_value !== null) {
+                    $row->update(['plan_value' => null]);
+                }
+            }
+        });
+    }
+
+    /** One entitlement.changed row per real change (value or source), as staff when given, else system. */
+    private function logChange(Workspace $workspace, Entitlement $key, ?WorkspaceEntitlement $before, ?string $after, ?string $source, ?array $staff, ?string $reason = null): void
+    {
+        if ($before?->value === $after && $before?->source === $source) {
+            return;
+        }
+        $metadata = ['key' => $key->value, 'before' => $before?->value, 'after' => $after, 'source' => $source];
+        $this->audit->staff('entitlement.changed', null, $workspace, $staff, $reason === null ? $metadata : [...$metadata, 'reason' => $reason]);
     }
 
     /** D6: a new Cloud workspace starts with the Free values. */

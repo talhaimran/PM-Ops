@@ -22,6 +22,7 @@ use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Markdown;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
@@ -80,6 +81,11 @@ class AppServiceProvider extends ServiceProvider
             $agent = $user?->agent();
             $by = $agent ? "agent:{$agent->id}" : ($user ? "user:{$user->id}" : "ip:{$request->ip()}");
             $workspace = $agent ? Workspace::find($agent->workspace_id) : null;
+            if ($workspace) {
+                // 3-R20: API calls per workspace per day, for the admin API's usage.
+                // shortcut: one write per API call, move to a cache counter if it shows up in profiling
+                DB::table('workspace_api_usage')->upsert(['workspace_id' => $workspace->id, 'day' => now()->toDateString(), 'calls' => 1], ['workspace_id', 'day'], ['calls' => DB::raw('calls + 1')]);
+            }
             $entitlements = app(Entitlements::class);
             $perMinute = ($workspace ? $entitlements->get($workspace, Entitlement::ApiPerMinute) : null) ?? (int) config('pm.api_rate_limit');
             $perDay = $workspace ? $entitlements->get($workspace, Entitlement::ApiPerDay) : null;

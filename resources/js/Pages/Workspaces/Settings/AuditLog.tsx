@@ -36,6 +36,12 @@ const sentences: Record<string, string> = {
     'workspace.settings_changed': 'Changed workspace settings',
     'workspace.deletion_scheduled': 'Scheduled the workspace for deletion',
     'workspace.deletion_cancelled': 'Cancelled the workspace deletion',
+    'workspace.suspended': 'Suspended the workspace',
+    'workspace.unsuspended': 'Lifted the suspension',
+    'workspace.archived': 'Archived the workspace',
+    'workspace.restored': 'Restored the workspace',
+    'staff.support_session_started': 'Started a support session as',
+    'staff.support_session_ended': 'Ended the support session as',
     'member.invited': 'Invited',
     'member.invitation_revoked': 'Revoked the invitation for',
     'member.joined': 'Joined',
@@ -72,6 +78,8 @@ function detail(m: Entry['metadata']): string | null {
             .map((k) => `${k.replaceAll('_', ' ')}: ${String(before[k])} → ${String(after[k])}`)
             .join('; ');
     }
+    // Staff and system actions from Platform management carry a reason (3-R18).
+    if (typeof m.reason === 'string') return m.reason;
     return null;
 }
 
@@ -181,7 +189,12 @@ export default function AuditLog({
                                                 ) : (
                                                     <span className="flex items-center gap-2">
                                                         {e.actor && <Avatar name={e.actor} email={e.actor} size="xs" />}
-                                                        {e.actor ?? (e.actor_type === 'system' ? 'System' : 'Unknown')}
+                                                        {e.actor ??
+                                                            (e.actor_type === 'staff'
+                                                                ? `Staff: ${(e.metadata?.staff as { name?: string } | undefined)?.name ?? ''}`
+                                                                : e.actor_type === 'system'
+                                                                  ? 'System'
+                                                                  : 'Unknown')}
                                                     </span>
                                                 )}
                                             </td>

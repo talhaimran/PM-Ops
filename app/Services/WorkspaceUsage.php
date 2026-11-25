@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\AgentStatus;
 use App\Enums\Entitlement;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
 use App\Models\Workspace;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -27,6 +29,46 @@ class WorkspaceUsage
     public function projects(Workspace $workspace): int
     {
         return $workspace->projects()->count();
+    }
+
+    /**
+     * What Platform management bills from (spec 9; also every system event's snapshot). billed_users and viewers are
+     * members; pending_billed_invitations are the extra billed people pending invitations would add.
+     *
+     * @return array{billed_users: int, viewers: int, pending_billed_invitations: int, projects: int, storage_mb: int}
+     */
+    public function snapshot(Workspace $workspace): array
+    {
+        $members = $this->people($workspace, withInvitations: false);
+        $billed = count(array_filter($members));
+
+        return [
+            'billed_users' => $billed,
+            'viewers' => count($members) - $billed,
+            'pending_billed_invitations' => count(array_filter($this->people($workspace))) - $billed,
+            'projects' => $this->projects($workspace),
+            // 3-R20: attachments arrive in step 6.
+            'storage_mb' => 0,
+        ];
+    }
+
+    /** The admin API's usage (3-R20): the snapshot plus agents, API calls over 30 days and the last activity. */
+    public function usage(Workspace $workspace): array
+    {
+        $agents = DB::table('agents')->where('workspace_id', $workspace->id)->where('status', '!=', AgentStatus::Revoked->value);
+        $last = collect([
+            DB::table('workspace_user')->where('workspace_id', $workspace->id)->max('last_active_at'),
+            DB::table('activities')->join('issues', 'issues.id', '=', 'activities.issue_id')->join('projects', 'projects.id', '=', 'issues.project_id')
+                ->where('projects.workspace_id', $workspace->id)->max('activities.created_at'),
+            (clone $agents)->max('last_used_at'),
+        ])->filter()->max();
+
+        return [
+            ...$this->snapshot($workspace),
+            'agents' => $agents->count(),
+            'api_calls_30d' => (int) DB::table('workspace_api_usage')->where('workspace_id', $workspace->id)->where('day', '>', now()->subDays(30)->toDateString())->sum('calls'),
+            'last_activity_at' => $last ? Carbon::parse($last)->toIso8601String() : null,
+        ];
     }
 
     /** Whether $email counts as billed (true), as a Viewer (false), or not at all (null), pending invitations included. */

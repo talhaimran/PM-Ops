@@ -319,3 +319,19 @@ function channelAuth(User $user, string $channel)
 
     return test()->actingAs($user)->postJson('/broadcasting/auth', ['socket_id' => '1234.5678', 'channel_name' => "private-{$channel}"]);
 }
+
+/** The service token tests enable the internal admin API with (3-R18). */
+const INTERNAL_TOKEN = 'internal-test-token';
+
+/** A call to the internal admin API with $token; writes carry a fresh Idempotency-Key unless $key is given ('' sends none). */
+function internalApi(string $method, string $uri, array $data = [], ?string $key = null, string $token = INTERNAL_TOKEN)
+{
+    test()->flushHeaders();
+    app('auth')->forgetGuards();
+    $headers = $token === '' ? [] : ['Authorization' => "Bearer {$token}"];
+    if ($method !== 'GET' && $key !== '') {
+        $headers['Idempotency-Key'] = $key ?? (string) Str::uuid();
+    }
+
+    return test()->withHeaders($headers)->json($method, '/internal/v1/'.$uri, $data);
+}

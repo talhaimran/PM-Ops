@@ -66,7 +66,7 @@ class ManageEntitlements extends Command
     {
         $key = Entitlement::tryFrom(trim($name));
         if (! $key) {
-            $this->error("Unknown entitlement \"{$name}\". Valid keys: ".implode(', ', array_column(Entitlement::cases(), 'value')).'.');
+            $this->error(Entitlement::unknown($name));
         }
 
         return $key;

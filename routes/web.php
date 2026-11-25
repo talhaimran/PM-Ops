@@ -17,6 +17,7 @@ use App\Http\Controllers\Web\ProjectController;
 use App\Http\Controllers\Web\ProjectMemberController;
 use App\Http\Controllers\Web\SprintController;
 use App\Http\Controllers\Web\StatusController;
+use App\Http\Controllers\Web\SupportSessionController;
 use App\Http\Controllers\Web\UsageController;
 use App\Http\Controllers\Web\WorkspaceController;
 use App\Http\Controllers\Web\WorkspaceInvitationController;
@@ -40,6 +41,9 @@ require __DIR__.'/auth.php';
 // The emailed link: anyone can open it; accepting needs the invited address signed in.
 Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'show'])->name('invitations.show')->where('token', '[A-Za-z0-9]{40}');
 Route::post('/invitations/{token}', [WorkspaceInvitationController::class, 'join'])->name('invitations.join')->where('token', '[A-Za-z0-9]{40}')->middleware('auth');
+
+// 3-R19: the one-time support-session URL from the internal admin API.
+Route::get('/support/{token}', [SupportSessionController::class, 'consume'])->name('support-sessions.consume')->where('token', '[A-Za-z0-9]{64}')->middleware('throttle:30,1');
 
 Route::middleware('auth')->group(function () {
     // Profile and the account stay global (D10); everything else lives under /{workspace}.

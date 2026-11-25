@@ -72,7 +72,10 @@ class WorkspaceController extends Controller
     {
         $workspace = $request->user()->workspaces()->where('slug', $slug)->firstOrFail();
         Gate::authorize('delete', $workspace);
-        $this->workspaces->cancelDeletion($workspace, $request->user());
+        // One Restore for both locked pages: undo a scheduled deletion first, else bring back an archived workspace (3-R17).
+        $workspace->deletion_scheduled_at || ! $workspace->archived_at
+            ? $this->workspaces->cancelDeletion($workspace, $request->user())
+            : $this->workspaces->changeState($workspace, 'workspace.restored', $request->user());
         $request->user()->forceFill(['current_workspace_id' => $workspace->id])->save();
 
         return redirect(route('dashboard', ['workspace' => $workspace->slug], false));

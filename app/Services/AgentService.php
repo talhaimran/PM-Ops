@@ -7,6 +7,7 @@ use App\Enums\AgentStatus;
 use App\Enums\ApprovalStatus;
 use App\Enums\Entitlement;
 use App\Enums\WorkspaceRole;
+use App\Http\Middleware\EnsureWorkspaceWritable;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
 use App\Models\User;
@@ -304,6 +305,10 @@ class AgentService
         // The same answer ResolveTokenWorkspace gives; this is what stops a long-lived stdio server.
         if ($workspace?->deletion_scheduled_at) {
             throw new HttpResponseException(response()->json(['message' => app(WorkspaceService::class)->lockedMessage($workspace, $agent->owner()->first())], 403));
+        }
+        // 3-R17: an archived workspace answers nothing to agents, reads included.
+        if ($workspace?->archived_at) {
+            $deny(403, 'workspace_archived', EnsureWorkspaceWritable::MESSAGES['archived']);
         }
         if ($workspace && ! $workspace->setting('agents_enabled')) {
             $deny(403, 'agents_disabled', self::disabledMessage($workspace));

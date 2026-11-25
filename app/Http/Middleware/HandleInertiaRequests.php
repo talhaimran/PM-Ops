@@ -44,8 +44,14 @@ class HandleInertiaRequests extends Middleware
                 return $workspace && $request->user() ? [
                     'id' => $workspace->id, 'name' => $workspace->name, 'slug' => $workspace->slug,
                     'role' => $request->user()->workspaceRole($workspace)?->value,
+                    // 3-R16: WorkspaceBanners shows the suspended notice.
+                    'state' => $workspace->state(),
                 ] : null;
             },
+            // 3-R19: "Support session: {staff} is viewing as {user}, ends at HH:MM" (server time).
+            'support_session' => fn () => ($s = $request->attributes->get('support_session'))
+                ? ['staff' => $s->staff_name, 'user' => $s->target->name, 'ends_at' => $s->ends_at->format('H:i')]
+                : null,
             'workspaces' => fn () => $request->user()?->workspaces()->orderBy('name')->get(['name', 'slug'])
                 ->map(fn ($w) => ['name' => $w->name, 'slug' => $w->slug])->all() ?? [],
             // Spec 8 (A5): only whether a provider is set; plain-English search and Mode C hide their controls without one.
