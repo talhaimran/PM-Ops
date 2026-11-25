@@ -23,6 +23,12 @@ class CommentPolicy
             : Response::deny('Only the author can edit a comment.');
     }
 
+    /** 3-R13: reacting (and removing your own) is Write level, like commenting: not a Viewer, not a read-only token. */
+    public function react(User $user, Comment $comment): Response
+    {
+        return $this->projects->contribute($user, $comment->issue->project);
+    }
+
     public function delete(User $user, Comment $comment): Response
     {
         $project = $comment->issue->project;

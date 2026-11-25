@@ -20,6 +20,16 @@
     }
 }
 
+/* 3-R12: an issue key in a comment shows its title and status on hover or focus, from the link's data attributes. */
+a.issue-key {
+    position: relative;
+}
+a.issue-key:hover::after,
+a.issue-key:focus-visible::after {
+    content: attr(data-key) ' · ' attr(data-status) ' · ' attr(data-title);
+    @apply absolute left-0 top-full z-50 mt-1 w-max max-w-xs whitespace-normal rounded-ctl border border-line bg-card px-2 py-1 text-xs font-normal text-text shadow-pop;
+}
+
 /* Theme toggle: the View Transitions cross-fade, timed by motion.ts (ThemeToggle sets --theme-duration). */
 ::view-transition-old(root),
 ::view-transition-new(root) {

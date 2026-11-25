@@ -31,6 +31,9 @@ class Issue extends Model
     /** Set by IssueService::update when "ask" left successors unmoved (spec 7.5, 2-R6); never stored. @var ?list<array<string, mixed>> */
     public ?array $proposedShifts = null;
 
+    /** Set by IssueService create/update: what the writer should know (MentionService warnings). Not stored. */
+    public array $warnings = [];
+
     /** Set by IssueService::loadFull: the sentence for IssueResource's `schedule_warning` (spec 7.5); never stored. */
     public ?string $scheduleWarning = null;
 

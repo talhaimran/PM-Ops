@@ -40,6 +40,7 @@ class IssueService
         private HistoryRecorder $history,
         private LinkService $links,
         private WatcherService $watchers,
+        private MentionService $mentions,
     ) {}
 
     /**
@@ -90,6 +91,7 @@ class IssueService
             $this->history->statusChanged($issue, null, $issue->status, $actor);
             $this->history->sprintChanged($issue, null, $issue->sprint, $actor, null);
             $this->history->estimateChanged($issue, null, $issue->story_points, $actor);
+            $issue->warnings = isset($data['description']) && ! $clonedFrom ? $this->mentions->sync($issue, null, null, $data['description'], $actor) : [];
 
             return $issue;
         });
@@ -288,6 +290,9 @@ class IssueService
                 $this->activity->log($issue, $actor, $reopened && $action === 'updated' ? 'reopened' : $action, $changes);
             }
             $this->shiftSuccessors($issue, $actor, $data, $action, isset($changes['due_date']));
+            // The full texts, not the shortened ones in the log.
+            // Only a person's or agent's own write of the text mentions: not an Undo or an approval.
+            $issue->warnings = isset($changes['description']) && in_array($action, ['updated', 'overwrote'], true) ? $this->mentions->sync($issue, null, $before['description'], $after['description'] ?? '', $actor) : [];
 
             return $issue;
         });
@@ -547,7 +552,7 @@ class IssueService
         return $issue->load([
             'subtasks' => fn ($q) => $q->with('status')->orderBy('number'),
             'epicIssues' => fn ($q) => $q->with('status')->orderBy('number')->limit(100),
-            'comments' => fn ($q) => $q->with(['author', 'agent.owner'])->oldest()->limit(100),
+            'comments' => fn ($q) => $q->with(['author', 'agent.owner', 'reactions.user', 'reactions.agent.owner'])->oldest()->limit(100),
             'pendingApprovals.agent.owner',
         ]);
     }

@@ -22,7 +22,7 @@ class DashboardService
     /** How a person can group My issues (spec 5.1); "focus" is the default and is stored as null. */
     public const GROUPS = ['focus', 'status', 'priority', 'project', 'sprint'];
 
-    public function __construct(private IssueService $issues) {}
+    public function __construct(private IssueService $issues, private MentionService $mentions) {}
 
     /**
      * Issues assigned to the user across their projects: priority desc, due date (nulls last), key. Not done unless
@@ -58,7 +58,8 @@ class DashboardService
     private function withFocus(User $user, Collection $issues): Collection
     {
         $ids = $issues->modelKeys();
-        $waiting = ApprovalRequest::open()->where('owner_user_id', $user->id)->whereIn('issue_id', $ids)->pluck('issue_id')->flip();
+        // 3-R10: an approval waiting for them, or a mention of them they haven't answered.
+        $waiting = ApprovalRequest::open()->where('owner_user_id', $user->id)->whereIn('issue_id', $ids)->pluck('issue_id')->merge($this->mentions->unanswered($user, collect($ids)))->flip();
         $blocking = IssueLink::where('type', LinkType::Blocks->value)->whereIn('source_issue_id', $ids)
             ->whereIn('target_issue_id', Issue::visibleTo($user)->open()->select('issues.id'))->pluck('source_issue_id')->flip();
 

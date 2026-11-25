@@ -27,6 +27,9 @@ return [
     // 3-R6: quick changes by one person to one issue join the recipient's newest unread notification for this many minutes.
     'notification_batch_minutes' => (int) env('PM_NOTIFICATION_BATCH_MINUTES', 5),
 
+    // 3-R11: @mentions one agent may send per hour; over it the text saves, nobody is notified and the response warns.
+    'agent_mention_limit' => (int) env('PM_AGENT_MENTION_LIMIT', 20),
+
     // How long a replayable Idempotency-Key response is kept.
     'idempotency_ttl_hours' => (int) env('PM_IDEMPOTENCY_TTL_HOURS', 24),
 

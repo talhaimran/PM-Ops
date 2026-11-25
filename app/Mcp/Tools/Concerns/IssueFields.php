@@ -13,7 +13,7 @@ trait IssueFields
     protected function issueFields(JsonSchema $schema): array
     {
         return [
-            'description' => $schema->string()->description('Markdown description.'),
+            'description' => $schema->string()->description('Markdown description. @ plus a project member\'s email mentions and notifies them; the response may carry `warnings` (`mention_not_member`, `mention_rate_limited`).'),
             'type' => $schema->string()->enum(IssueType::class)->description('Default task.'),
             'priority' => $schema->string()->enum(IssuePriority::class)->description('Default medium.'),
             'status' => $schema->string()->description('Status name, e.g. "To Do", "In Progress" (a column name works when the column has one status). Case-insensitive.'),

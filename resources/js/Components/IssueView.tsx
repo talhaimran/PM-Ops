@@ -9,8 +9,11 @@ import InputError from '@/Components/InputError';
 import IssueFormModal, { selectClass } from '@/Components/IssueFormModal';
 import IssueLinks from '@/Components/IssueLinks';
 import IssueTypeIcon from '@/Components/IssueTypeIcon';
+import MentionInput from '@/Components/MentionInput';
+import MentionInvite from '@/Components/MentionInvite';
 import PriorityIcon from '@/Components/PriorityIcon';
 import PrimaryButton from '@/Components/PrimaryButton';
+import Reactions from '@/Components/Reactions';
 import ResolutionChip, { DuplicateOfModal, resolutionLabels, resolutions } from '@/Components/ResolutionChip';
 import SecondaryButton from '@/Components/SecondaryButton';
 import StatusLozenge from '@/Components/StatusLozenge';
@@ -27,7 +30,7 @@ import { ElementType, ReactNode, useEffect, useState } from 'react';
 
 // Minimal Markdown styling without @tailwindcss/typography.
 const proseClass =
-    'break-words text-text [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_code]:rounded-ctl [&_code]:bg-card-2 [&_code]:px-1 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-ctl [&_pre]:bg-card-2 [&_pre]:p-2 [&_ul]:list-disc [&_ul]:pl-5';
+    'break-words text-text [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-4 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_.mention]:rounded-ctl [&_.mention]:px-1 [&_.mention]:tint-cobalt [&_a.issue-key]:no-underline [&_a.issue-key]:font-medium [&_code]:rounded-ctl [&_code]:bg-card-2 [&_code]:px-1 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-ctl [&_pre]:bg-card-2 [&_pre]:p-2 [&_ul]:list-disc [&_ul]:pl-5';
 
 // Inline field: looks like text until hovered or focused.
 const inlineField = `${selectClass} w-full !border-transparent !bg-transparent hover:!bg-card-2 focus:!border-primary focus:!bg-bg disabled:hover:!bg-transparent`;
@@ -443,12 +446,13 @@ export default function IssueView({
                         <h2 className="mb-1 font-semibold">Description</h2>
                         {editingDescription ? (
                             <div className="space-y-2">
-                                <textarea
+                                <MentionInput
                                     rows={8}
                                     aria-label="Description"
                                     className={`${selectClass} w-full font-mono`}
                                     value={description}
-                                    onChange={(e) => setDescription(e.target.value)}
+                                    members={options.members}
+                                    onChange={setDescription}
                                 />
                                 <div className="flex gap-2">
                                     <PrimaryButton onClick={() => save({ description: description || null }, () => setEditingDescription(false), bases.description)}>Save</PrimaryButton>
@@ -509,13 +513,14 @@ export default function IssueView({
                                     >
                                         <Avatar name={me.name} email={me.email} size="md" />
                                         <div className="flex-1 space-y-2">
-                                            <textarea
+                                            <MentionInput
                                                 rows={comment.data.body ? 4 : 1}
                                                 aria-label="Add a comment"
-                                                placeholder="Add a comment… (Markdown)"
+                                                placeholder="Add a comment… (Markdown, @ to mention)"
                                                 className={`${selectClass} w-full`}
                                                 value={comment.data.body}
-                                                onChange={(e) => comment.setData('body', e.target.value)}
+                                                members={options.members}
+                                                onChange={(body) => comment.setData('body', body)}
                                             />
                                             <InputError message={comment.errors.body} />
                                             {comment.data.body && (
@@ -528,7 +533,7 @@ export default function IssueView({
                                     </form>
                                 )}
                                 {issue.comments?.length === 0 && <EmptyState compact title="No comments yet." hint={can.contribute ? 'Write the first one above.' : undefined} />}
-                                {issue.comments?.map((c) => <CommentItem key={c.id} comment={c} canDelete={!!c.can_edit || can.manage} />)}
+                                {issue.comments?.map((c) => <CommentItem key={c.id} comment={c} canDelete={!!c.can_edit || can.manage} canReact={can.contribute} members={options.members} />)}
                             </div>
                         ) : (
                             <ActivityList entries={activity} />
@@ -538,6 +543,7 @@ export default function IssueView({
             </div>
 
             {warning}
+            <MentionInvite project={issue.project} />
             {can.contribute && (
                 <IssueFormModal show={addingSubtask} onClose={() => setAddingSubtask(false)} projectKey={issue.project} options={options} parent={issue.key} />
             )}
@@ -545,7 +551,7 @@ export default function IssueView({
     );
 }
 
-function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: boolean }) {
+function CommentItem({ comment, canDelete, canReact, members }: { comment: Comment; canDelete: boolean; canReact: boolean; members: IssueOptions['members'] }) {
     const [editing, setEditing] = useState(false);
     // The version it read (spec 7.11), taken when editing starts.
     const form = useForm({ body: comment.body, version: comment.version });
@@ -572,7 +578,7 @@ function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: bool
                             form.patch(route('comments.update', comment.id), { preserveScroll: true, onSuccess: () => setEditing(false) });
                         }}
                     >
-                        <textarea rows={3} aria-label="Edit comment" className={`${selectClass} w-full`} value={form.data.body} onChange={(e) => form.setData('body', e.target.value)} />
+                        <MentionInput rows={3} aria-label="Edit comment" className={`${selectClass} w-full`} value={form.data.body} members={members} onChange={(body) => form.setData('body', body)} />
                         <div className="flex gap-2">
                             <PrimaryButton disabled={form.processing}>Save</PrimaryButton>
                             <SecondaryButton onClick={() => setEditing(false)}>Cancel</SecondaryButton>
@@ -582,6 +588,7 @@ function CommentItem({ comment, canDelete }: { comment: Comment; canDelete: bool
                     // body_html is rendered server-side with html_input=strip and no unsafe links.
                     <div className={proseClass} dangerouslySetInnerHTML={{ __html: comment.body_html ?? '' }} />
                 )}
+                {!editing && <Reactions comment={comment} canReact={canReact} />}
                 {!editing && (comment.can_edit || canDelete) && (
                     <div className="-ms-2 flex gap-1 text-sm text-muted">
                         {comment.can_edit && (

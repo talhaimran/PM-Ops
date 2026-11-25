@@ -5,6 +5,7 @@ namespace App\Listeners;
 use App\Events\ActivityRecorded;
 use App\Models\Agent;
 use App\Models\Issue;
+use App\Models\Mention;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\WatcherService;
@@ -23,7 +24,7 @@ class NotifyOnActivity
     {
         $activity = $event->activity;
         // approval_request is the link to a request a person decided, not a field.
-        $changes = Arr::except($activity->changes ?? [], 'approval_request');
+        $changes = Arr::except($activity->changes ?? [], ['approval_request', 'comment_id']);
         $triggers = [];
 
         if ($activity->action === 'commented') {
@@ -52,8 +53,13 @@ class NotifyOnActivity
         $actor = $activity->user_id ? User::find($activity->user_id) : null;
         // A person's decision on an agent's request is theirs, not the agent's.
         $agent = $activity->agent_id && ! isset($activity->changes['approval_request']) ? Agent::find($activity->agent_id) : null;
+        // A watcher this comment mentioned gets the mention row only.
+        $mentioned = isset($activity->changes['comment_id']) ? Mention::where('comment_id', $activity->changes['comment_id'])->pluck('mentioned_user_id')->all() : [];
         foreach ($this->watchers->watchers($issue)->reject(fn ($u) => $u->id === $activity->user_id) as $watcher) {
             foreach ($triggers as [$name, $change]) {
+                if ($name === 'commented' && in_array($watcher->id, $mentioned, true)) {
+                    continue;
+                }
                 $this->notifications->notify($watcher, $issue, $name, $change, $actor, $agent, $activity->via);
             }
         }

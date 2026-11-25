@@ -28,7 +28,7 @@ function runStdio(array $messages, array $env): array
 
     return [
         $result,
-        collect(preg_split('/\R/', trim($result->output())))->filter()->map(fn ($l) => json_decode($l, true))->filter()->keyBy('id'),
+        collect(preg_split('/\r?\n/', trim($result->output())))->filter()->map(fn ($l) => json_decode($l, true))->filter()->keyBy('id'),
     ];
 }
 

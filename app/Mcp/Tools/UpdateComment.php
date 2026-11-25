@@ -29,7 +29,7 @@ class UpdateComment extends Tool
         Gate::authorize('update', $comment);
         $rules = new UpdateCommentRequest;
         $data = $request->validate($rules->rules(), $rules->messages());
-        $comment = $comments->update($comment, $data['body'], (int) $data['version']);
+        $comment = $comments->update($comment, $data['body'], (int) $data['version'], $request->user());
 
         return $this->result("Updated comment {$comment->id}.", new CommentResource($comment));
     }
