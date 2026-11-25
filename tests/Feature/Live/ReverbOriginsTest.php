@@ -36,6 +36,10 @@ test('without REVERB_ALLOWED_ORIGINS only the APP_URL host may connect', functio
     expect(reverbOrigins(['REVERB_ALLOWED_ORIGINS' => null, 'APP_URL' => 'https://pm.example.com']))->toBe(['pm.example.com']);
 });
 
+test('an empty REVERB_ALLOWED_ORIGINS (as in .env.example) falls back to the APP_URL host', function () {
+    expect(reverbOrigins(['REVERB_ALLOWED_ORIGINS' => '', 'APP_URL' => 'https://pm.example.com']))->toBe(['pm.example.com']);
+});
+
 test('REVERB_ALLOWED_ORIGINS lists hosts, comma separated, spaces trimmed', function () {
     expect(reverbOrigins(['REVERB_ALLOWED_ORIGINS' => 'pm.example.com, *.pm.example.com', 'APP_URL' => 'https://x.test']))
         ->toBe(['pm.example.com', '*.pm.example.com']);
