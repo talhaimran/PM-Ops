@@ -8,6 +8,7 @@ use App\Services\NotificationService;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -26,8 +27,12 @@ class SendAgentSummaries extends Command
         foreach ($pairs as $pair) {
             $workspace = Workspace::find($pair->workspace_id);
             $owner = User::find($pair->owner_user_id);
-            if ($workspace && $owner && $notifications->summary($workspace, $owner, $day)) {
-                $sent++;
+            try {
+                if ($workspace && $owner && $notifications->summary($workspace, $owner, $day)) {
+                    $sent++;
+                }
+            } catch (LockTimeoutException) {
+                // Another run holds this owner's day and makes that row; carry on with the rest.
             }
         }
         $this->info("Sent {$sent} agent summaries for {$day->toDateString()}.");

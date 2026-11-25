@@ -5,6 +5,9 @@ use App\Models\InboxItem;
 use App\Models\Issue;
 use App\Models\User;
 use App\Services\NotificationService;
+use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
 
 // 3-R7: one summary per owner for the previous day, visible keys only, nothing when zero.
 
@@ -51,4 +54,37 @@ test('nothing is sent when the agent did nothing, and keys the owner cannot see 
     $this->ws->members()->updateExistingPivot($this->owner->id, ['role' => 'member']);
     $this->artisan('notifications:agent-summary')->assertSuccessful();
     expect(InboxItem::where('event', 'agent_summary')->count())->toBe(0);
+});
+
+test('a summary run waits for another one making the same owner and day, so two schedulers never make two rows', function () {
+    agentWorks();
+    // Today, without travel(): frozen time would keep the lock's wait from ever timing out.
+    $day = now();
+    // Another scheduler is between its check and its insert for this owner and day.
+    $other = Cache::lock("pm:agent-summary:{$this->ws->id}:{$this->owner->id}:{$day->toDateString()}", 30);
+    expect($other->get())->toBeTrue();
+
+    expect(fn () => app(NotificationService::class)->summary($this->ws, $this->owner, $day))->toThrow(LockTimeoutException::class);
+    expect(InboxItem::where('event', 'agent_summary')->count())->toBe(0);
+
+    $other->release();
+    app(NotificationService::class)->summary($this->ws, $this->owner, $day);
+    app(NotificationService::class)->summary($this->ws, $this->owner, $day);
+    expect(InboxItem::where('event', 'agent_summary')->count())->toBe(1);
+});
+
+test('the daily summary is scheduled on one server and never overlaps itself', function () {
+    $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains($e->command, 'notifications:agent-summary'));
+    expect($event->onOneServer)->toBeTrue()->and($event->withoutOverlapping)->toBeTrue();
+});
+
+test('the command skips an owner another run is already summarising, and still finishes', function () {
+    agentWorks();
+    $day = now();
+    $other = Cache::lock("pm:agent-summary:{$this->ws->id}:{$this->owner->id}:{$day->toDateString()}", 30);
+    $other->get();
+
+    $this->artisan('notifications:agent-summary', ['day' => $day->toDateString()])->assertSuccessful();
+    expect(InboxItem::where('event', 'agent_summary')->count())->toBe(0);
+    $other->release();
 });

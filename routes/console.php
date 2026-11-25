@@ -21,4 +21,4 @@ Schedule::command('workspaces:purge')->daily();
 Schedule::command('approvals:expire')->hourly();
 
 // 3-R7: each person with agents hears once a day, shortly after midnight server time, what their agents did the day before.
-Schedule::command('notifications:agent-summary')->dailyAt('00:10');
+Schedule::command('notifications:agent-summary')->dailyAt('00:10')->onOneServer()->withoutOverlapping();

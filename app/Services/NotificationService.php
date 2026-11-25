@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -119,6 +120,13 @@ class NotificationService
     public function summary(Workspace $workspace, User $owner, Carbon $day): ?InboxItem
     {
         $date = $day->toDateString();
+
+        // Check-then-insert under a lock per owner and day, so two schedulers can't both make the day's row.
+        return Cache::lock("pm:agent-summary:{$workspace->id}:{$owner->id}:{$date}", 60)->block(5, fn () => $this->makeSummary($workspace, $owner, $day, $date));
+    }
+
+    private function makeSummary(Workspace $workspace, User $owner, Carbon $day, string $date): ?InboxItem
+    {
         $existing = InboxItem::where('workspace_id', $workspace->id)->where('user_id', $owner->id)->where('event', 'agent_summary')->whereRaw("JSON_UNQUOTE(JSON_EXTRACT(changes, '\$[0].to')) = ?", [$date])->first();
         if ($existing) {
             return $existing;
