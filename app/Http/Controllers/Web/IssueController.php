@@ -30,6 +30,8 @@ use App\Services\WatcherService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -55,13 +57,22 @@ class IssueController extends Controller
         return redirect()->route('issues.show', $issue->key)->with($this->mentionFlash($issue->warnings, $project));
     }
 
-    public function show(Request $request, string $key): Response
+    public function show(Request $request, string $key): Response|RedirectResponse
     {
-        $issue = $this->issues->resolve($request->user(), $key);
+        try {
+            $issue = $this->issues->resolve($request->user(), $key);
+        } catch (ValidationException $e) {
+            // 3-R15: a live reload of this page after its issue was deleted would be sent back to itself, again and again.
+            if (url()->previous() !== $request->fullUrl()) {
+                throw $e;
+            }
+
+            return redirect()->route('projects.show', Str::before($key, '-'))->with('warning', collect($e->errors())->flatten()->first());
+        }
 
         return Inertia::render('Issues/Show', [
             ...$this->issueView($issue, $request->user()),
-            'project' => ['key' => $issue->project->key, 'name' => $issue->project->name],
+            'project' => ['id' => $issue->project->id, 'key' => $issue->project->key, 'name' => $issue->project->name],
             'activity' => ActivityResource::collection(tap($issue->activities()->visibleTo($request->user())->with(['user', 'agent.owner'])->latest('id')->limit(50)->get(), fn ($rows) => ActivityLogger::hideUnseenOriginals($rows, $request->user())))->resolve(),
         ]);
     }

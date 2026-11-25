@@ -18,6 +18,7 @@ use App\Services\TwoFactorService;
 use App\Services\WorkspaceService;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Fortify;
@@ -300,4 +301,21 @@ function oauthConnect(User $user, int|string $agent, string $clientName = 'Claud
     $tokens = oauthExchange($clientId, oauthCode($user, $clientId, $agent, $challenge), $verifier)->assertOk()->json();
 
     return [...$tokens, 'client_id' => $clientId];
+}
+
+/** Channel auth runs on the Reverb broadcaster (phpunit.xml sets the null one, which checks nothing); the channels are registered again on it. */
+function useReverbForChannelAuth(): void
+{
+    config(['broadcasting.default' => 'reverb', 'broadcasting.connections.reverb.key' => 'test-key', 'broadcasting.connections.reverb.secret' => 'test-secret', 'broadcasting.connections.reverb.app_id' => '1']);
+    Broadcast::forgetDrivers();
+    require base_path('routes/channels.php');
+}
+
+/** $user's session asks to subscribe to the private $channel (the name without "private-"). */
+function channelAuth(User $user, string $channel)
+{
+    test()->flushHeaders();
+    app('auth')->forgetGuards();
+
+    return test()->actingAs($user)->postJson('/broadcasting/auth', ['socket_id' => '1234.5678', 'channel_name' => "private-{$channel}"]);
 }
