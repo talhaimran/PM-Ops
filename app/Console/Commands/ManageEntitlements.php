@@ -9,7 +9,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 
-#[Signature('pm:entitlements {workspace : The workspace address (slug)} {--set=* : key=value, as an override} {--unset=* : key; no row means unlimited} {--list : Show every key}')]
+#[Signature('pm:entitlements {workspace : The workspace address (slug)} {--set=* : key=value, as an override} {--unset=* : key; an override falls back to the plan value under it, anything else is removed (unlimited)} {--list : Show every key}')]
 #[Description('List or change a workspace\'s plan limits (spec 7.0c)')]
 class ManageEntitlements extends Command
 {

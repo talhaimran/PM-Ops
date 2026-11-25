@@ -14,6 +14,10 @@ class SupportSessionController extends Controller
     public function consume(Request $request, string $token, SupportSessionService $support): RedirectResponse
     {
         $session = $support->consume($token);
+        // A support session this browser already holds ends here, with its ended row, before the session is replaced.
+        if ($held = $request->attributes->get('support_session')) {
+            $support->end($held);
+        }
 
         // A fresh session holding only the target's sign-in, without the Login event: the target didn't sign in.
         $request->session()->invalidate();

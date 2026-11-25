@@ -20,5 +20,8 @@ Schedule::command('workspaces:purge')->daily();
 // A2: approval requests expire after 7 days; the agent can ask again.
 Schedule::command('approvals:expire')->hourly();
 
+// 3-R19: a support session past its end gets its ended row even if the browser never comes back.
+Schedule::command('support-sessions:end')->everyMinute()->onOneServer()->withoutOverlapping();
+
 // 3-R7: each person with agents hears once a day, shortly after midnight server time, what their agents did the day before.
 Schedule::command('notifications:agent-summary')->dailyAt('00:10')->onOneServer()->withoutOverlapping();

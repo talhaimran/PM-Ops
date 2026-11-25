@@ -40,6 +40,11 @@ class EndSupportSession
         $request->session()->regenerateToken();
         Auth::guard('web')->forgetUser();
 
-        return $request->routeIs('logout') ? redirect('/') : redirect()->route('login');
+        return match (true) {
+            $request->routeIs('logout') => redirect('/'),
+            // An ended session in this browser doesn't stop a new support URL from being opened.
+            $request->routeIs('support-sessions.consume') => $next($request),
+            default => redirect()->route('login'),
+        };
     }
 }

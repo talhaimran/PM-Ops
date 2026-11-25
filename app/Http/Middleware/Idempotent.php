@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\SupportSessionService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -63,7 +64,10 @@ class Idempotent
                     'status' => $response->getStatusCode(),
                     'body' => $response->getContent(),
                     'type' => $response->headers->get('Content-Type'),
-                ], now()->addHours(config('pm.idempotency_ttl_hours')));
+                ], $internal && str_ends_with($request->path(), '/support-sessions')
+                    // Its body holds the one-time URL: keep it no longer than the URL works.
+                    ? now()->addMinutes(SupportSessionService::URL_MINUTES)
+                    : now()->addHours(config('pm.idempotency_ttl_hours')));
             }
 
             return $response;

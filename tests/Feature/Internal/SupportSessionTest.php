@@ -6,6 +6,8 @@ use App\Models\AuditLog;
 use App\Models\Issue;
 use App\Models\SupportSession;
 use App\Models\User;
+use App\Services\SupportSessionService;
+use Illuminate\Console\Scheduling\Schedule;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // 3-R19 / 3-D4: staff view the app as a member through a one-time URL, read-only, with a banner and audit rows.
@@ -140,4 +142,49 @@ test('the target must be a member, minutes run 1 to 60, staff and reason are req
     startSupport($this, ['reason' => ''])->assertUnprocessable()->assertJsonValidationErrors('reason');
 
     expect(SupportSession::count())->toBe(0)->and(AuditLog::where('action', 'like', 'staff.%')->count())->toBe(0);
+});
+
+test('opening a second URL in the same browser ends the first session with its ended row', function () {
+    openSupportUrl($this, startSupport($this)->json('data.url'));
+    $first = SupportSession::sole();
+    $second = startSupport($this)->json('data.url');
+
+    $this->flushHeaders();
+    $this->get(parse_url($second, PHP_URL_PATH))->assertRedirect('/acme/dashboard');
+
+    expect($first->fresh()->ended_at)->not->toBeNull()
+        ->and(AuditLog::where('action', 'staff.support_session_ended')->count())->toBe(1)
+        ->and(session(SupportSessionService::SESSION_KEY))->toBe(SupportSession::latest('id')->first()->id);
+});
+
+test('support-sessions:end ends used sessions past ends_at once, even if the browser comes back', function () {
+    openSupportUrl($this, startSupport($this, ['minutes' => 10])->json('data.url'));
+    startSupport($this, ['minutes' => 5]);  // never opened: nothing to end
+    $this->travel(11)->minutes();
+
+    $this->artisan('support-sessions:end')->assertSuccessful();
+    $this->artisan('support-sessions:end')->assertSuccessful();
+    $this->get('/acme/dashboard')->assertRedirect();
+    $this->assertGuest('web');
+
+    expect(AuditLog::where('action', 'staff.support_session_ended')->count())->toBe(1)
+        ->and(SupportSession::whereNotNull('ended_at')->count())->toBe(1);
+});
+
+test('the scheduler runs support-sessions:end every minute on one server', function () {
+    $event = collect(app(Schedule::class)->events())->first(fn ($e) => str_contains($e->command, 'support-sessions:end'));
+
+    expect($event)->not->toBeNull()->and($event->expression)->toBe('* * * * *')
+        ->and($event->onOneServer)->toBeTrue()->and($event->withoutOverlapping)->toBeTrue();
+});
+
+test('audit rows written during a support session name the staff member, not the user', function () {
+    $this->ws->members()->updateExistingPivot($this->target->id, ['role' => WorkspaceRole::Admin->value]);
+    openSupportUrl($this, startSupport($this)->json('data.url'));
+
+    $this->get('/acme/settings/audit-log/export')->assertOk();
+
+    $row = AuditLog::where('action', 'audit_log.exported')->sole();
+    expect($row->only(['actor_type', 'actor_user_id']))->toBe(['actor_type' => 'staff', 'actor_user_id' => null])
+        ->and($row->metadata['staff'])->toBe(SUPPORT_STAFF);
 });

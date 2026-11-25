@@ -94,7 +94,7 @@ class Entitlements
 
     /**
      * Stores a value (validated for the key's type) and logs entitlement.changed when it changes. An override keeps the
-     * row's plan_value. $staff ({name, email}) makes the audit actor staff, else system (3-R18).
+     * row's plan_value, or takes the plan/default value it replaces as one. $staff ({name, email}) makes the audit actor staff, else system (3-R18).
      */
     public function set(Workspace $workspace, Entitlement $key, string|int|bool $value, string $source, ?array $staff = null, ?string $reason = null): void
     {
@@ -103,7 +103,12 @@ class Entitlements
             throw ValidationException::withMessages(['value' => $error]);
         }
         $before = $workspace->entitlements()->where('key', $key->value)->first();
-        $workspace->entitlements()->updateOrCreate(['key' => $key->value], ['value' => $normalized, 'source' => $source]);
+        $attributes = ['value' => $normalized, 'source' => $source];
+        // An override keeps the plan (or Free default) value it replaces, so removing it falls back to that.
+        if ($source === 'override' && $before && $before->source !== 'override') {
+            $attributes['plan_value'] = $before->value;
+        }
+        $workspace->entitlements()->updateOrCreate(['key' => $key->value], $attributes);
         $this->logChange($workspace, $key, $before, $normalized, $source, $staff, $reason);
     }
 

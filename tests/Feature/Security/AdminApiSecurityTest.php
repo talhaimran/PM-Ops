@@ -110,3 +110,15 @@ test('the service token is never logged, returned or audited', function () {
     Log::shouldNotHaveReceived('warning');
     Log::shouldNotHaveReceived('error');
 });
+
+test('a support-session answer is kept for replay only while its URL is valid, not for the usual 24 hours', function () {
+    $body = ['staff' => ['name' => 'Sue', 'email' => 'sue@pmops.test'], 'target_user_id' => $this->target->id, 'reason' => 'Ticket', 'minutes' => 10];
+    $first = internalApi('POST', "workspaces/{$this->ws->id}/support-sessions", $body, key: 'ttl-key')->assertCreated()->json('data.url');
+
+    $this->travel(4)->minutes();
+    expect(internalApi('POST', "workspaces/{$this->ws->id}/support-sessions", $body, key: 'ttl-key')->json('data.url'))->toBe($first);
+
+    $this->travel(2)->minutes();
+    $later = internalApi('POST', "workspaces/{$this->ws->id}/support-sessions", $body, key: 'ttl-key')->assertCreated();
+    expect($later->headers->has('Idempotent-Replayed'))->toBeFalse()->and($later->json('data.url'))->not->toBe($first);
+});

@@ -57,6 +57,11 @@ class AuditLogger
     private function write(?int $workspaceId, string $action, ?Model $target, array $metadata, ?User $actor, string $actorType): void
     {
         $request = app()->bound('request') ? request() : null;
+        // 3-R19: in a support session the staff member acted, not the user they view as.
+        if ($actorType === 'user' && ($support = $request?->attributes->get('support_session'))) {
+            [$actor, $actorType] = [null, 'staff'];
+            $metadata = [...$metadata, 'staff' => ['name' => $support->staff_name, 'email' => $support->staff_email]];
+        }
 
         $log = AuditLog::create([
             'workspace_id' => $workspaceId,

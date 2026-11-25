@@ -3,6 +3,7 @@
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
+use App\Mail\ProjectInvitationMail;
 use App\Mcp\Servers\LocalPmServer;
 use App\Mcp\Servers\PmServer;
 use App\Mcp\Tools\CreateIssue;
@@ -12,6 +13,9 @@ use App\Models\AuditLog;
 use App\Models\Comment;
 use App\Models\Issue;
 use App\Models\User;
+use App\Models\WorkspaceInvitation;
+use App\Services\InvitationService;
+use Illuminate\Support\Facades\Mail;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // Review Focus 4: a suspended workspace is read-only on every path (3-R16); an archived one shows its page (3-R17).
@@ -208,3 +212,49 @@ test('connecting an MCP client is refused while suspended: consent would create 
     $this->actingAs($this->owner, 'web')->get(oauthAuthorizeUrl($client, pkce()[1]))->assertForbidden()
         ->assertInertia(fn (Assert $page) => $page->component('Workspaces/NoAccess')->where('message', SUSPENDED));
 });
+
+test('web: a backlog rank is refused', function () {
+    makeIssue($this->project, $this->owner, ['title' => 'Second']);
+    suspendWorkspace($this);
+    assertRefusedOnWeb($this, $this->actingAs($this->owner, 'web')->post(w('/issues/WEB-1/rank'), ['after' => 'WEB-2']));
+});
+
+/** A pending invitation of carol to WEB and its plain token, taken from the email. */
+function invitationToken($t): string
+{
+    Mail::fake();
+    app(InvitationService::class)->invite($t->ws, $t->owner, 'carol@example.com', WorkspaceRole::Member, $t->project, ProjectRole::Member);
+    $token = null;
+    Mail::assertSent(ProjectInvitationMail::class, function (ProjectInvitationMail $mail) use (&$token) {
+        $token = $mail->token;
+
+        return true;
+    });
+
+    return $token;
+}
+
+test('joining by the emailed link is refused in a suspended or archived workspace', function (string $column, string $message) {
+    $token = invitationToken($this);
+    $this->ws->forceFill([$column => now()])->save();
+    $carol = User::factory()->create(['email' => 'carol@example.com']);
+
+    $this->actingAs($carol, 'web')->post("/invitations/{$token}")->assertSessionHasErrors(['invitation' => $message]);
+    expect($carol->workspaceRole($this->ws))->toBeNull();
+})->with([
+    'suspended' => ['suspended_at', SUSPENDED],
+    'archived' => ['archived_at', 'This workspace was archived after 12 months without activity. An Owner can restore it in the web app.'],
+]);
+
+test('accepting from the pending list is refused in a suspended or archived workspace', function (string $column, string $message) {
+    invitationToken($this);
+    $invitation = WorkspaceInvitation::sole();
+    $this->ws->forceFill([$column => now()])->save();
+    $carol = User::factory()->create(['email' => 'carol@example.com']);
+
+    $this->actingAs($carol, 'web')->post("/invitations/{$invitation->id}/accept")->assertSessionHasErrors(['invitation' => $message]);
+    expect($carol->workspaceRole($this->ws))->toBeNull()->and(WorkspaceInvitation::count())->toBe(1);
+})->with([
+    'suspended' => ['suspended_at', SUSPENDED],
+    'archived' => ['archived_at', 'This workspace was archived after 12 months without activity. An Owner can restore it in the web app.'],
+]);

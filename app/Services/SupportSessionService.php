@@ -12,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 /**
  * 3-R19 / 3-D4: staff view the app as a member. The one-time URL works once within 5 minutes; the session lasts the
  * minutes asked for (from the start), is read-only (EnsureWorkspaceWritable) and is logged in the workspace audit log.
+ * shortcut: a Reverb socket subscribed during the session keeps receiving (empty) events until it closes; ending the
+ * session doesn't disconnect it. Revoke channel access on end if events ever carry data.
  */
 class SupportSessionService
 {
@@ -55,7 +57,16 @@ class SupportSessionService
         });
     }
 
-    /** At ends_at or on sign-out: staff.support_session_ended, once. */
+    /** support-sessions:end: every opened session past ends_at that nobody's browser came back to end. */
+    public function endDue(): int
+    {
+        $due = SupportSession::with(['workspace', 'target'])->whereNotNull('used_at')->whereNull('ended_at')->where('ends_at', '<', now())->get();
+        $due->each(fn (SupportSession $session) => $this->end($session));
+
+        return $due->count();
+    }
+
+    /** At ends_at (here, in EndSupportSession or support-sessions:end) or on sign-out: staff.support_session_ended, once. */
     public function end(SupportSession $session): void
     {
         if (SupportSession::whereKey($session->id)->whereNull('ended_at')->update(['ended_at' => now()])) {

@@ -168,3 +168,23 @@ test('staff details are checked: a name and a valid email', function () {
         ->assertUnprocessable()->assertJsonValidationErrors('staff.email');
     expect($this->ws->fresh()->suspended_at)->toBeNull();
 });
+
+test('an override over a default keeps it as the plan value: removing the override goes back to the Free value', function () {
+    app(Entitlements::class)->applyFreeDefaults($this->ws);
+
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements/projects", ['value' => 5, 'reason' => 'Trial extension'])->assertOk()
+        ->assertJsonPath('data.entitlements.projects', ['value' => 5, 'source' => 'override', 'plan_value' => 1]);
+    internalApi('DELETE', "workspaces/{$this->ws->id}/entitlements/projects", ['reason' => 'Over'])->assertOk()
+        ->assertJsonPath('data.entitlements.projects.value', 1);
+});
+
+test('only effective changes are logged: a new plan value under an override writes no audit row', function () {
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements/projects", ['value' => 10, 'reason' => 'x'])->assertOk();
+    $rows = AuditLog::where('action', 'entitlement.changed')->count();
+
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 3]])->assertOk();
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 4]])->assertOk();
+
+    expect(entitlementRow($this->ws, 'projects'))->toBe(['value' => '10', 'source' => 'override', 'plan_value' => '4'])
+        ->and(AuditLog::where('action', 'entitlement.changed')->count())->toBe($rows);
+});

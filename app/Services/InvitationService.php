@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Entitlement;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
+use App\Http\Middleware\EnsureWorkspaceWritable;
 use App\Mail\ProjectInvitationMail;
 use App\Models\Project;
 use App\Models\User;
@@ -134,6 +135,8 @@ class InvitationService
             // A workspace scheduled for deletion (D2) takes no new members.
             ! $invitation, (bool) $invitation->workspace->deletion_scheduled_at => self::GONE,
             $invitation->expires_at->isPast() => self::EXPIRED,
+            // 3-R16/3-R17: joining adds a member, so a suspended or archived workspace refuses it like any write.
+            ! $invitation->workspace->isWritable() => EnsureWorkspaceWritable::refusal($invitation->workspace)['message'],
             $user && strtolower($user->email) !== $invitation->email => self::OTHER_EMAIL,
             default => null,
         };

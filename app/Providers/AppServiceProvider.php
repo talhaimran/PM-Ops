@@ -83,7 +83,8 @@ class AppServiceProvider extends ServiceProvider
             $workspace = $agent ? Workspace::find($agent->workspace_id) : null;
             if ($workspace) {
                 // 3-R20: API calls per workspace per day, for the admin API's usage.
-                // shortcut: one write per API call, move to a cache counter if it shows up in profiling
+                // shortcut: one write per API call, move to a cache counter if it shows up in profiling. Runs before the limit
+                // is checked, so throttled (429) calls are counted too.
                 DB::table('workspace_api_usage')->upsert(['workspace_id' => $workspace->id, 'day' => now()->toDateString(), 'calls' => 1], ['workspace_id', 'day'], ['calls' => DB::raw('calls + 1')]);
             }
             $entitlements = app(Entitlements::class);
