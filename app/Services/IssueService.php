@@ -91,7 +91,7 @@ class IssueService
             $this->history->statusChanged($issue, null, $issue->status, $actor);
             $this->history->sprintChanged($issue, null, $issue->sprint, $actor, null);
             $this->history->estimateChanged($issue, null, $issue->story_points, $actor);
-            $issue->warnings = isset($data['description']) ? $this->mentions->sync($issue, null, null, $data['description'], $actor) : [];
+            $issue->warnings = isset($data['description']) && ! $clonedFrom ? $this->mentions->sync($issue, null, null, $data['description'], $actor) : [];
 
             return $issue;
         });
@@ -291,7 +291,8 @@ class IssueService
             }
             $this->shiftSuccessors($issue, $actor, $data, $action, isset($changes['due_date']));
             // The full texts, not the shortened ones in the log.
-            $issue->warnings = isset($changes['description']) && $after['description'] !== null ? $this->mentions->sync($issue, null, $before['description'], $after['description'], $actor) : [];
+            // Only a person's or agent's own write of the text mentions: not an Undo or an approval.
+            $issue->warnings = isset($changes['description']) && in_array($action, ['updated', 'overwrote'], true) ? $this->mentions->sync($issue, null, $before['description'], $after['description'] ?? '', $actor) : [];
 
             return $issue;
         });

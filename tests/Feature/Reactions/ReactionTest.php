@@ -2,11 +2,14 @@
 
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
+use App\Enums\Reaction;
 use App\Events\ReactionChanged;
 use App\Models\Activity;
 use App\Models\InboxItem;
 use App\Models\User;
 use App\Services\CommentService;
+use App\Services\ReactionService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 
 // Spec 7.11 (3-R13): reactions on comments.
@@ -92,4 +95,15 @@ test('web: react and unreact redirect back', function () {
     expect($this->comment->reactions()->count())->toBe(1);
     $this->actingAs($this->bob)->delete(w("/comments/{$this->comment->id}/reactions"), ['emoji' => '❤️'])->assertRedirect();
     expect($this->comment->reactions()->count())->toBe(0);
+});
+
+test('the add is an insert-or-ignore: a row that already exists is no change and no event', function () {
+    Event::fake([ReactionChanged::class]);
+    // As if a concurrent request had inserted it first: the unique key must be absorbed, not thrown.
+    app(ReactionService::class)->add($this->comment, Reaction::Eyes, $this->bob);
+    DB::table('comment_reactions')->where('comment_id', $this->comment->id)->update(['via' => 'api']);
+    app(ReactionService::class)->add($this->comment, Reaction::Eyes, $this->bob);
+
+    expect($this->comment->reactions()->count())->toBe(1);
+    Event::assertDispatchedTimes(ReactionChanged::class, 1);
 });

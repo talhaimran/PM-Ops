@@ -26,7 +26,13 @@ class MentionService
      */
     public function sync(Issue $issue, ?Comment $comment, ?string $old, string $new, User $actor): array
     {
-        $added = array_values(array_diff($this->text->mentions($new), $old === null ? [] : $this->text->mentions($old)));
+        $before = $old === null ? [] : $this->text->mentions($old);
+        $now = $this->text->mentions($new);
+        // An edit that drops a mention takes its row back (no notice either way): the issue leaves their Waiting on you.
+        if ($dropped = array_diff($before, $now)) {
+            Mention::where(['issue_id' => $issue->id, 'comment_id' => $comment?->id])->whereIn('mentioned_user_id', User::whereIn('email', $dropped)->select('id'))->delete();
+        }
+        $added = array_values(array_diff($now, $before));
         if (! $added) {
             return [];
         }

@@ -127,3 +127,64 @@ test('the mentionable list needs sight of the project', function () {
     $this->actingAs($this->sam)->getJson(w('/projects/WEB/mentionable'))->assertOk()
         ->assertJsonPath('members.0.email', 'alex@example.com')->assertJsonCount(3, 'members');
 });
+
+// Fix round 1.
+
+test('a mentioned watcher gets the mention row only, another watcher still gets commented', function () {
+    $bob = addMember($this->project, User::factory()->create(['email' => 'bob@example.com']), ProjectRole::Member);
+    app(WatcherService::class)->watch($this->issue, $bob, $bob);
+    InboxItem::query()->delete();
+
+    app(CommentService::class)->add($this->issue, $this->ann, 'Sam please @sam@example.com');
+
+    expect(InboxItem::where('user_id', $this->sam->id)->pluck('event')->all())->toBe(['mention'])
+        ->and(InboxItem::where('user_id', $bob->id)->pluck('event')->all())->toBe(['commented']);
+});
+
+test('cloning and Undo make no mentions', function () {
+    $issue = app(IssueService::class)->create($this->project, $this->ann, ['title' => 'M', 'description' => 'For @sam@example.com']);
+    $before = [Mention::count(), InboxItem::where('event', 'mention')->count()];
+
+    app(IssueService::class)->clone($issue, $this->ann);
+    expect([Mention::count(), InboxItem::where('event', 'mention')->count()])->toBe($before);
+
+    app(IssueService::class)->update($issue->refresh(), $this->ann, ['description' => 'plain']);
+    Mention::query()->delete();
+    InboxItem::query()->delete();
+    app(IssueService::class)->update($issue->refresh(), $this->ann, ['description' => 'For @sam@example.com'], 'undid');
+    expect(Mention::count())->toBe(0)->and(InboxItem::where('event', 'mention')->count())->toBe(0);
+});
+
+test('editing a mention out removes it and the issue leaves Waiting on you', function () {
+    $comment = app(CommentService::class)->add($this->issue, $this->ann, 'Hi @sam@example.com');
+    $unanswered = fn () => app(MentionService::class)->unanswered($this->sam, collect([$this->issue->id]))->all();
+    expect($unanswered())->toBe([$this->issue->id]);
+
+    InboxItem::query()->delete();
+    app(CommentService::class)->update($comment, 'Hi there', $comment->version);
+
+    expect($unanswered())->toBe([])->and(Mention::count())->toBe(0)->and(InboxItem::count())->toBe(0);
+
+    $issue = app(IssueService::class)->create($this->project, $this->ann, ['title' => 'D', 'description' => '@sam@example.com']);
+    app(IssueService::class)->update($issue, $this->ann, ['description' => null]);
+    expect(Mention::where('issue_id', $issue->id)->count())->toBe(0);
+});
+
+test('a deleted comment\'s mention no longer counts', function () {
+    $comment = app(CommentService::class)->add($this->issue, $this->ann, 'Hi @sam@example.com');
+    app(CommentService::class)->delete($comment);
+
+    expect(app(MentionService::class)->unanswered($this->sam, collect([$this->issue->id]))->all())->toBe([]);
+});
+
+test('web: an Admin gets the invite prompt, a Member the cannot-see warning, and an edit warns the editor', function () {
+    $this->actingAs($this->ann)->post(w('/issues/WEB-1/comments'), ['body' => 'cc @x@example.com'])
+        ->assertSessionHas('mention_invite', ['project' => 'WEB', 'emails' => ['x@example.com']]);
+
+    $this->actingAs($this->alex)->post(w('/issues/WEB-1/comments'), ['body' => 'cc @x@example.com'])
+        ->assertSessionHas('warning', "x@example.com can't see this issue.")->assertSessionMissing('mention_invite');
+
+    $comment = app(CommentService::class)->add($this->issue, $this->alex, 'plain');
+    $this->actingAs($this->alex)->patch(w("/comments/{$comment->id}"), ['body' => 'now @y@example.com', 'version' => $comment->version])
+        ->assertSessionHas('warning', "y@example.com can't see this issue.");
+});

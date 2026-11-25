@@ -17,11 +17,12 @@ class ReactionService
     public function add(Comment $comment, Reaction $emoji, User $actor): void
     {
         $agent = $actor->agent();
-        $row = CommentReaction::firstOrCreate(
-            ['comment_id' => $comment->id, 'emoji' => $emoji->value, 'reactor' => $agent ? "a{$agent->id}" : "u{$actor->id}"],
-            ['user_id' => $actor->id, 'agent_id' => $agent?->id, 'via' => ActivityLogger::via($actor)],
-        );
-        $row->wasRecentlyCreated && $this->changed($comment);
+        // insertOrIgnore: a concurrent identical add loses to the unique key quietly; only the one that inserted announces it.
+        $inserted = CommentReaction::insertOrIgnore([
+            'comment_id' => $comment->id, 'emoji' => $emoji->value, 'reactor' => $agent ? "a{$agent->id}" : "u{$actor->id}",
+            'user_id' => $actor->id, 'agent_id' => $agent?->id, 'via' => ActivityLogger::via($actor), 'created_at' => now(),
+        ]);
+        $inserted && $this->changed($comment);
     }
 
     public function remove(Comment $comment, Reaction $emoji, User $actor): void

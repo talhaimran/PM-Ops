@@ -5,6 +5,7 @@ namespace App\Listeners;
 use App\Events\ActivityRecorded;
 use App\Models\Agent;
 use App\Models\Issue;
+use App\Models\Mention;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\WatcherService;
@@ -52,8 +53,15 @@ class NotifyOnActivity
         $actor = $activity->user_id ? User::find($activity->user_id) : null;
         // A person's decision on an agent's request is theirs, not the agent's.
         $agent = $activity->agent_id && ! isset($activity->changes['approval_request']) ? Agent::find($activity->agent_id) : null;
+        // A watcher this comment mentioned gets the mention row only. shortcut: matched by author and time (the mention is written right after the activity), upgrade with a comment id on activities.
+        $mentioned = $activity->action === 'commented'
+            ? Mention::where('issue_id', $issue->id)->where('by_user_id', $activity->user_id)->whereNotNull('comment_id')->where('created_at', '>=', $activity->created_at)->pluck('mentioned_user_id')->all()
+            : [];
         foreach ($this->watchers->watchers($issue)->reject(fn ($u) => $u->id === $activity->user_id) as $watcher) {
             foreach ($triggers as [$name, $change]) {
+                if ($name === 'commented' && in_array($watcher->id, $mentioned, true)) {
+                    continue;
+                }
                 $this->notifications->notify($watcher, $issue, $name, $change, $actor, $agent, $activity->via);
             }
         }

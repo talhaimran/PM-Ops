@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('add_comment')]
-#[Description('Add a Markdown comment to an issue.')]
+#[Description('Add a Markdown comment to an issue. Write @ plus a project member\'s email (e.g. @sam@example.com) to mention and notify them. The response may carry `warnings` (`mention_not_member`, `mention_rate_limited`); the comment is saved either way.')]
 class AddComment extends Tool
 {
     use RespondsWithJson;
