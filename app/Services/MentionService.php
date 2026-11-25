@@ -8,6 +8,7 @@ use App\Models\Mention;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * Spec 7.10 (3-R9..R11): @email mentions in comments and descriptions. Only mentions new in the text make rows and notifications;
@@ -40,7 +41,15 @@ class MentionService
         $members = $project->members()->whereIn('email', $added)->get()->keyBy(fn (User $u) => strtolower($u->email));
         $agent = $actor->agent();
         $via = ActivityLogger::via($actor);
-        $budget = $agent ? max(0, (int) config('pm.agent_mention_limit') - Mention::where('agent_id', $agent->id)->where('created_at', '>=', now()->subHour())->count()) : PHP_INT_MAX;
+
+        // 3-R11: reserve the whole batch in one atomic counter, so editing a mention out gives nothing back and two requests can't both fit.
+        // shortcut: a fixed hour from the agent's first mention (RateLimiter), not a sliding one; upgrade if agents game the window edge.
+        $budget = PHP_INT_MAX;
+        if ($agent) {
+            $key = "pm:agent-mentions:{$agent->id}";
+            $limit = (int) config('pm.agent_mention_limit');
+            $budget = max(0, $limit - (RateLimiter::increment($key, 3600, count($added)) - count($added)));
+        }
 
         $warnings = [];
         $limited = false;

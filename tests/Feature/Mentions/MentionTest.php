@@ -11,6 +11,7 @@ use App\Services\IssueService;
 use App\Services\MentionService;
 use App\Services\WatcherService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\RateLimiter;
 
 // Spec 7.10 (3-R9..R11): @email mentions in comments and descriptions.
 
@@ -187,4 +188,34 @@ test('web: an Admin gets the invite prompt, a Member the cannot-see warning, and
     $comment = app(CommentService::class)->add($this->issue, $this->alex, 'plain');
     $this->actingAs($this->alex)->patch(w("/comments/{$comment->id}"), ['body' => 'now @y@example.com', 'version' => $comment->version])
         ->assertSessionHas('warning', "y@example.com can't see this issue.");
+});
+
+// Owner review.
+
+test('editing mentions out gives an agent no capacity back, and the hour resets it', function () {
+    config(['pm.agent_mention_limit' => 2]);
+    RateLimiter::clear('pm:agent-mentions:'.makeAgent($this->ann)[0]->id);
+    [$agent, $token] = makeAgent($this->ann, AgentLevel::Write);
+    RateLimiter::clear("pm:agent-mentions:{$agent->id}");
+
+    $c = asToken($token)->postJson('/api/v1/issues/WEB-1/comments', ['body' => '@sam@example.com @alex@example.com'])->assertCreated();
+    asToken($token)->patchJson('/api/v1/comments/'.$c->json('data.id'), ['body' => 'nothing', 'version' => 1])->assertOk();
+    expect(Mention::count())->toBe(0);
+
+    InboxItem::query()->delete();
+    $r = asToken($token)->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'again @sam@example.com'])->assertCreated();
+    expect($r->json('data.warnings.0.code'))->toBe('mention_rate_limited')->and(Mention::count())->toBe(0)->and(mentionRows($this->sam))->toHaveCount(0);
+
+    $this->travel(61)->minutes();
+    $r = asToken($token)->postJson('/api/v1/issues/WEB-1/comments', ['body' => 'later @sam@example.com'])->assertCreated();
+    expect($r->json('data.warnings'))->toBeNull()->and(Mention::count())->toBe(1);
+});
+
+test('two comments by one author in the same second: the mention row belongs to the first only', function () {
+    $this->freezeTime();
+    InboxItem::query()->delete();
+    app(CommentService::class)->add($this->issue, $this->ann, 'first @sam@example.com');
+    app(CommentService::class)->add($this->issue, $this->ann, 'second, no mention');
+
+    expect(InboxItem::where('user_id', $this->sam->id)->orderBy('id')->pluck('event')->all())->toBe(['mention', 'commented']);
 });
