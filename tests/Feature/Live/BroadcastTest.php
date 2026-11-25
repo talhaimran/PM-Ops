@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\BoardService;
 use App\Services\CommentService;
 use App\Services\IssueService;
+use App\Services\MembershipService;
 use App\Services\NotificationService;
 use App\Services\ReactionService;
 use App\Services\WatcherService;
@@ -22,6 +23,8 @@ beforeEach(function () {
     $this->bob = addMember($this->project, User::factory()->create(), ProjectRole::Member);
     $this->issue = makeIssue($this->project, $this->ann, ['title' => 'Plain']);
     $this->channel = "private-workspace.{$this->project->workspace_id}.project.{$this->project->id}";
+    // phpunit.xml sets the null broadcaster, with which nothing is sent (see the last test).
+    config(['broadcasting.default' => 'reverb']);
     Event::fake([ProjectChanged::class, NotificationsChanged::class]);
 });
 
@@ -44,9 +47,13 @@ test('an issue update broadcasts one ProjectChanged on the project channel, with
 });
 
 test('a change that rolls back broadcasts nothing', function () {
+    $comment = app(CommentService::class)->add($this->issue, $this->ann, 'Hello');
+    Event::fake([ProjectChanged::class]);
     try {
-        DB::transaction(function () {
+        DB::transaction(function () use ($comment) {
             app(IssueService::class)->update($this->issue, $this->ann, ['title' => 'Renamed']);
+            // Dispatched by the service itself (not through ActivityRecorded), so only ProjectChanged's own after-commit holds it.
+            app(CommentService::class)->update($comment, 'Edited', $comment->version);
             throw new RuntimeException('boom');
         });
     } catch (RuntimeException) {
@@ -108,4 +115,25 @@ test('a live reload of an issue page whose issue was deleted goes to the board i
         ->assertRedirect(url(w('/projects/WEB')))->assertSessionHas('warning');
     // Opened from elsewhere, it still goes back there.
     $this->withHeaders(['Referer' => url(w('/dashboard'))])->get($page)->assertRedirect(url(w('/dashboard')));
+});
+
+test('with the null broadcaster an issue change neither looks the issue up again nor dispatches ProjectChanged', function () {
+    config(['broadcasting.default' => 'null']);
+    DB::enableQueryLog();
+
+    app(IssueService::class)->update($this->issue, $this->ann, ['title' => 'Renamed']);
+
+    Event::assertNotDispatched(ProjectChanged::class);
+    // ProjectChanged::about's lookup: by id, deleted issues included (no deleted_at condition).
+    $issueLookups = collect(DB::getQueryLog())->filter(fn ($q) => str_ends_with($q['query'], 'from `issues` where `issues`.`id` = ? limit 1'));
+    expect($issueLookups)->toHaveCount(0);
+});
+
+test('that redirect goes to the project list when the reader can no longer see the project', function () {
+    $page = w('/issues/WEB-1');
+    asWorkspaceMember($this->bob);
+    app(MembershipService::class)->remove($this->project, $this->bob);
+
+    $this->actingAs($this->bob)->withHeaders(['X-Requested-With' => 'XMLHttpRequest', 'Referer' => url($page)])->get($page)
+        ->assertRedirect(url(w('/projects')))->assertSessionHas('warning');
 });

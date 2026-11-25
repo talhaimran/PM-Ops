@@ -1,6 +1,6 @@
 import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
-import type { Connection } from './useLiveReload';
+import { subscription, type Connection } from './useLiveReload';
 
 // Loaded by useLiveReload only when VITE_REVERB_APP_KEY is set (3-R15).
 let echo: Echo<'reverb'> | null = null;
@@ -38,6 +38,6 @@ function client(): Echo<'reverb'> {
 /** Listen for "changed" on the private `channel` until stopped. */
 export function subscribe(channel: string, onEvent: () => void): Connection {
     const echo = client();
-    echo.private(channel).listen('.changed', onEvent);
-    return { connected: () => echo.connectionStatus() === 'connected', stop: () => echo.leave(channel) };
+    const private_ = echo.private(channel).listen('.changed', onEvent);
+    return subscription(() => echo.connectionStatus() === 'connected', private_, () => echo.leave(channel));
 }

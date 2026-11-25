@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { liveReload, POLL_MS, RESUME_MS, type Connect } from './useLiveReload.ts';
+import { liveReload, POLL_MS, RESUME_MS, subscription, type Connect } from './useLiveReload.ts';
 
 /** A reload that finishes at once, counting calls. */
 function counter() {
@@ -102,4 +102,40 @@ test('events during a reload in flight make one more reload after it, not one ea
     finish();
     assert.equal(n, 2);
     stop();
+});
+
+/** A fake Echo private channel: `succeed()` / `fail()` fire its subscription callbacks. */
+function fakeChannel() {
+    const on: { ok?: () => void; error?: (e: unknown) => void } = {};
+    const channel = {
+        subscribed: (cb: () => void) => ((on.ok = cb), channel),
+        error: (cb: (e: unknown) => void) => ((on.error = cb), channel),
+    };
+    return { channel, succeed: () => on.ok!(), fail: () => on.error!({ status: 403 }) };
+}
+
+test('a connected socket whose channel subscription fails keeps polling; a successful one stops', (t) => {
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const { calls, reload } = counter();
+    const refused = fakeChannel();
+    const stop = liveReload('workspace.1.project.2', reload, () => false, () => subscription(() => true, refused.channel, () => {}));
+
+    refused.fail();
+    t.mock.timers.tick(POLL_MS);
+    assert.equal(calls.n, 1);
+    stop();
+
+    const accepted = fakeChannel();
+    const stop2 = liveReload('workspace.1.project.2', reload, () => false, () => subscription(() => true, accepted.channel, () => {}));
+    // Before the subscription is confirmed the page still polls.
+    t.mock.timers.tick(POLL_MS);
+    assert.equal(calls.n, 2);
+    accepted.succeed();
+    t.mock.timers.tick(POLL_MS * 3);
+    assert.equal(calls.n, 2);
+    // A later refusal (e.g. after a reconnect) brings polling back.
+    accepted.fail();
+    t.mock.timers.tick(POLL_MS);
+    assert.equal(calls.n, 3);
+    stop2();
 });

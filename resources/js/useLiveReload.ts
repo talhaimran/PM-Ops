@@ -38,6 +38,19 @@ export function liveReload(channel: string | null, reload: (done: () => void) =>
     };
 }
 
+type EchoChannel = { subscribed(cb: () => void): unknown; error(cb: (e: unknown) => void): unknown };
+
+/**
+ * Live only while the socket is up and the channel's subscription succeeded: a refused or failed channel auth leaves the
+ * socket connected, and the page must keep polling then. Pusher resubscribes after a reconnect, firing these again.
+ */
+export function subscription(socketUp: () => boolean, channel: EchoChannel, stop: () => void): Connection {
+    let subscribed = false;
+    channel.subscribed(() => (subscribed = true));
+    channel.error(() => (subscribed = false));
+    return { connected: () => subscribed && socketUp(), stop };
+}
+
 /** Echo is loaded only when Reverb is configured, so a page without it never fetches pusher-js and only polls. */
 // `?.`: under node --test there is no import.meta.env.
 const echoConnect: Connect | null = import.meta.env?.VITE_REVERB_APP_KEY

@@ -18,6 +18,10 @@ class ProjectChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
     /** Broadcast that $issueId (deleted ones too) changed; nothing when it is gone for good. */
     public static function about(int $issueId, string $kind): void
     {
+        // No broadcaster: skip the lookup (this runs for every activity row).
+        if (config('broadcasting.default') === 'null') {
+            return;
+        }
         $issue = Issue::withTrashed()->with('project')->find($issueId);
         $issue && event(new self($issue->project->workspace_id, $issue->project_id, $issue->key, $kind));
     }

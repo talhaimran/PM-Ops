@@ -67,7 +67,11 @@ class IssueController extends Controller
                 throw $e;
             }
 
-            return redirect()->route('projects.show', Str::before($key, '-'))->with('warning', collect($e->errors())->flatten()->first());
+            // The board while the reader can still see the project, else their project list.
+            $project = Str::before($key, '-');
+            $to = $request->user()->accessibleProjects()->where('projects.key', $project)->exists() ? route('projects.show', $project) : route('projects.index');
+
+            return redirect($to)->with('warning', collect($e->errors())->flatten()->first());
         }
 
         return Inertia::render('Issues/Show', [
