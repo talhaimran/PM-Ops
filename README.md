@@ -93,6 +93,7 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `PM_SHIFT_LIMIT` | `500` | Most issues one due-date change may shift through `precedes` links. Over it, nothing is shifted (422 when you asked for the shift). |
 | `PM_CLONE_LIMIT` | `100` | Most sub-tasks, and separately most links, one clone copies. Over it the clone is refused and nothing is saved. |
 | `PM_BILLING_URL` | — | Upgrade link in the plan-limit dialog. Leave empty on self-hosted. |
+| `PM_INTERNAL_API_TOKEN`, `PM_INTERNAL_API_TOKEN_NEXT` | — | Service token(s) for the internal admin API (`/internal/v1`) Platform management calls on Cloud. Empty: the API is off and every path answers 404. `_NEXT` is accepted too, so you can rotate: set the new token as `_NEXT`, switch Platform management to it, then move it to `PM_INTERNAL_API_TOKEN`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Google sign-in. Leave empty to hide the button. See below. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | GitHub sign-in. Leave empty to hide the button. See below. |
 
@@ -159,6 +160,7 @@ For production, run `npm run build` and serve `public/` with any PHP host over H
 - Configure real SMTP so verification and invitation emails arrive.
 - Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge` and `workspaces:purge` daily.
 - On `cloud`, registration is open to anyone. On `self_hosted`, only the first person and invited people can register.
+- Leave `PM_INTERNAL_API_TOKEN` and `PM_INTERNAL_API_TOKEN_NEXT` empty unless Platform management calls this install; when set, use long random values (`openssl rand -hex 32`), serve `/internal/v1` over HTTPS only, and never log or commit them.
 
 The app is at <http://localhost:8000>, and the API docs are at <http://localhost:8000/docs/api> (OpenAPI JSON at `/docs/api.json`).
 
