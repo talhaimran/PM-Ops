@@ -36,6 +36,15 @@ class ProjectChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
         return 'changed';
     }
 
+    /**
+     * Nothing on the wire: viewers only reload, and a socket kept open after losing access (auth runs at subscribe, scan
+     * F1/F2) learns no issue key or kind, just that the project changed and when.
+     */
+    public function broadcastWith(): array
+    {
+        return [];
+    }
+
     /** Without a broadcaster nothing is queued, so a server with no queue worker doesn't pile up jobs. */
     public function broadcastWhen(): bool
     {

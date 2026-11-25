@@ -43,7 +43,9 @@ test('an issue update broadcasts one ProjectChanged on the project channel, with
         ->and($changes[0]->issueKey)->toBe('WEB-1')
         ->and($changes[0]->kind)->toBe('updated')
         ->and(array_keys(get_object_vars($changes[0])))->toEqual(['workspaceId', 'projectId', 'issueKey', 'kind'])
-        ->and(json_encode($changes[0]))->not->toContain('Secret');
+        ->and(json_encode($changes[0]))->not->toContain('Secret')
+        // Scan F1/F2: the wire payload is empty, so a socket kept open after losing access learns only that the project changed.
+        ->and($changes[0]->broadcastWith())->toBe([]);
 });
 
 test('a change that rolls back broadcasts nothing', function () {

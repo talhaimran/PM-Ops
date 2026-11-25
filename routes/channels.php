@@ -6,7 +6,7 @@ use App\Models\User;
 use App\Services\CurrentWorkspace;
 use Illuminate\Support\Facades\Broadcast;
 
-// shortcut: auth runs at subscribe only; a removed member keeps receiving ids/keys/kinds until they reconnect; upgrade: disconnect them on member removal.
+// shortcut: auth runs at subscribe only; a removed member keeps an open socket learning that the project changed and when (payloads are empty, scan F1/F2) until they reconnect; upgrade: disconnect them on member removal.
 // 3-R14: people only (an agent's token never subscribes). A project channel needs a member of that workspace whose session
 // the workspace serves (as on its pages), who can see the project there: accessibleProjects(), so Owners and Admins too.
 Broadcast::channel('workspace.{workspace}.project.{project}', function (User $user, $workspaceId, $projectId) {
