@@ -19,6 +19,7 @@ use App\Services\CurrentWorkspace;
 use App\Services\IssueService;
 use App\Services\ProjectService;
 use App\Services\WorkspaceMemberService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -61,6 +62,14 @@ class ProjectController extends Controller
         $project = $this->projects->create($request->user(), $request->validated());
 
         return redirect()->route('projects.settings', $project->key);
+    }
+
+    /** The members the composer's @ list offers: the project's, only to someone who can see the project. */
+    public function mentionable(Project $project): JsonResponse
+    {
+        Gate::authorize('view', $project);
+
+        return response()->json(['members' => $project->members()->orderBy('name')->get(['users.name', 'users.email'])->map(fn ($u) => ['name' => $u->name, 'email' => $u->email])->all()]);
     }
 
     public function settings(Request $request, Project $project): Response

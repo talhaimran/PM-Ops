@@ -67,7 +67,9 @@ Permissions: **Admins** manage settings, members, columns and the project itself
 | `unlink_issues` | Remove a link; the same arguments. Write level | from, type, to | |
 | `watch_issue` | Watch an issue: it adds your owner (an agent watching counts as its owner watching). Returns `watchers_count`, `watching`, `watchers`. REST `POST /api/v1/issues/{key}/watchers`. Write level | issue | user (people only: a member's email) |
 | `unwatch_issue` | Stop watching. REST `DELETE /api/v1/issues/{key}/watchers`. Write level | issue | user (people only: project admins) |
-| `add_comment` | Markdown comment | issue, body | |
+| `add_comment` | Markdown comment. Write `@sam@example.com` (`@` + the member's email) to mention a person: they are told at once and watch the issue. Works in descriptions too, and only mentions new in the text notify. An email that isn't a project member is saved as text and the response carries `warnings: [{code: "mention_not_member", email, message}]`; you can't mention agents. You may send 20 mentions an hour (server setting): past that the text saves, nobody is told, and the warning is `mention_rate_limited`. Mentions inside code or links count for nothing. Issue keys in text (`WEB-12`) become links for readers who can see that issue | issue, body | |
+| `add_reaction` | React to a comment with one of 👍 ✅ 👀 🎉 ❤️ 😄 (anything else is a 422 listing them). Repeating does nothing; you and your owner react separately. No notification, no version change. REST `POST /api/v1/comments/{id}/reactions` `{"emoji": "👍"}`. Write level | comment_id, emoji | |
+| `remove_reaction` | Take back your own reaction (no `confirm`). REST `DELETE /api/v1/comments/{id}/reactions` `{"emoji": "👍"}`. Write level | comment_id, emoji | |
 | `update_comment` | Edit your own comment; send its `version` (from `get_issue`), a stale one saves nothing | comment_id, body, version | |
 | `delete_comment` | Delete your comment (admins: any). Soft, like issues | comment_id | |
 | `list_labels` / `create_label` / `update_label` / `delete_label` | Manage labels (by name) | project (+ name or label) | color, name |

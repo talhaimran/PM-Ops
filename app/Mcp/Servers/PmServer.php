@@ -5,6 +5,7 @@ namespace App\Mcp\Servers;
 use App\Mcp\Resources\IssueResource;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Tools\AddComment;
+use App\Mcp\Tools\AddReaction;
 use App\Mcp\Tools\BulkCreateIssues;
 use App\Mcp\Tools\BulkUpdateIssues;
 use App\Mcp\Tools\CloneIssue;
@@ -35,6 +36,7 @@ use App\Mcp\Tools\MoveIssue;
 use App\Mcp\Tools\MyIssues;
 use App\Mcp\Tools\ProjectSummary;
 use App\Mcp\Tools\RankBacklog;
+use App\Mcp\Tools\RemoveReaction;
 use App\Mcp\Tools\SearchIssues;
 use App\Mcp\Tools\StartSprint;
 use App\Mcp\Tools\UnlinkIssues;
@@ -94,6 +96,8 @@ class PmServer extends Server
         UnlinkIssues::class,
         WatchIssue::class,
         UnwatchIssue::class,
+        AddReaction::class,
+        RemoveReaction::class,
         AddComment::class,
         UpdateComment::class,
         DeleteComment::class,

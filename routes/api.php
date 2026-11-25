@@ -73,4 +73,6 @@ Route::prefix('v1')->middleware(['auth:sanctum', ResolveTokenWorkspace::class, '
     Route::post('issues/{key}/comments', [CommentController::class, 'store']);
     Route::patch('comments/{comment}', [CommentController::class, 'update']);
     Route::delete('comments/{comment}', [CommentController::class, 'destroy']);
+    Route::post('comments/{comment}/reactions', [CommentController::class, 'react']);
+    Route::delete('comments/{comment}/reactions', [CommentController::class, 'unreact']);
 });

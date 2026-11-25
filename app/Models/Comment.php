@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable(['issue_id', 'user_id', 'body', 'agent_id'])]
@@ -14,6 +15,9 @@ class Comment extends Model
 
     /** Spec 7.11: the version a new comment starts at (the column default), so a created model carries it too. */
     protected $attributes = ['version' => 1];
+
+    /** Set by CommentService::add: what the writer should know (MentionService warnings). Not stored. */
+    public array $warnings = [];
 
     protected function casts(): array
     {
@@ -28,6 +32,11 @@ class Comment extends Model
     public function author(): BelongsTo
     {
         return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function reactions(): HasMany
+    {
+        return $this->hasMany(CommentReaction::class)->orderBy('id');
     }
 
     public function agent(): BelongsTo

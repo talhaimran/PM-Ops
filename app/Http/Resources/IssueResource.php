@@ -66,6 +66,8 @@ class IssueResource extends JsonResource
             'epic_issues' => $this->whenLoaded('epicIssues', fn () => $this->epicIssues->map($child)->all()),
             'comments' => $this->whenLoaded('comments', fn () => CommentResource::collection($this->comments)->resolve()),
             'pending_approvals' => $this->whenLoaded('pendingApprovals', fn () => ApprovalRequestResource::collection($this->pendingApprovals)->resolve()),
+            // 3-R9: what the writer should know after a save (a mention of someone who isn't a member); only when there is something.
+            'warnings' => $this->when($this->resource->warnings !== [], fn () => $this->resource->warnings),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ]);

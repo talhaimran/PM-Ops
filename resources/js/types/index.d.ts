@@ -92,6 +92,8 @@ export interface Comment {
     version: number;
     body_html?: string;
     can_edit?: boolean;
+    /** 3-R13: one per emoji in use; `mine` = you (or your agent) reacted. */
+    reactions?: { emoji: string; count: number; people: string[]; mine: boolean }[];
     author: UserSummary | null;
     agent?: AgentRef | null;
     created_at: string;

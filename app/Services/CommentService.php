@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class CommentService
 {
-    public function __construct(private ActivityLogger $activity, private WatcherService $watchers) {}
+    public function __construct(private ActivityLogger $activity, private WatcherService $watchers, private MentionService $mentions) {}
 
     public function add(Issue $issue, User $author, string $body): Comment
     {
@@ -19,15 +19,16 @@ class CommentService
             $comment = $issue->comments()->create(['user_id' => $author->id, 'body' => $body, 'agent_id' => $author->agent()?->id]);
             $this->activity->log($issue, $author, 'commented');
             $this->watchers->autoWatch($issue, $author);
+            $comment->warnings = $this->mentions->sync($issue, $comment, null, $body, $author);
 
             return $comment->setRelation('author', $author);
         });
     }
 
-    /** Spec 7.11: $version must be the comment's current version, or nothing is saved (EditConflict). A change bumps it. */
-    public function update(Comment $comment, string $body, int $version): Comment
+    /** Spec 7.11 ($actor: who edits, default the author; they get the mention warnings): $version must be the comment's current version, or nothing is saved (EditConflict). A change bumps it. */
+    public function update(Comment $comment, string $body, int $version, ?User $actor = null): Comment
     {
-        return DB::transaction(function () use ($comment, $body, $version) {
+        return DB::transaction(function () use ($comment, $body, $version, $actor) {
             // The issue row, then the comment row, held: the check and the write can't interleave with another save or a delete.
             $issueGone = Issue::withTrashed()->whereKey($comment->issue_id)->lockForUpdate()->first()?->trashed() ?? true;
             Comment::withTrashed()->whereKey($comment->id)->lockForUpdate()->first();
@@ -39,8 +40,10 @@ class CommentService
             if ($comment->version !== $version) {
                 throw EditConflict::comment($comment, $version);
             }
-            if ($comment->body !== $body) {
+            $old = $comment->body;
+            if ($old !== $body) {
                 $comment->increment('version', 1, ['body' => $body]);
+                $comment->warnings = $this->mentions->sync($comment->issue()->with('project')->first(), $comment, $old, $body, $actor ?? User::findOrFail($comment->user_id));
             }
 
             return $comment->loadMissing('author');

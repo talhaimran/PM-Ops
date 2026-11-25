@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Web;
 
 use App\Enums\DateShift;
 use App\Enums\LinkType;
+use App\Enums\Reaction;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Web\Concerns\PresentsIssue;
 use App\Http\Requests\Issues\CloneIssueRequest;
 use App\Http\Requests\Issues\CommentRequest;
 use App\Http\Requests\Issues\DestroyIssueRequest;
 use App\Http\Requests\Issues\LinkRequest;
+use App\Http\Requests\Issues\ReactionRequest;
 use App\Http\Requests\Issues\StoreIssueRequest;
 use App\Http\Requests\Issues\UpdateCommentRequest;
 use App\Http\Requests\Issues\UpdateIssueRequest;
@@ -22,6 +24,7 @@ use App\Services\CommentService;
 use App\Services\IssueService;
 use App\Services\LinkService;
 use App\Services\ProjectService;
+use App\Services\ReactionService;
 use App\Services\UndoService;
 use App\Services\WatcherService;
 use Illuminate\Http\RedirectResponse;
@@ -41,6 +44,7 @@ class IssueController extends Controller
         private UndoService $undo,
         private LinkService $links,
         private WatcherService $watchers,
+        private ReactionService $reactions,
     ) {}
 
     public function store(StoreIssueRequest $request, Project $project): RedirectResponse
@@ -48,7 +52,7 @@ class IssueController extends Controller
         Gate::authorize('contribute', $project);
         $issue = $this->issues->create($project, $request->user(), $request->validated());
 
-        return redirect()->route('issues.show', $issue->key);
+        return redirect()->route('issues.show', $issue->key)->with($this->mentionFlash($issue->warnings, $project));
     }
 
     public function show(Request $request, string $key): Response
@@ -95,7 +99,7 @@ class IssueController extends Controller
         if ($token !== $marker) {
             $status = $before['status'] ?? null;
 
-            return back()->with($shifts)->with('undo', [
+            return back()->with($shifts)->with($this->mentionFlash($issue->warnings, $issue->project))->with('undo', [
                 'message' => $status !== null && $status !== $issue->status->name ? "{$issue->key} moved to {$issue->status->name}" : "{$issue->key} updated",
                 'method' => 'patch',
                 'url' => route('issues.update', $issue->key),
@@ -103,7 +107,7 @@ class IssueController extends Controller
             ]);
         }
 
-        return back()->with($shifts);
+        return back()->with($shifts)->with($this->mentionFlash($issue->warnings, $issue->project));
     }
 
     public function destroy(DestroyIssueRequest $request, string $key): RedirectResponse
@@ -215,16 +219,34 @@ class IssueController extends Controller
     {
         $issue = $this->issues->resolve($request->user(), $key);
         Gate::authorize('comment', $issue);
-        $this->comments->add($issue, $request->user(), $request->validated('body'));
+        $comment = $this->comments->add($issue, $request->user(), $request->validated('body'));
 
-        return back();
+        return back()->with($this->mentionFlash($comment->warnings, $issue->project));
     }
 
     public function updateComment(UpdateCommentRequest $request, int $comment): RedirectResponse
     {
         $comment = $this->comments->resolve($request->user(), $comment);
         Gate::authorize('update', $comment);
-        $this->comments->update($comment, $request->validated('body'), (int) $request->validated('version'));
+        $updated = $this->comments->update($comment, $request->validated('body'), (int) $request->validated('version'), $request->user());
+
+        return back()->with($this->mentionFlash($updated->warnings, $comment->issue->project));
+    }
+
+    public function react(ReactionRequest $request, int $comment): RedirectResponse
+    {
+        $comment = $this->comments->resolve($request->user(), $comment);
+        Gate::authorize('react', $comment);
+        $this->reactions->add($comment, Reaction::from($request->validated('emoji')), $request->user());
+
+        return back();
+    }
+
+    public function unreact(ReactionRequest $request, int $comment): RedirectResponse
+    {
+        $comment = $this->comments->resolve($request->user(), $comment);
+        Gate::authorize('react', $comment);
+        $this->reactions->remove($comment, Reaction::from($request->validated('emoji')), $request->user());
 
         return back();
     }

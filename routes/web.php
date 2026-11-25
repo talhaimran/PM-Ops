@@ -125,6 +125,8 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::post('/issues/{key}/comments', [IssueController::class, 'comment'])->name('issues.comments.store');
     Route::patch('/comments/{comment}', [IssueController::class, 'updateComment'])->name('comments.update');
     Route::delete('/comments/{comment}', [IssueController::class, 'destroyComment'])->name('comments.destroy');
+    Route::post('/comments/{comment}/reactions', [IssueController::class, 'react'])->name('comments.reactions.store')->whereNumber('comment');
+    Route::delete('/comments/{comment}/reactions', [IssueController::class, 'unreact'])->name('comments.reactions.destroy')->whereNumber('comment');
 
     Route::prefix('/projects/{project:key}')->name('projects.')->group(function () {
         Route::get('/', [BoardController::class, 'show'])->name('show');
@@ -141,6 +143,7 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
         Route::post('/sprints/{sprint}/start', [SprintController::class, 'start'])->name('sprints.start')->scopeBindings();
         Route::post('/sprints/{sprint}/complete', [SprintController::class, 'complete'])->name('sprints.complete')->scopeBindings();
         Route::get('/settings', [ProjectController::class, 'settings'])->name('settings');
+        Route::get('/mentionable', [ProjectController::class, 'mentionable'])->name('mentionable');
         Route::post('/join', [ProjectController::class, 'join'])->name('join');
         Route::post('/issues', [IssueController::class, 'store'])->name('issues.store');
         Route::post('/labels', [LabelController::class, 'store'])->name('labels.store');
