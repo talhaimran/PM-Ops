@@ -24,6 +24,9 @@ return [
     // At most this many sub-tasks, and separately this many links, are copied by one clone (spec 7.9).
     'clone_limit' => (int) env('PM_CLONE_LIMIT', 100),
 
+    // 3-R6: quick changes by one person to one issue join the recipient's newest unread notification for this many minutes.
+    'notification_batch_minutes' => (int) env('PM_NOTIFICATION_BATCH_MINUTES', 5),
+
     // How long a replayable Idempotency-Key response is kept.
     'idempotency_ttl_hours' => (int) env('PM_IDEMPOTENCY_TTL_HOURS', 24),
 

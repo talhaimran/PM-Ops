@@ -2,6 +2,7 @@ import ApplicationLogo from '@/Components/ApplicationLogo';
 import Avatar from '@/Components/Avatar';
 import ConflictDialog from '@/Components/ConflictDialog';
 import PlanLimitDialog from '@/Components/PlanLimitDialog';
+import NotificationBell from '@/Components/NotificationBell';
 import { projectLinks } from '@/Components/ProjectNav';
 import ThemeToggle from '@/Components/ThemeToggle';
 import Toaster from '@/Components/Toaster';
@@ -82,6 +83,7 @@ function Sidebar({ project, searchId, create }: { project?: { key: string; name:
                         <NavItem href={route('projects.index')} icon={FolderKanban} current={route().current('projects.index')}>
                             Projects
                         </NavItem>
+                        <NotificationBell row={row} rest={rest} />
                     </nav>
 
                     {project && (
