@@ -242,6 +242,8 @@ function isolationExemptRoutes(): array
         'POST oauth/register' => 'OAuth client registration, no workspace data', 'POST oauth/token' => 'OAuth code exchange; the agent was picked on consent',
         'GET oauth/authorize' => 'consent screen; lists only the current workspace\'s agents (below)',
         'POST oauth/authorize' => 'consent; takes only my agents in the current workspace (below)', 'DELETE oauth/authorize' => 'consent refused; changes nothing',
+        // 3-R14: the channel names carry the ids; the channel cases below check them.
+        'GET broadcasting/auth' => 'live channel auth; channels covered below', 'POST broadcasting/auth' => 'live channel auth; channels covered below',
     ];
 }
 
@@ -552,4 +554,21 @@ test('OAuth: a consent screen shown in A is never approved in B, even after swit
     $this->from($url)->post('/oauth/authorize', ['auth_token' => $authToken, 'agent' => $this->annB[0]->id])
         ->assertSessionHasErrors(['agent' => 'You switched to Bravo after this screen opened. Choose an agent again.']);
     expect(AuthCode::count())->toBe(0)->and(workspaceSnapshot($this->b))->toBe($this->bBefore);
+});
+
+test('live channels: acting in A never subscribes to B\'s projects, and a user channel is only its user\'s', function () {
+    useReverbForChannelAuth();
+    $ops = Project::where('workspace_id', $this->b->id)->where('key', 'OPS')->sole();
+    $web = Project::where('workspace_id', $this->a->id)->sole();
+
+    // B's project named under A (ann is in both, and Admin of OPS): refused like a project that doesn't exist.
+    channelAuth($this->ann, "workspace.{$this->a->id}.project.{$ops->id}")->assertForbidden();
+    channelAuth($this->ann, "workspace.{$this->a->id}.project.999999")->assertForbidden();
+    // bob is only in B.
+    channelAuth($this->bob, "workspace.{$this->a->id}.project.{$web->id}")->assertForbidden();
+    channelAuth($this->bob, "workspace.{$this->b->id}.project.{$web->id}")->assertForbidden();
+    channelAuth($this->ann, "user.{$this->bob->id}")->assertForbidden();
+    // The legitimate ones still work.
+    channelAuth($this->ann, "workspace.{$this->a->id}.project.{$web->id}")->assertOk();
+    channelAuth($this->bob, "workspace.{$this->b->id}.project.{$ops->id}")->assertOk();
 });

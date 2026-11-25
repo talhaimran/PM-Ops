@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\ProjectChanged;
 use App\Exceptions\EditConflict;
 use App\Models\Comment;
 use App\Models\Issue;
@@ -44,6 +45,8 @@ class CommentService
             if ($old !== $body) {
                 $comment->increment('version', 1, ['body' => $body]);
                 $comment->warnings = $this->mentions->sync($comment->issue()->with('project')->first(), $comment, $old, $body, $actor ?? User::findOrFail($comment->user_id));
+                // Edits, deletes and restores aren't in the activity log, so they tell live viewers here.
+                ProjectChanged::about($comment->issue_id, 'comment_edited');
             }
 
             return $comment->loadMissing('author');
@@ -54,11 +57,13 @@ class CommentService
     public function delete(Comment $comment): void
     {
         $comment->delete();
+        ProjectChanged::about($comment->issue_id, 'comment_deleted');
     }
 
     public function restore(Comment $comment): Comment
     {
         $comment->restore();
+        ProjectChanged::about($comment->issue_id, 'comment_restored');
 
         return $comment;
     }

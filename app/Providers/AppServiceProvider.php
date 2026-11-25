@@ -18,6 +18,7 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\StatefulGuard;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Mail\Markdown;
 use Illuminate\Support\Facades\Auth;
@@ -54,6 +55,11 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Vite::prefetch(concurrency: 3);
+        // 3-R15: `php artisan dev` starts Reverb only when live updates are configured; otherwise pages poll.
+        $reverb = config('broadcasting.connections.reverb');
+        if (config('broadcasting.default') !== 'reverb' || ! $reverb['key'] || ! $reverb['secret'] || ! $reverb['app_id']) {
+            DevCommands::except('reverb');
+        }
         // Names people choose (workspace, inviter, project) are echoed into Markdown mail: keep them text, not links.
         Markdown::withSecuredEncoding();
         Model::preventLazyLoading(! $this->app->isProduction());

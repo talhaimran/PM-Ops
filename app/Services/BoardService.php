@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\IssueType;
+use App\Events\ProjectChanged;
 use App\Models\Column;
 use App\Models\Issue;
 use App\Models\Project;
@@ -76,6 +77,8 @@ class BoardService
             };
 
             $this->ranks->place($issue, $siblings, $position);
+            // A move to another status is in the activity log (BroadcastChanges); reordering alone isn't.
+            isset($input['status']) || isset($input['resolution']) || isset($input['duplicate_of']) || ProjectChanged::about($issue->id, 'ranked');
 
             return $issue;
         });

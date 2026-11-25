@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\IssueType;
 use App\Enums\SprintState;
+use App\Events\ProjectChanged;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
@@ -83,6 +84,8 @@ class BacklogService
             };
 
             $this->ranks->place($issue, $siblings, $position);
+            // A move to another section is in the activity log (BroadcastChanges); reordering alone isn't.
+            array_key_exists('sprint', $input) || ProjectChanged::about($issue->id, 'ranked');
 
             return $issue;
         });

@@ -21,6 +21,7 @@ import { motion } from 'motion/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { UNDO_LIFETIME } from '@/undo';
 import { dropAnnouncement } from '@/board';
+import { useLiveReload, useProjectChannel } from '@/useLiveReload';
 import { IssueOptions, Project, Resolution, StatusCategory } from '@/types';
 import { closestCorners, DndContext, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -116,6 +117,10 @@ export default function Board({
             );
         move(false);
     });
+    // 3-R15: others' changes reload the board (and an open peek), never under a card being dragged.
+    useLiveReload(useProjectChannel(project.id), ['board', 'active_sprint', 'peek'], { paused: () => active !== null });
+    // Cards slide to where the server puts them; measuring stops while dragging, where dnd-kit moves them.
+    const layoutDep = active ? 'drag' : lanes;
     const [creating, setCreating] = useState(false);
     const [completing, setCompleting] = useState(false);
     const openCreate = useCallback(() => setCreating(true), []);
@@ -187,7 +192,7 @@ export default function Board({
                     <DndContext sensors={sensors} collisionDetection={closestCorners} {...handlers}>
                         <div className="flex snap-x items-start gap-2.5 overflow-x-auto pb-4">
                             {board.columns.map(({ name, statuses }) => (
-                                <Lane key={name} name={name} category={statuses[0].category} color={statuses[0].color} cards={lanes[name] ?? []} draggable={can.contribute} fresh={fresh} busy={busy} onBusy={setBusy} />
+                                <Lane key={name} name={name} category={statuses[0].category} color={statuses[0].color} cards={lanes[name] ?? []} draggable={can.contribute} fresh={fresh} busy={busy} onBusy={setBusy} layoutDep={layoutDep} />
                             ))}
                         </div>
                         <DragOverlay dropAnimation={css('drop')}>
@@ -234,7 +239,7 @@ const css = (moment: 'lift' | 'drop') => {
 };
 
 /** Design system BoardColumn: status square (its first status's category), name, count; the points total; the cards; a dashed target when empty. */
-function Lane({ name, category, color, cards, draggable, fresh, busy, onBusy }: { name: string; category: StatusCategory; color: string | null; cards: Card[]; draggable: boolean; fresh: string | null; busy: string | null; onBusy: (key: string | null) => void }) {
+function Lane({ name, category, color, cards, draggable, fresh, busy, onBusy, layoutDep }: { name: string; category: StatusCategory; color: string | null; cards: Card[]; draggable: boolean; fresh: string | null; busy: string | null; onBusy: (key: string | null) => void; layoutDep: unknown }) {
     const { setNodeRef, isOver } = useLaneDroppable(name);
     // shortcut: totals cover the cards on screen, so a board cut off at 500 issues (the notice above says so) or a filtered
     // board shows partial sums; move the sum to BoardService when estimates get a unit (step 10).
@@ -259,7 +264,7 @@ function Lane({ name, category, color, cards, draggable, fresh, busy, onBusy }: 
             <SortableContext items={cards.map((c) => c.key)} strategy={verticalListSortingStrategy}>
                 <ul className="flex min-h-16 flex-1 flex-col gap-2">
                     {cards.map((card) => (
-                        <SortableCard key={card.key} card={card} disabled={!draggable} chip={fresh === card.key || busy === card.key} onBusy={(b) => onBusy(b ? card.key : null)} />
+                        <SortableCard key={card.key} card={card} disabled={!draggable} chip={fresh === card.key || busy === card.key} onBusy={(b) => onBusy(b ? card.key : null)} layoutDep={layoutDep} />
                     ))}
                     {cards.length === 0 && (
                         <li>
@@ -272,13 +277,16 @@ function Lane({ name, category, color, cards, draggable, fresh, busy, onBusy }: 
     );
 }
 
-function SortableCard({ card, disabled, chip, onBusy }: { card: Card; disabled: boolean; chip: boolean; onBusy: (busy: boolean) => void }) {
+function SortableCard({ card, disabled, chip, onBusy, layoutDep }: { card: Card; disabled: boolean; chip: boolean; onBusy: (busy: boolean) => void; layoutDep: unknown }) {
     const { attributes, listeners, setNodeRef, transform, transition: sliding, isDragging } = useSortable({ id: card.key, disabled, transition: css('drop') });
 
     return (
         <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition: sliding }} {...attributes} {...listeners} className="rounded-item">
-            {/* The dashed ghost marks where the card will land. */}
-            {isDragging ? <div className="h-[88px] rounded-item border border-dashed border-line-2" /> : <CardView card={card} chip={chip ? { editable: !disabled, onBusy } : undefined} />}
+            {/* layoutId: a card another person moves to another column slides there. Position only, so the ghost doesn't stretch. */}
+            <motion.div layout="position" layoutId={card.key} layoutDependency={layoutDep} transition={transition('drop')}>
+                {/* The dashed ghost marks where the card will land. */}
+                {isDragging ? <div className="h-[88px] rounded-item border border-dashed border-line-2" /> : <CardView card={card} chip={chip ? { editable: !disabled, onBusy } : undefined} />}
+            </motion.div>
         </li>
     );
 }

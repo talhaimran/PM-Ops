@@ -1,10 +1,13 @@
 import { Link, usePage } from '@inertiajs/react';
 import { Bell } from 'lucide-react';
+import { useLiveReload } from '@/useLiveReload';
 
 /** The sidebar's inbox row (design system NotificationInbox): the bell, and the unread count when there is one. */
 /** `row` and `rest` are the sidebar's row classes and its inactive colours, so this link switches between them like the others. */
 export default function NotificationBell({ row, rest }: { row: string; rest: string }) {
-    const unread = usePage().props.unread_notifications;
+    const { unread_notifications: unread, auth } = usePage().props;
+    // 3-R15: the count follows new notifications and reads in other tabs.
+    useLiveReload(`user.${auth.user.id}`, ['unread_notifications']);
     const current = route().current('notifications.index');
 
     return (

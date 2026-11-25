@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Events\NotificationsChanged;
 use App\Models\Activity;
 use App\Models\Agent;
 use App\Models\InboxItem;
@@ -44,6 +45,8 @@ class NotificationService
         $workspaceId = $issue->project->workspace_id;
 
         return DB::transaction(function () use ($to, $issue, $event, $change, $actor, $agent, $via, $batch, $workspaceId) {
+            // Sent after commit, so the bell reloads once the row is there.
+            event(new NotificationsChanged($to->id));
             if ($batch && ! in_array($event, self::OWN_ROW, true)) {
                 $row = InboxItem::where('user_id', $to->id)->where('workspace_id', $workspaceId)->where('issue_id', $issue->id)
                     ->whereNull('read_at')->whereNotIn('event', self::OWN_ROW)->orderByDesc('id')->lockForUpdate()->first();
@@ -106,10 +109,14 @@ class NotificationService
     /** Mark $user's unread items read: those in $ids, or with 'all' every one in the current workspace. Returns how many changed. */
     public function markRead(User $user, int|array|string $ids): int
     {
-        return InboxItem::where('user_id', $user->id)->where('workspace_id', $this->current->id() ?? 0)->whereNull('read_at')
+        $changed = InboxItem::where('user_id', $user->id)->where('workspace_id', $this->current->id() ?? 0)->whereNull('read_at')
             ->when($ids !== 'all', fn ($q) => $q->whereIn('id', (array) $ids))
             // Not touching updated_at: reading a row mustn't make get_updates send it again.
             ->toBase()->update(['read_at' => now()]);
+        // The bell in the reader's other tabs.
+        $changed && event(new NotificationsChanged($user->id));
+
+        return $changed;
     }
 
     /**
@@ -151,14 +158,14 @@ class NotificationService
             return null;
         }
 
-        return InboxItem::create([
+        return tap(InboxItem::create([
             'workspace_id' => $workspace->id, 'user_id' => $owner->id, 'event' => 'agent_summary', 'via' => 'system',
             // One agent: its id, so the text says "Your agent"; several: none, "Your agents".
             'agent_id' => $agents->count() === 1 ? $agents->first() : null,
             // Ids, not keys: what the reader sees is decided when they read it (annotate), so lost access hides the issue.
             'changes' => [['action' => 'day', 'from' => null, 'to' => $date], ...$ids->map(fn ($id) => ['action' => 'updated', 'from' => null, 'to' => null, 'issue_id' => $id])->all()],
             'count' => $ids->count(),
-        ]);
+        ]), fn () => event(new NotificationsChanged($owner->id)));
     }
 
     /** The line an item shows: "Alex's agent moved WEB-12 to In Review". Needs issue.project, actor and agent.owner loaded. */
