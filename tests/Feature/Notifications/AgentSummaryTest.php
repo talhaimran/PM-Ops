@@ -2,6 +2,7 @@
 
 use App\Enums\AgentLevel;
 use App\Models\InboxItem;
+use App\Models\Issue;
 use App\Models\User;
 use App\Services\NotificationService;
 
@@ -33,7 +34,7 @@ test('the owner gets one summary for yesterday with the issues the agent touched
 
     $row = InboxItem::where('user_id', $this->owner->id)->where('event', 'agent_summary')->sole();
     expect($row->count)->toBe(2)->and($row->issue_id)->toBeNull()
-        ->and(collect($row->changes)->pluck('to')->all())->toContain('WEB-1', 'WEB-2')->not->toContain('WEB-3')
+        ->and(collect($row->changes)->pluck('issue_id')->filter()->values()->all())->toBe(Issue::whereIn('number', [1, 2])->orderBy('id')->pluck('id')->all())
         ->and(app(NotificationService::class)->inbox($this->owner, $this->ws)->first()->id)->toBe($row->id);
 });
 

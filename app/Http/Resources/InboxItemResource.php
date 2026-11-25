@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * An inbox line (spec 7.10). Needs issue.project, actor and agent.owner loaded. Agents show as "{Owner}'s agent" (spec 5.1).
+ * An inbox line (spec 7.10). Needs issue.project, actor and agent.owner loaded, and summary_keys set (NotificationService::annotate, done by inbox()). Agents show as "{Owner}'s agent" (spec 5.1).
  *
  * @mixin InboxItem
  */
@@ -24,7 +24,7 @@ class InboxItemResource extends JsonResource
             'agent' => $this->agent ? ['name' => $this->agent->name, 'owner' => $this->agent->owner?->name ?? ''] : null,
             'actor' => $this->actor?->only(['name', 'email']),
             // The keys a daily summary names.
-            'keys' => $this->event === 'agent_summary' ? collect($this->changes)->where('action', 'updated')->pluck('to')->values()->all() : [],
+            'keys' => $this->event === 'agent_summary' ? array_slice($this->summary_keys ?? [], 0, NotificationService::SUMMARY_KEYS) : [],
             'count' => $this->count,
             'read' => $this->read_at !== null,
             'created_at' => $this->created_at->toIso8601String(),

@@ -23,8 +23,8 @@ class NotificationService
     /** Events that always get their own row: they are never joined, and never join another row. */
     private const OWN_ROW = ['mention', 'approval_request', 'agent_summary'];
 
-    /** Most issue keys a summary lists (the count says how many in all). shortcut: first 50 keys, page them if owners ask. */
-    private const SUMMARY_KEYS = 50;
+    /** Most issue keys a summary shows (its text says how many in all). shortcut: first 50 keys, page them if owners ask. */
+    public const SUMMARY_KEYS = 50;
 
     public function __construct(private CurrentWorkspace $current) {}
 
@@ -64,12 +64,31 @@ class NotificationService
     /** $user's items in $workspace they can still see, newest first. Needs $workspace to be the current one. */
     public function inbox(User $user, Workspace $workspace, int $perPage = 25): LengthAwarePaginator
     {
-        return InboxItem::visibleTo($user, $workspace->id)->with(['issue.project', 'actor', 'agent.owner'])->orderByDesc('notifications.id')->paginate($perPage);
+        $page = InboxItem::visibleTo($user, $workspace->id)->with(['issue.project', 'actor', 'agent.owner'])->orderByDesc('notifications.id')->paginate($perPage);
+        $this->annotate($page->getCollection(), $user);
+
+        return $page;
     }
 
     public function unreadCount(User $user, Workspace $workspace): int
     {
         return InboxItem::visibleTo($user, $workspace->id)->whereNull('notifications.read_at')->count();
+    }
+
+    /**
+     * Give each daily summary in $items `summary_keys`: the keys, looked up now, of the issues it names that $user can still see
+     * (a renamed project shows its new key, a lost one is gone). One query for the whole page.
+     *
+     * @param  iterable<InboxItem>  $items
+     */
+    public function annotate(iterable $items, User $user): void
+    {
+        $summaries = collect($items)->where('event', 'agent_summary');
+        $ids = $summaries->flatMap(fn (InboxItem $i) => collect($i->changes)->pluck('issue_id')->filter())->unique()->all();
+        $keys = $ids ? Issue::visibleTo($user)->whereIn('issues.id', $ids)->with('project')->get()->mapWithKeys(fn (Issue $i) => [$i->id => $i->key]) : collect();
+        foreach ($summaries as $item) {
+            $item->setAttribute('summary_keys', collect($item->changes)->pluck('issue_id')->filter()->map(fn ($id) => $keys[$id] ?? null)->filter()->values()->all());
+        }
     }
 
     /** One of $user's own items in the current workspace, or the 404 every missing id gets. */
@@ -112,15 +131,15 @@ class NotificationService
             return null;
         }
 
-        // The owner's own view: no token project scope, and the workspace the keys are read in.
+        // The owner's own view: no token project scope, and the workspace the ids are read in.
         $previous = $this->current->id() ? $this->current->get() : null;
         $this->current->set($workspace);
         try {
-            $keys = Issue::visibleTo(User::findOrFail($owner->id))->whereIn('issues.id', $touched)->with('project')->orderBy('issues.id')->get()->map->key;
+            $ids = Issue::visibleTo(User::findOrFail($owner->id))->whereIn('issues.id', $touched)->orderBy('issues.id')->pluck('issues.id');
         } finally {
             $previous ? $this->current->set($previous) : $this->current->forget();
         }
-        if ($keys->isEmpty()) {
+        if ($ids->isEmpty()) {
             return null;
         }
 
@@ -128,8 +147,9 @@ class NotificationService
             'workspace_id' => $workspace->id, 'user_id' => $owner->id, 'event' => 'agent_summary', 'via' => 'system',
             // One agent: its id, so the text says "Your agent"; several: none, "Your agents".
             'agent_id' => $agents->count() === 1 ? $agents->first() : null,
-            'changes' => [['action' => 'day', 'from' => null, 'to' => $date], ...$keys->take(self::SUMMARY_KEYS)->map(fn ($k) => ['action' => 'updated', 'from' => null, 'to' => $k])->all()],
-            'count' => $keys->count(),
+            // Ids, not keys: what the reader sees is decided when they read it (annotate), so lost access hides the issue.
+            'changes' => [['action' => 'day', 'from' => null, 'to' => $date], ...$ids->map(fn ($id) => ['action' => 'updated', 'from' => null, 'to' => null, 'issue_id' => $id])->all()],
+            'count' => $ids->count(),
         ]);
     }
 
@@ -142,7 +162,9 @@ class NotificationService
             $day = Carbon::parse($item->changes[0]['to']);
             $when = $day->isYesterday() ? 'yesterday' : 'on '.$day->format('M j');
 
-            return ($item->agent_id ? 'Your agent' : 'Your agents')." updated {$item->count} ".($item->count === 1 ? 'issue' : 'issues')." {$when}";
+            $n = count($item->summary_keys ?? []);
+
+            return ($item->agent_id ? 'Your agent' : 'Your agents')." updated {$n} ".($n === 1 ? 'issue' : 'issues')." {$when}";
         }
         $who = $item->agent ? ActivityLogger::agentLabel($item->agent) : ($item->actor?->name ?? 'Someone');
         if ($item->count > 1) {

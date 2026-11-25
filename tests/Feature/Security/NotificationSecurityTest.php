@@ -77,3 +77,42 @@ test("another workspace's notifications never show, and another user's cannot be
     $this->actingAs($this->bob)->get('/other/notifications')->assertOk()->assertInertia(fn ($p) => $p->has('items.data', 0));
     $this->actingAs($this->bob)->postJson("/other/notifications/{$mine->id}/read")->assertNotFound();
 });
+
+/** bob's agent touches WEB-1 and OPS-1 yesterday; the daily summary is then made. */
+function summaryOfTwoProjects(): array
+{
+    $ops = makeProject(test()->ann, 'OPS');
+    addMember($ops, test()->bob, ProjectRole::Member);
+    makeIssue($ops, test()->ann);
+    [, $token] = makeAgent(test()->bob, AgentLevel::Write, name: 'helper');
+    foreach (['WEB-1', 'OPS-1'] as $key) {
+        asToken($token)->postJson("/api/v1/issues/{$key}/move", ['status' => 'In Progress'])->assertOk();
+    }
+    test()->travel(1)->day();
+    test()->artisan('notifications:agent-summary')->assertSuccessful();
+
+    return [$ops, $token];
+}
+
+test('a summary names only the issues its reader can still see, with the count of those', function () {
+    [$ops, $token] = summaryOfTwoProjects();
+    expect(InboxItem::where('event', 'agent_summary')->where('user_id', $this->bob->id)->sole()->count)->toBe(2);
+    $ops->members()->detach($this->bob->id);
+
+    $page = $this->actingAs($this->bob)->get(w('/notifications'));
+    $page->assertInertia(fn ($p) => $p->has('items.data', 1)->where('items.data.0.keys', ['WEB-1'])
+        ->where('items.data.0.text', fn ($t) => str_contains($t, 'updated 1 issue ')));
+    expect($page->getContent())->not->toContain('OPS-1');
+    expect(json_encode(asToken($token)->getJson('/api/v1/me/updates')->json()))->not->toContain('OPS-1')
+        ->and(json_encode(mcpJson($token, 'get_updates')))->not->toContain('OPS-1');
+});
+
+test('a summary with no issue left visible is gone from the inbox and the unread count', function () {
+    [$ops] = summaryOfTwoProjects();
+    expect($this->notes->unreadCount($this->bob, $this->ws))->toBe(1);
+
+    $ops->members()->detach($this->bob->id);
+    $this->project->members()->detach($this->bob->id);
+
+    expect($this->notes->inbox($this->bob, $this->ws)->total())->toBe(0)->and($this->notes->unreadCount($this->bob, $this->ws))->toBe(0);
+});
