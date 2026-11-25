@@ -117,8 +117,8 @@ test('a live reload of an issue page whose issue was deleted goes to the board i
     $this->withHeaders(['Referer' => url(w('/dashboard'))])->get($page)->assertRedirect(url(w('/dashboard')));
 });
 
-test('with the null broadcaster an issue change neither looks the issue up again nor dispatches ProjectChanged', function () {
-    config(['broadcasting.default' => 'null']);
+test('with the null broadcaster an issue change neither looks the issue up again nor dispatches ProjectChanged', function (?string $default) {
+    config(['broadcasting.default' => $default]);
     DB::enableQueryLog();
 
     app(IssueService::class)->update($this->issue, $this->ann, ['title' => 'Renamed']);
@@ -127,7 +127,12 @@ test('with the null broadcaster an issue change neither looks the issue up again
     // ProjectChanged::about's lookup: by id, deleted issues included (no deleted_at condition).
     $issueLookups = collect(DB::getQueryLog())->filter(fn ($q) => str_ends_with($q['query'], 'from `issues` where `issues`.`id` = ? limit 1'));
     expect($issueLookups)->toHaveCount(0);
-});
+    expect((new NotificationsChanged($this->ann->id))->broadcastWhen())->toBeFalse();
+})->with([
+    'the string null' => ['null'],
+    // BROADCAST_CONNECTION=null in .env: env() turns it into a real null.
+    'null from the env' => [null],
+]);
 
 test('that redirect goes to the project list when the reader can no longer see the project', function () {
     $page = w('/issues/WEB-1');

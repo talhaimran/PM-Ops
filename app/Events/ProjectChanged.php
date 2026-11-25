@@ -19,7 +19,7 @@ class ProjectChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
     public static function about(int $issueId, string $kind): void
     {
         // No broadcaster: skip the lookup (this runs for every activity row).
-        if (config('broadcasting.default') === 'null') {
+        if (! self::broadcasting()) {
             return;
         }
         $issue = Issue::withTrashed()->with('project')->find($issueId);
@@ -39,6 +39,12 @@ class ProjectChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
     /** Without a broadcaster nothing is queued, so a server with no queue worker doesn't pile up jobs. */
     public function broadcastWhen(): bool
     {
-        return config('broadcasting.default') !== 'null';
+        return self::broadcasting();
+    }
+
+    /** False for the null broadcaster: BROADCAST_CONNECTION=null reaches config as a real null (env()), or 'null' when unset. */
+    public static function broadcasting(): bool
+    {
+        return ! in_array(config('broadcasting.default'), [null, 'null'], true);
     }
 }

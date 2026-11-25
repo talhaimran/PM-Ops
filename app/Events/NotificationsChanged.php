@@ -24,6 +24,6 @@ class NotificationsChanged implements ShouldBroadcast, ShouldDispatchAfterCommit
     /** Without a broadcaster nothing is queued (see ProjectChanged). */
     public function broadcastWhen(): bool
     {
-        return config('broadcasting.default') !== 'null';
+        return ProjectChanged::broadcasting();
     }
 }
