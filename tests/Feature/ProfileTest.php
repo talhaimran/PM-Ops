@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\User;
+use App\Services\WorkspaceMemberService;
+use Illuminate\Validation\ValidationException;
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();
@@ -82,4 +84,25 @@ test('correct password must be provided to delete account', function () {
         ->assertRedirect('/profile');
 
     $this->assertNotNull($user->fresh());
+});
+
+test('a deletion refused under the lock keeps the person signed in (PR 50 review)', function () {
+    $user = User::factory()->create();
+    $this->partialMock(WorkspaceMemberService::class, fn ($mock) => $mock->shouldReceive('deleteAccount')
+        ->andThrow(ValidationException::withMessages(['password' => 'You are the last Owner of Acme.'])));
+
+    $this->actingAs($user)->from('/profile')->delete('/profile', ['password' => 'password'])
+        ->assertSessionHasErrors('password')->assertRedirect('/profile');
+
+    $this->assertAuthenticatedAs($user);
+    expect($user->fresh())->not->toBeNull();
+});
+
+test('signing out after the delete does not save the deleted user back (PR 50 review)', function () {
+    $user = User::factory()->create(['remember_token' => 'remember-me-token']);
+
+    $this->actingAs($user)->delete('/profile', ['password' => 'password'])->assertSessionHasNoErrors()->assertRedirect('/');
+
+    $this->assertGuest();
+    expect(User::whereKey($user->id)->exists())->toBeFalse();
 });

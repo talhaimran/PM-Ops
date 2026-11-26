@@ -92,10 +92,12 @@ class ProfileController extends Controller
             ]);
         }
 
-        Auth::logout();
-
-        // Revokes their agents and logs the removal from each workspace, then deletes, in one transaction.
+        // Revokes their agents and logs the removal from each workspace, then deletes, in one transaction. It can still refuse
+        // (the last-Owner check under the lock), so the person is signed out only after it succeeds.
         $workspaceMembers->deleteAccount($user);
+
+        // Not logout(): that would save the deleted user's remember token back (re-inserting the row) and audit a logout for them.
+        Auth::logoutCurrentDevice();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();
