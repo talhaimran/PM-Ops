@@ -29,6 +29,7 @@ class WorkspaceMemberService
             $now = $this->usage->isBilled($workspace, $member->email);
             $this->entitlements->ensurePerson($workspace, $now, $now === true || $role !== WorkspaceRole::Member);
             $current = $this->lockAndCheck($workspace, $actor, $member, $role === WorkspaceRole::Owner, 'role');
+            $billedBefore = $this->usage->memberBilled($workspace, $member->email) === true;
             if ($current === WorkspaceRole::Owner && $role !== WorkspaceRole::Owner) {
                 $this->ensureAnotherOwner($workspace, $member, 'role');
             }
@@ -40,7 +41,11 @@ class WorkspaceMemberService
                     $current => 'owner.removed',
                     default => 'member.role_changed',
                 };
-                $this->audit->log($action, $member, ['from' => $current->value, 'to' => $role->value], $workspace, $actor);
+                // billed_before/after: member.role_changed's system event says whether the change flipped billing (3-R21).
+                $this->audit->log($action, $member, [
+                    'from' => $current->value, 'to' => $role->value,
+                    ...($action === 'member.role_changed' ? ['billed_before' => $billedBefore, 'billed_after' => $this->usage->memberBilled($workspace, $member->email) === true] : []),
+                ], $workspace, $actor);
             }
         });
     }
@@ -85,11 +90,12 @@ class WorkspaceMemberService
                 $workspace->projects()->firstWhere('key', $key)->members()->syncWithoutDetaching([$admin->id => ['role' => ProjectRole::Admin->value]]);
             }
 
+            $billed = $this->usage->memberBilled($workspace, $member->email) === true;
             $member->projects()->detach($workspace->projects()->pluck('id'));
             $this->agents->revokeAllOf($member, $workspace);
             $member->tokens()->where('workspace_id', $workspace->id)->delete();
             $workspace->members()->detach($member->id);
-            $this->audit->log('member.removed', $member, array_filter(['role' => $role->value, 'new_admins' => $newAdmins ? array_intersect_key($newAdmins, array_flip($keys)) : null]), $workspace, $actor);
+            $this->audit->log('member.removed', $member, [...array_filter(['role' => $role->value, 'new_admins' => $newAdmins ? array_intersect_key($newAdmins, array_flip($keys)) : null]), 'billed' => $billed], $workspace, $actor);
         });
     }
 

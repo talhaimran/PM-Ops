@@ -29,3 +29,6 @@ Schedule::command('support-sessions:end')->everyMinute()->onOneServer()->without
 
 // 3-R7: each person with agents hears once a day, shortly after midnight server time, what their agents did the day before.
 Schedule::command('notifications:agent-summary')->dailyAt('00:10')->onOneServer()->withoutOverlapping();
+
+// 3-R21: tell Platform management which workspaces were active yesterday (does nothing without PM_SYSTEM_EVENTS_URL).
+Schedule::command('system-events:activity')->dailyAt('00:20')->onOneServer()->withoutOverlapping();

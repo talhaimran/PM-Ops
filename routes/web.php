@@ -7,6 +7,7 @@ use App\Http\Controllers\Web\AgentController;
 use App\Http\Controllers\Web\AiSettingsController;
 use App\Http\Controllers\Web\ApprovalController;
 use App\Http\Controllers\Web\AuditLogController;
+use App\Http\Controllers\Web\BillingController;
 use App\Http\Controllers\Web\BoardController;
 use App\Http\Controllers\Web\InvitationController;
 use App\Http\Controllers\Web\IssueController;
@@ -95,6 +96,7 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::delete('/settings/statuses/{status}', [StatusController::class, 'destroy'])->name('statuses.destroy')->whereNumber('status');
     Route::get('/settings/audit-log', [AuditLogController::class, 'index'])->name('settings.audit-log');
     Route::get('/settings/usage', UsageController::class)->name('settings.usage');
+    Route::get('/settings/billing', BillingController::class)->name('settings.billing');
     Route::get('/settings/security', [WorkspaceSettingsController::class, 'security'])->name('settings.security');
     Route::patch('/settings/security', [WorkspaceSettingsController::class, 'updateSecurity'])->name('settings.security.update');
     Route::patch('/settings/agent-policy', [WorkspaceSettingsController::class, 'updateAgentPolicy'])->name('settings.agent-policy.update');

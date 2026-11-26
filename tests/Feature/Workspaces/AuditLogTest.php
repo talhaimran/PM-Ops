@@ -147,7 +147,7 @@ test('member events: invited, revoked, joined, role changed, owner added and rem
     expect($joined->metadata)->toEqual(['role' => 'member', 'project' => 'WEB']);
 
     $members->changeRole($this->ws, $this->owner, $new, WorkspaceRole::Admin);
-    expect(expectOneAudit('member.role_changed', $this->ws, $this->owner, 'new@example.com')->metadata)->toEqual(['from' => 'member', 'to' => 'admin']);
+    expect(expectOneAudit('member.role_changed', $this->ws, $this->owner, 'new@example.com')->metadata)->toEqual(['from' => 'member', 'to' => 'admin', 'billed_before' => true, 'billed_after' => true]);
     $members->changeRole($this->ws, $this->owner, $new, WorkspaceRole::Owner);
     expectOneAudit('owner.added', $this->ws, $this->owner, 'new@example.com');
     $members->changeRole($this->ws, $this->owner, $new, WorkspaceRole::Member);

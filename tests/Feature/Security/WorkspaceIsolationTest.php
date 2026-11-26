@@ -193,6 +193,8 @@ function isolationRouteCases(): array
         'GET {workspace}/settings/audit-log/export' => ['alpha/settings/audit-log/export?actor={U}', []],
         // Takes no id: it must count only A's people and projects (B has more of both).
         'GET {workspace}/settings/usage' => ['alpha/settings/usage', []],
+        // Takes no id and reads the signed-in user's role in A: the redirect names A only (404 here: no billing env).
+        'GET {workspace}/settings/billing' => ['alpha/settings/billing', []],
         'GET {workspace}/settings/security' => ['alpha/settings/security', []],
         'PATCH {workspace}/settings/security' => ['alpha/settings/security', ['require_2fa' => false]],
         'PATCH {workspace}/settings/sign-in-methods' => ['alpha/settings/sign-in-methods', ['sign_in_methods' => ['password']]],

@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class MembershipService
 {
-    public function __construct(private Entitlements $entitlements, private WorkspaceUsage $usage) {}
+    public function __construct(private Entitlements $entitlements, private WorkspaceUsage $usage, private AuditLogger $audit) {}
 
     public function changeRole(Project $project, User $member, ProjectRole $role): void
     {
@@ -23,7 +23,14 @@ class MembershipService
             if ($role !== ProjectRole::Admin) {
                 $this->ensureNotLastAdmin($project, $member, 'role');
             }
+            $from = $project->members()->whereKey($member->id)->first()?->pivot->role;
+            $billedBefore = $this->usage->memberBilled($workspace, $member->email) === true;
             $project->members()->updateExistingPivot($member->id, ['role' => $role->value]);
+            // Platform management hears of it only when the change flips billing (3-R21).
+            $this->audit->log('project.member_role_changed', $member, [
+                'project' => $project->key, 'from' => $from, 'to' => $role->value, 'user_id' => $member->id, 'email' => $member->email,
+                'billed_before' => $billedBefore, 'billed_after' => $this->usage->memberBilled($workspace, $member->email) === true,
+            ], $workspace);
         });
     }
 

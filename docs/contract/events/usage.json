@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Usage snapshot carried by every system event",
+  "type": "object",
+  "required": ["billed_users", "viewers", "pending_billed_invitations", "projects", "storage_mb"],
+  "additionalProperties": false,
+  "properties": {
+    "billed_users": {"type": "integer", "minimum": 0},
+    "viewers": {"type": "integer", "minimum": 0},
+    "pending_billed_invitations": {"type": "integer", "minimum": 0},
+    "projects": {"type": "integer", "minimum": 0},
+    "storage_mb": {"type": "integer", "minimum": 0}
+  },
+  "examples": [{"billed_users": 2, "viewers": 1, "pending_billed_invitations": 0, "projects": 1, "storage_mb": 0}]
+}

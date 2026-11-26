@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Billing link token claims: base64url(JSON claims) + \".\" + base64url(HMAC-SHA256 of the first part, PM_BILLING_LINK_SECRET)",
+  "type": "object",
+  "required": ["workspace_id", "user_id", "email", "name", "role", "iat", "exp", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "workspace_id": {"type": "integer"},
+    "user_id": {"type": "integer"},
+    "email": {"type": "string"},
+    "name": {"type": "string"},
+    "role": {"enum": ["owner", "admin", "member"]},
+    "iat": {"type": "integer"},
+    "exp": {"type": "integer"},
+    "nonce": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "examples": [
+    {"workspace_id": 1, "user_id": 1, "email": "owner@example.com", "name": "Olive Owner", "role": "owner", "iat": 1796464800, "exp": 1796465100,
+     "nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}
+  ]
+}

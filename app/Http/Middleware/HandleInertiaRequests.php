@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\AiSettingsService;
+use App\Services\BillingLink;
 use App\Services\CurrentWorkspace;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
@@ -52,6 +53,9 @@ class HandleInertiaRequests extends Middleware
             'support_session' => fn () => ($s = $request->attributes->get('support_session'))
                 ? ['staff' => $s->staff_name, 'user' => $s->target->name, 'ends_at' => $s->ends_at->format('H:i')]
                 : null,
+            // 3-R24: the Billing link and banners (WorkspaceBanners).
+            'billing' => fn () => ($workspace = app(CurrentWorkspace::class)->id() ? app(CurrentWorkspace::class)->get() : null) && $request->user()
+                ? app(BillingLink::class)->banners($workspace, $request->user()) : null,
             'workspaces' => fn () => $request->user()?->workspaces()
                 ->when($request->attributes->get('support_session'), fn ($q, $s) => $q->whereKey($s->workspace_id))
                 ->orderBy('name')->get(['name', 'slug'])

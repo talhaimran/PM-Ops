@@ -34,6 +34,8 @@ export type PageProps<
     /** 3-R25: unread inbox items you can still see, in the current workspace. */
     unread_notifications: number;
     /** 3-R19: staff viewing as this user, read-only; ends_at is HH:MM server time. */
+    /** 3-R24: the Billing link (Owners, when configured) and the billing banners. */
+    billing: { link: string | null; trial_days: number | null; notice: 'past_due' | 'canceling' | 'read_only' | null } | null;
     support_session: { staff: string; user: string; ends_at: string } | null;
 };
 
