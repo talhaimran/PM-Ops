@@ -102,31 +102,38 @@ class Entitlements
         if ($error) {
             throw ValidationException::withMessages(['value' => $error]);
         }
-        $before = $workspace->entitlements()->where('key', $key->value)->first();
-        $attributes = ['value' => $normalized, 'source' => $source];
-        // An override keeps the plan (or Free default) value it replaces, so removing it falls back to that.
-        if ($source === 'override' && $before && $before->source !== 'override') {
-            $attributes['plan_value'] = $before->value;
-        }
-        $workspace->entitlements()->updateOrCreate(['key' => $key->value], $attributes);
-        $this->logChange($workspace, $key, $before, $normalized, $source, $staff, $reason);
+        // Locked like replacePlan, so a racing PUT can't leave an override with a stale plan_value.
+        DB::transaction(function () use ($workspace, $key, $normalized, $source, $staff, $reason) {
+            Workspace::whereKey($workspace->id)->lockForUpdate()->first();
+            $before = $workspace->entitlements()->where('key', $key->value)->first();
+            $attributes = ['value' => $normalized, 'source' => $source];
+            // An override keeps the plan (or Free default) value it replaces, so removing it falls back to that.
+            if ($source === 'override' && $before && $before->source !== 'override') {
+                $attributes['plan_value'] = $before->value;
+            }
+            $workspace->entitlements()->updateOrCreate(['key' => $key->value], $attributes);
+            $this->logChange($workspace, $key, $before, $normalized, $source, $staff, $reason);
+        });
     }
 
     /** Removes the row (unlimited); an override with a plan value under it falls back to that instead. */
     public function unset(Workspace $workspace, Entitlement $key, ?array $staff = null, ?string $reason = null): void
     {
-        $row = $workspace->entitlements()->where('key', $key->value)->first();
-        if (! $row) {
-            return;
-        }
-        $before = clone $row;
-        if ($row->source === 'override' && $row->plan_value !== null) {
-            $row->update(['value' => $row->plan_value, 'source' => 'plan']);
-            $this->logChange($workspace, $key, $before, $row->plan_value, 'plan', $staff, $reason);
-        } else {
-            $row->delete();
-            $this->logChange($workspace, $key, $before, null, null, $staff, $reason);
-        }
+        DB::transaction(function () use ($workspace, $key, $staff, $reason) {
+            Workspace::whereKey($workspace->id)->lockForUpdate()->first();
+            $row = $workspace->entitlements()->where('key', $key->value)->first();
+            if (! $row) {
+                return;
+            }
+            $before = clone $row;
+            if ($row->source === 'override' && $row->plan_value !== null) {
+                $row->update(['value' => $row->plan_value, 'source' => 'plan']);
+                $this->logChange($workspace, $key, $before, $row->plan_value, 'plan', $staff, $reason);
+            } else {
+                $row->delete();
+                $this->logChange($workspace, $key, $before, null, null, $staff, $reason);
+            }
+        });
     }
 
     /**

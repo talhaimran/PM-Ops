@@ -21,11 +21,12 @@ interface Item {
 }
 
 export default function Index({ items }: { items: Paginated<Item> }) {
-    const unread = usePage().props.unread_notifications;
+    const { unread_notifications: unread, support_session: support } = usePage().props;
     const markRead = (id: number) => router.post(route('notifications.read', id), {}, { preserveScroll: true, preserveState: true });
     // A plain click is one request: the server marks the item read and redirects to the issue. Cmd/Ctrl/Shift-click keep the browser's own behaviour.
     const open = (item: Item) => (e: MouseEvent) => {
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        // A support session can't write, so skip the mark-read POST and just follow the link.
+        if (support || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
         e.preventDefault();
         router.post(route('notifications.read', item.id), { open: true });
     };

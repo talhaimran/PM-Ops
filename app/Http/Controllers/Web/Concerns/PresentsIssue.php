@@ -20,10 +20,12 @@ trait PresentsIssue
         $issue = app(IssueService::class)->loadFull($issue, $user);
         $data = (new IssueResource($issue))->resolve();
         $text = app(RenderedText::class);
-        $data['description_html'] = $text->html($issue->description, $user, $issue->project);
+        // One lookup for the description and every comment (3-R12).
+        $html = $text->htmlMany([$issue->description, ...$issue->comments->values()->pluck('body')->all()], $user, $issue->project);
+        $data['description_html'] = array_shift($html);
         $data['comments'] = $issue->comments->values()->map(fn ($comment, $i) => [
             ...$data['comments'][$i],
-            'body_html' => $text->html($comment->body, $user, $issue->project),
+            'body_html' => $html[$i],
             'can_edit' => $comment->isWrittenBy($user),
         ])->all();
         $data['pending_approvals'] = $issue->pendingApprovals->map(fn ($approval, $i) => [

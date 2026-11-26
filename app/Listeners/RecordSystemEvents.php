@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\SystemEventService;
 use App\Services\WorkspaceUsage;
+use Throwable;
 
 /**
  * 3-R21/3-R22: the audit rows Platform management cares about become system events, after the change commits.
@@ -17,7 +18,17 @@ class RecordSystemEvents
 {
     public function __construct(private SystemEventService $events, private WorkspaceUsage $usage) {}
 
+    /** Runs in the request after the change committed: a failure here is reported, never turned into a 500 the client would retry. */
     public function handle(AuditRecorded $recorded): void
+    {
+        try {
+            $this->record($recorded);
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function record(AuditRecorded $recorded): void
     {
         if (! SystemEventService::enabled()) {
             return;
@@ -30,6 +41,7 @@ class RecordSystemEvents
         $mapped = match ($log->action) {
             'workspace.created' => ['workspace.created', ['name' => $log->target_label, 'slug' => $meta['slug'] ?? null, 'owner' => $this->user($log->actor_user_id, null)]],
             'workspace.updated' => ['workspace.updated', ['changes' => ['before' => $meta['before'] ?? [], 'after' => $meta['after'] ?? []]]],
+            'workspace.restored' => ['workspace.updated', ['changes' => ['before' => ['state' => 'archived'], 'after' => ['state' => $workspace?->state() ?? 'active']]]],
             'workspace.deleted' => ['workspace.deleted', ['workspace_id' => $log->target_id, 'slug' => $meta['slug'] ?? null]],
             'owner.added', 'owner.removed' => ['workspace.owner_changed', ['user' => $this->user($log->target_id, $log->target_label), 'change' => $log->action === 'owner.added' ? 'added' : 'removed']],
             // Someone already in the workspace who accepts a project invitation wasn't added to it.

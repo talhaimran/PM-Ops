@@ -6,6 +6,7 @@ use App\Jobs\DeliverSystemEvent;
 use App\Models\AuditLog;
 use App\Models\SystemEvent;
 use App\Models\User;
+use App\Services\AuditLogger;
 use App\Services\InvitationService;
 use App\Services\MembershipService;
 use App\Services\ProjectService;
@@ -270,4 +271,55 @@ test('a second workspace.activity run for the same day waits its turn instead of
     $lock->release();
     $this->artisan('system-events:activity', ['day' => now()->toDateString()])->assertSuccessful();
     expect(events('workspace.activity'))->toHaveCount(1);
+});
+
+test('restoring an archived workspace sends workspace.updated, as an Owner or as staff (final review I1)', function () {
+    $service = app(WorkspaceService::class);
+    foreach ([[$this->owner, null], [null, ['name' => 'Sam Staff', 'email' => 'sam@platform.test']]] as [$user, $staff]) {
+        $service->changeState($this->ws, 'workspace.archived', null, null, 'Inactive');
+        $service->changeState($this->ws, 'workspace.restored', $user, $staff);
+    }
+
+    $events = events('workspace.updated');
+    expect($events)->toHaveCount(2)
+        ->and($events->first()->payload['changes'])->toEqual(['before' => ['state' => 'archived'], 'after' => ['state' => 'active']])
+        ->and(eventErrors($events->first()))->toBe([]);
+});
+
+test('workspace.activity ignores staff, system and failed sign-in audit rows (final review I3)', function () {
+    $this->actingAs($this->owner);
+    SystemEvent::query()->delete();
+    DB::table('audit_logs')->where('workspace_id', $this->ws->id)->delete();
+    $audit = app(AuditLogger::class);
+    $audit->system('workspace.archived', $this->ws, $this->ws);
+    $audit->staff('staff.support_session_started', $this->ws, $this->ws, ['name' => 'Sam', 'email' => 's@platform.test']);
+    $audit->forEveryWorkspaceOf($this->owner, 'auth.login_failed');
+
+    $this->artisan('system-events:activity', ['day' => now()->toDateString()])->assertSuccessful();
+    expect(events('workspace.activity'))->toHaveCount(0);
+
+    $audit->log('project.created', null, [], $this->ws, $this->owner);
+    $this->artisan('system-events:activity', ['day' => now()->toDateString()])->assertSuccessful();
+    expect(events('workspace.activity'))->toHaveCount(1);
+});
+
+test('deleting an account sends member.removed (and owner_changed for an Owner) for every workspace they were in (final review I4)', function () {
+    $second = makeWorkspace($this->owner, 'second');
+    $member = User::factory()->create(['email' => 'gone@example.com']);
+    $this->ws->addMember($member, WorkspaceRole::Admin);
+    $co = User::factory()->create(['email' => 'co@example.com']);
+    $second->addMember($co, WorkspaceRole::Owner);
+    $second->addMember($member, WorkspaceRole::Owner);
+    SystemEvent::query()->delete();
+
+    $this->actingAs($member)->delete('/profile', ['password' => 'password'])->assertSessionHasNoErrors();
+
+    expect(User::find($member->id))->toBeNull()
+        ->and(events('member.removed'))->toHaveCount(2)
+        ->and(events('member.removed')->firstWhere('workspace_id', $this->ws->id)->payload)->toMatchArray(['role' => 'admin', 'billed' => true, 'user' => ['id' => $member->id, 'email' => 'gone@example.com', 'name' => null]])
+        ->and(events('workspace.owner_changed')->sole()->workspace_id)->toBe($second->id)
+        ->and(events('workspace.owner_changed')->sole()->payload['change'])->toBe('removed');
+    foreach (SystemEvent::all() as $event) {
+        expect(eventErrors($event))->toBe([], $event->type);
+    }
 });

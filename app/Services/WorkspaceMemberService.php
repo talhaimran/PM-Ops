@@ -8,6 +8,7 @@ use App\Enums\WorkspaceRole;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -96,6 +97,27 @@ class WorkspaceMemberService
             $member->tokens()->where('workspace_id', $workspace->id)->delete();
             $workspace->members()->detach($member->id);
             $this->audit->log('member.removed', $member, [...array_filter(['role' => $role->value, 'new_admins' => $newAdmins ? array_intersect_key($newAdmins, array_flip($keys)) : null]), 'billed' => $billed], $workspace, $actor);
+        });
+    }
+
+    /**
+     * Account deletion leaves every workspace at once: revokes their agents and writes the member.removed (plus owner.removed for an
+     * Owner) audit rows, with role and billed read before the rows cascade away, so Platform management's billing feed sees it (3-R21).
+     * shortcut: the workspace rows aren't locked, so a concurrent role change can leave the row's role a moment stale; the caller checks sole Owners first.
+     */
+    public function deleteAccount(User $user): void
+    {
+        DB::transaction(function () use ($user) {
+            foreach ($user->workspaces()->get() as $workspace) {
+                $role = $workspace->members()->whereKey($user->id)->firstOrFail()->pivot->role;
+                $billed = $this->usage->memberBilled($workspace, $user->email) === true;
+                $this->agents->revokeAllOf($user, $workspace, 'owner_deleted');
+                $this->audit->log('member.removed', $user, ['role' => $role, 'billed' => $billed], $workspace, $user);
+                if ($role === WorkspaceRole::Owner->value) {
+                    $this->audit->log('owner.removed', $user, ['from' => $role, 'to' => null], $workspace, $user);
+                }
+            }
+            $user->delete();
         });
     }
 

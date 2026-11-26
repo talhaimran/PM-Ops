@@ -8,12 +8,15 @@ use App\Models\ApprovalRequest;
 use App\Models\InboxItem;
 use App\Models\User;
 use App\Services\ApprovalService;
+use App\Services\AuditLogger;
 use App\Services\CommentService;
 use App\Services\IssueService;
 use App\Services\NotificationService;
 use App\Services\StatusService;
+use App\Services\SystemEventService;
 use App\Services\WatcherService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Exceptions;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // Spec 7.10 (3-R4, 3-R5, 3-R8, 3-R25): who is told about what, the inbox, and get_updates.
@@ -215,4 +218,18 @@ test('opening an item marks it read and goes to its issue, or to the inbox when 
     $this->actingAs($this->ann)->post(w("/notifications/{$item->id}/read"), ['open' => true])->assertRedirect(w('/notifications'));
 
     $this->actingAs($this->bob)->postJson(w("/notifications/{$item->id}/read"), ['open' => true])->assertNotFound();
+});
+
+test('a failing notification or system event is reported, not raised: the committed comment stays (final review M1)', function () {
+    Exceptions::fake();
+    config(['pm.system_events_url' => 'https://platform.example.test/events', 'pm.system_events_secret' => 's']);
+    $this->mock(NotificationService::class)->shouldReceive('notify')->andThrow(new RuntimeException('deadlock'));
+    $this->mock(SystemEventService::class)->shouldReceive('record')->andThrow(new RuntimeException('outbox down'));
+
+    $comment = app(CommentService::class)->add($this->issue, $this->bob, 'Hello');
+    app(AuditLogger::class)->log('project.created', null, [], $this->project->workspace, $this->ann);
+
+    expect($comment->exists)->toBeTrue();
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'deadlock');
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'outbox down');
 });

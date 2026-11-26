@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
-use App\Services\AgentService;
 use App\Services\MembershipService;
 use App\Services\SocialSignInService;
 use App\Services\TwoFactorService;
@@ -76,7 +75,7 @@ class ProfileController extends Controller
     /**
      * Delete the user's account.
      */
-    public function destroy(Request $request, MembershipService $memberships, WorkspaceMemberService $workspaceMembers, AgentService $agents): RedirectResponse
+    public function destroy(Request $request, MembershipService $memberships, WorkspaceMemberService $workspaceMembers): RedirectResponse
     {
         $request->validate([
             'password' => ['required', 'current_password'],
@@ -97,12 +96,10 @@ class ProfileController extends Controller
             ]);
         }
 
-        // The agent rows go with the user; revoke them first so each one leaves an agent.revoked audit row.
-        $user->workspaces()->get()->each(fn ($workspace) => $agents->revokeAllOf($user, $workspace, 'owner_deleted'));
-
         Auth::logout();
 
-        $user->delete();
+        // Revokes their agents and logs the removal from each workspace, then deletes, in one transaction.
+        $workspaceMembers->deleteAccount($user);
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

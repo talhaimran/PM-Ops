@@ -195,3 +195,18 @@ test('a new plan value under an override writes one audit row with the plan befo
         ->and($logged[1]->metadata)->toMatchArray(['key' => 'projects', 'plan_before' => '4', 'plan_after' => null])
         ->and($logged[0]->actor_type)->toBe('system');
 });
+
+test('setting or removing one entitlement locks the workspace row first, like replacing the plan (final review M9)', function () {
+    $locks = [];
+    DB::listen(function ($q) use (&$locks) {
+        if (str_contains($q->sql, 'from `workspaces`') && str_contains($q->sql, 'for update')) {
+            $locks[] = $q->sql;
+        }
+    });
+    $entitlements = app(Entitlements::class);
+
+    $entitlements->set($this->ws, Entitlement::Projects, '3', 'override');
+    expect($locks)->toHaveCount(1);
+    $entitlements->unset($this->ws, Entitlement::Projects);
+    expect($locks)->toHaveCount(2);
+});

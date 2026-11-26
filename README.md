@@ -160,7 +160,7 @@ For production, run `npm run build` and serve `public/` with any PHP host over H
 - Set `SESSION_SECURE_COOKIE=true`.
 - For live updates, run Reverb and a queue worker as their own processes (see Live updates above).
 - Configure real SMTP so verification and invitation emails arrive.
-- Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge`, `workspaces:purge`, `approvals:expire`, `notifications:agent-summary`, `system-events:activity`, `system-events:pending` and `support-sessions:end` (see `routes/console.php`).
+- Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge`, `workspaces:purge`, `approvals:expire`, `links:reconcile-duplicates`, `notifications:agent-summary`, `system-events:activity`, `system-events:pending` and `support-sessions:end` (see `routes/console.php`).
 - On `cloud`, registration is open to anyone. On `self_hosted`, only the first person and invited people can register.
 - Leave `PM_INTERNAL_API_TOKEN` and `PM_INTERNAL_API_TOKEN_NEXT` empty unless Platform management calls this install; when set, use long random values (`openssl rand -hex 32`), serve `/internal/v1` over HTTPS only, and never log or commit them.
 
@@ -216,7 +216,7 @@ For Platform management on Cloud; self-hosted installs leave all of it off.
 - **Internal admin API** (`/internal/v1`, bearer `PM_INTERNAL_API_TOKEN` or `_NEXT`): list and show workspaces, usage, plan entitlements and overrides, suspend/unsuspend, archive/restore and support sessions. Writes need an `Idempotency-Key`. Schemas are in `docs/contract/admin-api/`.
 - **Suspended and archived workspaces** are read-only on web, REST and MCP (403 `workspace_suspended` / `workspace_archived`); scheduled upkeep keeps running. An Owner can restore an archived workspace.
 - **Support sessions:** staff open a read-only, time-boxed (1-60 minutes) session through a single-use link; they never write, and a banner shows while one is open. `support-sessions:end` runs every minute.
-- **System events:** members, projects and workspace changes are recorded in an outbox and POSTed, signed, to `PM_SYSTEM_EVENTS_URL` (see the env table; schemas in `docs/contract/events/`). `system-events:activity` runs daily at 00:20 and `system-events:pending` every 10 minutes to retry what did not arrive.
+- **System events:** members, projects and workspace changes are recorded in an outbox and POSTed, signed, to `PM_SYSTEM_EVENTS_URL` (see the env table; schemas in `docs/contract/events/`). `system-events:activity` runs daily at 00:20 and `system-events:pending` every 10 minutes to queue events that were never attempted (a failed delivery retries on its own, with backoff, for 24 hours). Delivery runs on the queue, so system events need a running queue worker.
 - **Billing link:** with `PM_BILLING_URL` and `PM_BILLING_LINK_SECRET` set, Owners get a **Billing** link that redirects with a signed 5-minute token (`docs/contract/billing-token.json`). Banners tell Owners about a trial ending, a past-due or canceling plan, and everyone about going over a limit.
 
 ## Agents

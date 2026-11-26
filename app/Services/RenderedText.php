@@ -36,30 +36,50 @@ class RenderedText
     /** The page's HTML: mentions of $project's members as "@Name", keys of issues $viewer can see as links with hover data. */
     public function html(?string $text, User $viewer, Project $project): string
     {
-        if ($text === null || $text === '') {
-            return '';
-        }
-        $doc = $this->load($this->markdown($text));
-        [$body, $sites] = $this->sites($doc);
-        $sites = collect($sites);
+        return $this->htmlMany([$text], $viewer, $project)[0];
+    }
 
+    /**
+     * html() for several texts (an issue's description and comments) with one members lookup and one issues lookup between them (3-R12).
+     *
+     * @param  list<?string>  $texts
+     * @return list<string> in the same order
+     */
+    public function htmlMany(array $texts, User $viewer, Project $project): array
+    {
+        $parsed = array_map(function (?string $text) {
+            if ($text === null || $text === '') {
+                return null;
+            }
+            $doc = $this->load($this->markdown($text));
+
+            return [$doc, ...$this->sites($doc)];
+        }, $texts);
+
+        $sites = collect($parsed)->filter()->flatMap(fn ($p) => $p[2]);
         $emails = $sites->where('type', 'email')->pluck('value')->unique()->all();
         $names = $emails ? $project->members()->whereIn('email', $emails)->pluck('users.name', 'users.email')->mapWithKeys(fn ($n, $e) => [strtolower($e) => $n])->all() : [];
         $issues = $this->visibleIssues($viewer, $sites->where('type', 'key')->pluck('value')->unique()->take(self::MAX_KEYS)->all());
 
-        foreach ($sites->groupBy(fn ($s) => spl_object_id($s['node'])) as $group) {
-            $node = $group[0]['node'];
-            if ($node instanceof DOMText) {
-                $this->rewrite($doc, $node, $names, $issues);
-            } elseif (isset($names[$group[0]['value']])) {
-                // An autolinked "@" + email: the "@" is the previous text's last character.
-                $previous = $node->previousSibling;
-                $previous->nodeValue = substr($previous->nodeValue, 0, -1);
-                $node->parentNode->replaceChild($this->mention($doc, $names[$group[0]['value']]), $node);
+        return array_map(function (?array $p) use ($names, $issues) {
+            if ($p === null) {
+                return '';
             }
-        }
+            [$doc, $body, $sites] = $p;
+            foreach (collect($sites)->groupBy(fn ($s) => spl_object_id($s['node'])) as $group) {
+                $node = $group[0]['node'];
+                if ($node instanceof DOMText) {
+                    $this->rewrite($doc, $node, $names, $issues);
+                } elseif (isset($names[$group[0]['value']])) {
+                    // An autolinked "@" + email: the "@" is the previous text's last character.
+                    $previous = $node->previousSibling;
+                    $previous->nodeValue = substr($previous->nodeValue, 0, -1);
+                    $node->parentNode->replaceChild($this->mention($doc, $names[$group[0]['value']]), $node);
+                }
+            }
 
-        return collect($body->childNodes)->map(fn (DOMNode $n) => $doc->saveHTML($n))->implode('');
+            return collect($body->childNodes)->map(fn (DOMNode $n) => $doc->saveHTML($n))->implode('');
+        }, $parsed);
     }
 
     private function markdown(string $text): string
