@@ -108,7 +108,10 @@ class WorkspaceMemberService
     public function deleteAccount(User $user): void
     {
         DB::transaction(function () use ($user) {
-            foreach ($user->workspaces()->get() as $workspace) {
+            // Lock their workspaces (id order) and re-check, so two Owners deleting at once can't both pass the page's check.
+            $workspaces = Workspace::whereIn('id', $user->workspaces()->pluck('workspaces.id'))->orderBy('id')->lockForUpdate()->get();
+            $this->ensureNotSoleOwner($user);
+            foreach ($workspaces as $workspace) {
                 $role = $workspace->members()->whereKey($user->id)->firstOrFail()->pivot->role;
                 $billed = $this->usage->memberBilled($workspace, $user->email) === true;
                 $this->agents->revokeAllOf($user, $workspace, 'owner_deleted');
@@ -126,6 +129,16 @@ class WorkspaceMemberService
     {
         $this->memberships->add($project, $actor, ProjectRole::Admin);
         $this->audit->log('project.admin_joined', $project, [], $project->workspace()->first(), $actor);
+    }
+
+    /** E7: refuses while $user is the only Owner of a workspace. */
+    public function ensureNotSoleOwner(User $user): void
+    {
+        if ($names = $this->soleOwnerOf($user)) {
+            throw ValidationException::withMessages([
+                'password' => 'You are the last Owner of '.implode(', ', $names).'. Make someone else an Owner or delete those workspaces first.',
+            ]);
+        }
     }
 
     /** E7: names of workspaces $user is the only Owner of; their account can't be deleted while this isn't empty. */

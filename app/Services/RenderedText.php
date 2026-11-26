@@ -19,7 +19,7 @@ use Illuminate\Support\Str;
  */
 class RenderedText
 {
-    /** Most distinct keys looked up per render. shortcut: later keys stay plain text, raise it if a text really names more. */
+    /** Most distinct keys looked up per text. shortcut: later keys stay plain text, raise it if a text really names more. */
     private const MAX_KEYS = 50;
 
     /** `@email` (not glued to a word or another email) or a key like WEB-12. */
@@ -59,7 +59,9 @@ class RenderedText
         $sites = collect($parsed)->filter()->flatMap(fn ($p) => $p[2]);
         $emails = $sites->where('type', 'email')->pluck('value')->unique()->all();
         $names = $emails ? $project->members()->whereIn('email', $emails)->pluck('users.name', 'users.email')->mapWithKeys(fn ($n, $e) => [strtolower($e) => $n])->all() : [];
-        $issues = $this->visibleIssues($viewer, $sites->where('type', 'key')->pluck('value')->unique()->take(self::MAX_KEYS)->all());
+        // The cap is per text, as html() alone had it; the lookup is still one query for all of them.
+        $keys = collect($parsed)->filter()->flatMap(fn ($p) => collect($p[2])->where('type', 'key')->pluck('value')->unique()->take(self::MAX_KEYS))->unique();
+        $issues = $this->visibleIssues($viewer, $keys->values()->all());
 
         return array_map(function (?array $p) use ($names, $issues) {
             if ($p === null) {

@@ -83,12 +83,8 @@ class ProfileController extends Controller
 
         $user = $request->user();
 
-        // E7: a workspace always keeps an Owner.
-        if ($names = $workspaceMembers->soleOwnerOf($user)) {
-            throw ValidationException::withMessages([
-                'password' => 'You are the last Owner of '.implode(', ', $names).'. Make someone else an Owner or delete those workspaces first.',
-            ]);
-        }
+        // E7: a workspace always keeps an Owner (checked again under the lock in deleteAccount).
+        $workspaceMembers->ensureNotSoleOwner($user);
 
         if ($keys = $memberships->soleAdminProjectKeys($user)) {
             throw ValidationException::withMessages([

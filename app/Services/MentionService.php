@@ -71,7 +71,14 @@ class MentionService
             $budget--;
             Mention::create(['issue_id' => $issue->id, 'comment_id' => $comment?->id, 'mentioned_user_id' => $user->id, 'by_user_id' => $actor->id, 'agent_id' => $agent?->id, 'via' => $via]);
             // After commit: the inbox row's workspace FK share-locks the workspace row, which must not happen under the issue lock.
-            DB::afterCommit(fn () => $this->notifications->notify($user, $issue, 'mention', ['action' => 'mention', 'from' => null, 'to' => null], $actor, $agent, $via, batch: false));
+            // The text is already saved by then, so a failure is reported, not thrown: the request succeeds and the other mentions still go out.
+            DB::afterCommit(function () use ($user, $issue, $actor, $agent, $via) {
+                try {
+                    $this->notifications->notify($user, $issue, 'mention', ['action' => 'mention', 'from' => null, 'to' => null], $actor, $agent, $via, batch: false);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
             $this->watchers->autoWatch($issue, $user);
         }
         if ($limited) {
