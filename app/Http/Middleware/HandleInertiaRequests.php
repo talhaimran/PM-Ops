@@ -52,7 +52,9 @@ class HandleInertiaRequests extends Middleware
             'support_session' => fn () => ($s = $request->attributes->get('support_session'))
                 ? ['staff' => $s->staff_name, 'user' => $s->target->name, 'ends_at' => $s->ends_at->format('H:i')]
                 : null,
-            'workspaces' => fn () => $request->user()?->workspaces()->orderBy('name')->get(['name', 'slug'])
+            'workspaces' => fn () => $request->user()?->workspaces()
+                ->when($request->attributes->get('support_session'), fn ($q, $s) => $q->whereKey($s->workspace_id))
+                ->orderBy('name')->get(['name', 'slug'])
                 ->map(fn ($w) => ['name' => $w->name, 'slug' => $w->slug])->all() ?? [],
             // Spec 8 (A5): only whether a provider is set; plain-English search and Mode C hide their controls without one.
             'ai' => fn () => ['enabled' => app(CurrentWorkspace::class)->id() && app(AiSettingsService::class)->for(app(CurrentWorkspace::class)->get()) !== null],

@@ -8,6 +8,7 @@ use App\Models\SupportSession;
 use App\Models\User;
 use App\Services\SupportSessionService;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Testing\AssertableInertia as Assert;
 
 // 3-R19 / 3-D4: staff view the app as a member through a one-time URL, read-only, with a banner and audit rows.
@@ -26,11 +27,11 @@ beforeEach(function () {
     makeIssue($this->project, $this->owner, ['title' => 'First']);
 });
 
-function startSupport($t, array $overrides = [])
+function startSupport($t, array $overrides = [], ?string $key = null)
 {
     return internalApi('POST', "workspaces/{$t->ws->id}/support-sessions", [
         'staff' => SUPPORT_STAFF, 'target_user_id' => $t->target->id, 'reason' => 'Ticket 42', 'minutes' => 30, ...$overrides,
-    ]);
+    ], $key);
 }
 
 /** A fresh browser opening $url. */
@@ -74,20 +75,18 @@ test('the URL expires after 5 minutes', function () {
     $this->assertGuest();
 });
 
-test('a support session writes nothing: workspace pages, the profile and OAuth consent are refused', function () {
+test('a support session writes nothing on its workspace pages', function () {
     openSupportUrl($this, startSupport($this)->json('data.url'));
     $before = [Issue::count(), $this->target->fresh()->name];
 
     $this->post('/acme/projects/WEB/issues', ['title' => 'Staff wrote this'])->assertRedirect()->assertSessionHas('warning', READ_ONLY);
     $this->patch('/acme/issues/WEB-1', ['title' => 'x', 'version' => 1])->assertSessionHas('warning', READ_ONLY);
     $this->post('/acme/notifications/read-all')->assertSessionHas('warning', READ_ONLY);
-    $this->patch('/profile', ['name' => 'Hacked', 'email' => 'tara@example.com'])->assertSessionHas('warning', READ_ONLY);
-    $this->postJson('/oauth/authorize', ['auth_token' => 'x', 'agent' => 'new'])->assertForbidden()
-        ->assertExactJson(['error' => 'support_session_read_only', 'message' => READ_ONLY]);
-
-    // A GET that writes: the sign-in callback would link the staff member's own Google login to the user.
-    $this->get('/auth/google/redirect')->assertSessionHas('warning', READ_ONLY);
-    $this->get('/auth/google/callback')->assertSessionHas('warning', READ_ONLY);
+    // Account pages and OAuth are closed altogether (scan F1/F2); the GET sign-in callback would link a login.
+    $this->patch('/profile', ['name' => 'Hacked', 'email' => 'tara@example.com'])->assertNotFound();
+    $this->postJson('/oauth/authorize', ['auth_token' => 'x', 'agent' => 'new'])->assertNotFound();
+    $this->get('/auth/google/redirect')->assertNotFound();
+    $this->get('/auth/google/callback')->assertNotFound();
 
     expect([Issue::count(), $this->target->fresh()->name])->toBe($before);
 });
@@ -187,4 +186,50 @@ test('audit rows written during a support session name the staff member, not the
     $row = AuditLog::where('action', 'audit_log.exported')->sole();
     expect($row->only(['actor_type', 'actor_user_id']))->toBe(['actor_type' => 'staff', 'actor_user_id' => null])
         ->and($row->metadata['staff'])->toBe(SUPPORT_STAFF);
+});
+
+// Scan of PR 5, F1/F2: a support session sees its workspace only, never the user's account pages or OAuth.
+test('account pages, OAuth and workspace creation are closed to a support session', function () {
+    $this->target->forceFill(['two_factor_secret' => encrypt('PENDINGSECRET'), 'remember_token' => 'kept'])->save();
+    openSupportUrl($this, startSupport($this)->json('data.url'));
+
+    $this->get('/profile')->assertNotFound()->assertDontSee('PENDINGSECRET');
+    $this->get('/oauth/authorize?prompt=login&response_type=code&client_id=x')->assertNotFound();
+    $this->get('/workspaces/create')->assertNotFound();
+    $this->get('/invitations/abc')->assertNotFound();
+
+    $this->assertAuthenticatedAs($this->target);
+    expect($this->target->fresh()->remember_token)->toBe('kept')
+        ->and(AuditLog::where('action', 'auth.logout')->exists())->toBeFalse();
+    $this->get('/acme/dashboard')->assertOk();
+});
+
+// Scan of PR 5, F3: nothing of the user's other workspaces shows, even when they last worked there.
+test('a support session shows nothing of the user\'s other workspaces', function () {
+    useReverbForChannelAuth();
+    $other = makeWorkspace($otherOwner = User::factory()->create(), 'other');
+    $other->addMember($this->target, WorkspaceRole::Member);
+    useWorkspace($other);
+    $otherProject = makeProject($otherOwner, 'OPS');
+    addMember($otherProject, $this->target, ProjectRole::Member);
+    useWorkspace($this->ws);
+    $this->target->forceFill(['current_workspace_id' => $other->id])->save();
+    openSupportUrl($this, startSupport($this)->json('data.url'));
+
+    $this->get('/acme/dashboard')->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('workspace.slug', 'acme')
+        ->where('workspaces', [['name' => $this->ws->name, 'slug' => 'acme']]));
+    $auth = fn ($ws, $project) => $this->postJson('/broadcasting/auth', ['socket_id' => '1234.5678', 'channel_name' => "private-workspace.{$ws->id}.project.{$project->id}"]);
+    $auth($other, $otherProject)->assertForbidden();
+    $auth($this->ws, $this->project)->assertOk();
+});
+
+// Scan of PR 5, F4: the replay cache keeps no readable copy of the one-time URL.
+test('the idempotency cache holds no plaintext support URL, and a replay still returns it', function () {
+    $first = startSupport($this, [], 'support-key');
+    $url = $first->json('data.url');
+    $stored = Cache::get('idempotency:'.sha1('internal|internal/v1/workspaces/'.$this->ws->id.'/support-sessions|support-key'));
+
+    expect($stored)->not->toBeNull()->and(serialize($stored))->not->toContain(basename($url));
+    expect(startSupport($this, [], 'support-key')->assertCreated()->assertHeader('Idempotent-Replayed', 'true')->json('data.url'))->toBe($url);
 });

@@ -20,7 +20,8 @@ class UseCurrentWorkspace
     public function handle(Request $request, Closure $next): Response
     {
         if ($user = $request->user()) {
-            $workspace = $this->workspaces->currentFor($user);
+            // 3-R19: a support session is in its own workspace, whichever the user last used.
+            $workspace = $request->attributes->get('support_session')?->workspace ?? $this->workspaces->currentFor($user);
             $workspace ? $this->current->set($workspace) : $this->current->forget();
             if ($workspace) {
                 URL::defaults(['workspace' => $workspace->slug]);

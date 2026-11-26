@@ -73,8 +73,13 @@ class ResolveWorkspace
         if ($workspace->deletion_scheduled_at) {
             return WorkspaceController::scheduled($workspace, $user)->toResponse($request)->setStatusCode(403);
         }
+        // 3-R19: live channels too see only a support session's own workspace.
+        $session = $request->attributes->get('support_session');
+        if ($session && $session->workspace_id !== $workspace->id) {
+            return response('', 404);
+        }
         // 3-R17: every page of an archived workspace; its Owners get Restore (not staff in a support session).
-        $support = $request->attributes->has('support_session');
+        $support = (bool) $session;
         if ($workspace->archived_at) {
             return Inertia::render('Workspaces/Archived', [
                 'name' => $workspace->name,

@@ -13,7 +13,8 @@ use Symfony\Component\HttpFoundation\Response;
  * 3-R19: on every web request of a support session, signs out at ends_at (or on Log out) and logs
  * staff.support_session_ended once; otherwise marks the request as a support session (the support_session request
  * attribute), which makes it read-only, skips the workspace's 2FA and sign-in-method rules, and shows the banner.
- * Signs out without the Logout event: the target didn't sign out.
+ * Signs out without the Logout event: the target didn't sign out. Outside /{workspace} it serves only the few routes
+ * that lead back into it.
  */
 class EndSupportSession
 {
@@ -29,6 +30,8 @@ class EndSupportSession
         $session = SupportSession::with(['workspace', 'target'])->find($id);
         if ($session && ! $session->ended_at && $session->ends_at->isFuture() && ! $request->routeIs('logout')) {
             $request->attributes->set('support_session', $session);
+            // Scan F1/F2: only its workspace's pages, never the user's account pages, OAuth or other workspaces.
+            abort_unless($this->allowed($request), 404);
 
             return $next($request);
         }
@@ -46,5 +49,15 @@ class EndSupportSession
             $request->routeIs('support-sessions.consume') => $next($request),
             default => redirect()->route('login'),
         };
+    }
+
+    private function allowed(Request $request): bool
+    {
+        $route = $request->route();
+
+        return in_array('workspace', $route?->middleware() ?? [], true)
+            || $request->routeIs('support-sessions.consume', 'workspaces.no-access')
+            || $request->is('/', 'broadcasting/auth')
+            || $route?->uri() === '{legacy}';
     }
 }
