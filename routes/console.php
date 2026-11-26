@@ -8,6 +8,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// 3-R16, owner ruling on the PR 5 review: every job below also runs in suspended workspaces. Suspension stops people,
+// agents and staff from changing things; this is upkeep they already chose or the system owes (trash retention, the
+// Owner's scheduled deletion, approval expiry, link repair, support-session end, yesterday's agent summary).
+
 // Soft-deleted issues and comments are removed for good after 30 days (spec 5.1, leaning).
 Schedule::command('issues:purge')->daily();
 
@@ -19,6 +23,9 @@ Schedule::command('workspaces:purge')->daily();
 
 // A2: approval requests expire after 7 days; the agent can ask again.
 Schedule::command('approvals:expire')->hourly();
+
+// 3-R19: a support session past its end gets its ended row even if the browser never comes back.
+Schedule::command('support-sessions:end')->everyMinute()->onOneServer()->withoutOverlapping();
 
 // 3-R7: each person with agents hears once a day, shortly after midnight server time, what their agents did the day before.
 Schedule::command('notifications:agent-summary')->dailyAt('00:10')->onOneServer()->withoutOverlapping();

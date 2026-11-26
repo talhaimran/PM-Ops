@@ -18,7 +18,7 @@ class Workspace extends Model
     public const RESERVED_SLUGS = [
         'login', 'logout', 'register', 'forgot-password', 'reset-password', 'verify-email', 'confirm-password',
         'two-factor-challenge', 'auth', 'profile', 'dashboard', 'projects', 'issues', 'comments', 'search',
-        'settings', 'invitations', 'workspaces', 'api', 'mcp', 'docs', 'internal', 'up', 'build', 'storage', 'admin', 'new',
+        'settings', 'invitations', 'workspaces', 'api', 'mcp', 'docs', 'internal', 'up', 'build', 'storage', 'admin', 'new', 'support',
     ];
 
     protected function casts(): array
@@ -34,6 +34,11 @@ class Workspace extends Model
     public function members(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'workspace_user')->withPivot('role', 'last_active_at')->withTimestamps();
+    }
+
+    public function owners(): BelongsToMany
+    {
+        return $this->members()->wherePivot('role', WorkspaceRole::Owner->value);
     }
 
     public function projects(): HasMany
@@ -59,6 +64,18 @@ class Workspace extends Model
     public function setting(string $key): mixed
     {
         return ($this->settings ?? [])[$key] ?? self::DEFAULT_SETTINGS[$key] ?? null;
+    }
+
+    /** 3-R16: suspended (a notice) or archived (3-R17) workspaces take no writes from anyone. */
+    public function isWritable(): bool
+    {
+        return ! $this->suspended_at && ! $this->archived_at;
+    }
+
+    /** active, suspended or archived (archived wins). */
+    public function state(): string
+    {
+        return $this->archived_at ? 'archived' : ($this->suspended_at ? 'suspended' : 'active');
     }
 
     public function addMember(User $user, WorkspaceRole $role): void

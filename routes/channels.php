@@ -19,4 +19,5 @@ Broadcast::channel('workspace.{workspace}.project.{project}', function (User $us
     return ctype_digit((string) $projectId) && $user->accessibleProjects()->whereKey((int) $projectId)->exists();
 });
 
-Broadcast::channel('user.{id}', fn (User $user, $id) => ! $user->viaToken() && (string) $user->id === (string) $id);
+// Not in a support session: it tells when anything reaches the user, from any of their workspaces (owner review of PR 5).
+Broadcast::channel('user.{id}', fn (User $user, $id) => ! $user->viaToken() && ! request()->attributes->has('support_session') && (string) $user->id === (string) $id);

@@ -110,11 +110,26 @@ enum Entitlement: string
         return "{$n} {$noun}".($n === 1 ? '' : 's');
     }
 
+    /** A stored string as its type: int, bool, or the string itself. */
+    public function cast(string $value): int|bool|string
+    {
+        return match ($this->type()) {
+            'int' => (int) $value,
+            'bool' => $value === '1',
+            default => $value,
+        };
+    }
+
+    public static function unknown(string $name): string
+    {
+        return "Unknown entitlement \"{$name}\". Valid keys: ".implode(', ', array_column(self::cases(), 'value')).'.';
+    }
+
     /** The stored string for $value, or an error saying what the key takes. @return array{0: ?string, 1: ?string} */
-    public function normalize(string $value): array
+    public function normalize(string|int|bool $value): array
     {
         $type = $this->type();
-        $value = trim($value);
+        $value = is_bool($value) ? ($value ? '1' : '0') : trim((string) $value);
 
         return match (true) {
             is_array($type) => in_array($value, $type, true) ? [$value, null] : [null, "{$this->value} takes one of: ".implode(', ', $type).'.'],

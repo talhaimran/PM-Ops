@@ -85,6 +85,31 @@ class WorkspaceService
     }
 
     /**
+     * 3-R16/3-R17: workspace.suspended, .unsuspended, .archived or .restored. Logged once, when the state changes: as the
+     * Owner restoring on the web ($user), else as staff or system through the admin API.
+     */
+    public function changeState(Workspace $workspace, string $action, ?User $user = null, ?array $staff = null, ?string $reason = null): Workspace
+    {
+        [$column, $on] = match ($action) {
+            'workspace.suspended' => ['suspended_at', true],
+            'workspace.unsuspended' => ['suspended_at', false],
+            'workspace.archived' => ['archived_at', true],
+            'workspace.restored' => ['archived_at', false],
+        };
+
+        return DB::transaction(function () use ($workspace, $action, $user, $staff, $reason, $column, $on) {
+            $locked = Workspace::whereKey($workspace->id)->lockForUpdate()->firstOrFail();
+            if ((bool) $locked->{$column} !== $on) {
+                $locked->forceFill([$column => $on ? now() : null])->save();
+                $metadata = $reason === null ? [] : ['reason' => $reason];
+                $user ? $this->audit->log($action, $locked, $metadata, $locked, $user) : $this->audit->staff($action, $locked, $locked, $staff, $metadata);
+            }
+
+            return $locked;
+        });
+    }
+
+    /**
      * Deletes the workspace for good: projects with their issues, then (by cascade) tokens, invitations, members,
      * redirects and its audit log. One unscoped workspace.deleted row stays.
      */

@@ -244,6 +244,15 @@ function isolationExemptRoutes(): array
         'POST oauth/authorize' => 'consent; takes only my agents in the current workspace (below)', 'DELETE oauth/authorize' => 'consent refused; changes nothing',
         // 3-R14: the channel names carry the ids; the channel cases below check them.
         'GET broadcasting/auth' => 'live channel auth; channels covered below', 'POST broadcasting/auth' => 'live channel auth; channels covered below',
+        // 3-R18: the service API takes only PM_INTERNAL_API_TOKEN(_NEXT); a user's token or session is a 401 (below, AdminApiSecurityTest).
+        ...collect([
+            'GET internal/v1/workspaces', 'GET internal/v1/workspaces/{id}', 'GET internal/v1/workspaces/{id}/usage',
+            'PUT internal/v1/workspaces/{id}/entitlements', 'PUT internal/v1/workspaces/{id}/entitlements/{key}', 'DELETE internal/v1/workspaces/{id}/entitlements/{key}',
+            'POST internal/v1/workspaces/{id}/suspend', 'POST internal/v1/workspaces/{id}/unsuspend', 'POST internal/v1/workspaces/{id}/archive',
+            'POST internal/v1/workspaces/{id}/restore', 'POST internal/v1/workspaces/{id}/support-sessions',
+        ])->mapWithKeys(fn ($r) => [$r => 'internal admin API, service token only (below)'])->all(),
+        // 3-R19: addressed by a one-time token; the session it opens stays in its own workspace (below, SupportSessionTest).
+        'GET support/{token}' => 'one-time support-session URL; stays in its workspace (below)',
     ];
 }
 
@@ -571,4 +580,43 @@ test('live channels: acting in A never subscribes to B\'s projects, and a user c
     // The legitimate ones still work.
     channelAuth($this->ann, "workspace.{$this->a->id}.project.{$web->id}")->assertOk();
     channelAuth($this->bob, "workspace.{$this->b->id}.project.{$ops->id}")->assertOk();
+});
+
+test('the internal admin API answers a user\'s Sanctum or OAuth token, from either workspace, with a bare 401', function () {
+    config(['pm.internal_api_token' => INTERNAL_TOKEN]);
+    $tokens = oauthConnect($this->ann, $this->annA[0]->id);
+
+    foreach ([$this->annA[1], $this->annB[1], $tokens['access_token']] as $token) {
+        internalApi('GET', "workspaces/{$this->b->id}", token: $token)->assertUnauthorized()->assertExactJson(['message' => 'Unauthenticated.']);
+        internalApi('POST', "workspaces/{$this->b->id}/suspend", ['reason' => 'x'], token: $token)->assertUnauthorized();
+    }
+    expect($this->b->fresh()->suspended_at)->toBeNull()->and(workspaceSnapshot($this->b))->toBe($this->bBefore);
+});
+
+test('the web restore of an archived workspace never reaches one you don\'t own or aren\'t in', function () {
+    $this->b->forceFill(['archived_at' => now()])->save();
+    $carol = User::factory()->create();
+    makeWorkspace($carol, 'carol');
+
+    // ann is a plain member of B; carol isn't in B at all.
+    $this->actingAs($this->ann)->post('/workspaces/bravo/restore')->assertForbidden();
+    $this->actingAs($carol)->post('/workspaces/bravo/restore')->assertNotFound();
+    expect($this->b->fresh()->archived_at)->not->toBeNull();
+});
+
+test('a support session opened in A never shows B, even though its user is in B', function () {
+    config(['pm.internal_api_token' => INTERNAL_TOKEN]);
+    $url = internalApi('POST', "workspaces/{$this->a->id}/support-sessions", [
+        'staff' => ['name' => 'Sue', 'email' => 'sue@pmops.test'], 'target_user_id' => $this->ann->id, 'reason' => 'x', 'minutes' => 5,
+    ])->assertCreated()->json('data.url');
+    $this->flushHeaders();
+
+    $this->get(parse_url($url, PHP_URL_PATH))->assertRedirect('/alpha/dashboard');
+    expect($this->get('/bravo/dashboard')->assertNotFound()->getContent())->not->toContain(B_MARKER);
+    expect($this->get('/bravo/projects/OPS')->assertNotFound()->getContent())->not->toContain(B_MARKER);
+
+    // A session started for B's workspace can't be started for a user who isn't in it.
+    internalApi('POST', "workspaces/{$this->b->id}/support-sessions", [
+        'staff' => ['name' => 'Sue', 'email' => 'sue@pmops.test'], 'target_user_id' => User::factory()->create()->id, 'reason' => 'x', 'minutes' => 5,
+    ])->assertUnprocessable();
 });

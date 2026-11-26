@@ -2,32 +2,43 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\SupportSessionService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Replays the stored response when a POST repeats an Idempotency-Key, so retried creates
- * don't duplicate. Keys are scoped per token (or user) and path. Only successful responses are stored.
+ * Replays the stored response when a POST, PUT or DELETE repeats an Idempotency-Key, so retried writes don't
+ * duplicate. Keys are scoped per token (or user) and path; the internal admin API's are keyed internal:{path} and
+ * required on its writes (3-R18). Only successful responses are stored.
  */
 class Idempotent
 {
     public function handle(Request $request, Closure $next): Response
     {
         $key = $request->header('Idempotency-Key');
+        $internal = $request->is('internal/*');
 
-        if (! $key || ! $request->isMethod('post')) {
+        if (! $request->isMethod('post') && ! $request->isMethod('put') && ! $request->isMethod('delete')) {
             return $next($request);
+        }
+        if (! $key) {
+            return $internal ? response()->json(['message' => 'An Idempotency-Key header is required.'], 400) : $next($request);
         }
 
         if (strlen($key) > 255) {
             return response()->json(['message' => 'Idempotency-Key must be at most 255 characters.'], 400);
         }
 
-        $token = $request->user()?->currentAccessToken();
-        $owner = $token instanceof PersonalAccessToken ? "token:{$token->id}" : 'user:'.$request->user()?->id;
+        $token = $internal ? null : $request->user()?->currentAccessToken();
+        $owner = match (true) {
+            $internal => 'internal',
+            $token instanceof PersonalAccessToken => "token:{$token->id}",
+            default => 'user:'.$request->user()?->id,
+        };
         $cacheKey = 'idempotency:'.sha1("{$owner}|{$request->path()}|{$key}");
         $hash = sha1($request->getContent());
 
@@ -52,9 +63,13 @@ class Idempotent
                 Cache::put($cacheKey, [
                     'hash' => $hash,
                     'status' => $response->getStatusCode(),
-                    'body' => $response->getContent(),
+                    // Encrypted: a support session's body holds its one-time URL (scan F4), and the cache may be a DB table.
+                    'body' => Crypt::encryptString((string) $response->getContent()),
                     'type' => $response->headers->get('Content-Type'),
-                ], now()->addHours(config('pm.idempotency_ttl_hours')));
+                ], $internal && str_ends_with($request->path(), '/support-sessions')
+                    // Its body holds the one-time URL: keep it no longer than the URL works.
+                    ? now()->addMinutes(SupportSessionService::URL_MINUTES)
+                    : now()->addHours(config('pm.idempotency_ttl_hours')));
             }
 
             return $response;
@@ -71,6 +86,6 @@ class Idempotent
             ], 422);
         }
 
-        return response($stored['body'], $stored['status'], ['Content-Type' => $stored['type'], 'Idempotent-Replayed' => 'true']);
+        return response(Crypt::decryptString($stored['body']), $stored['status'], ['Content-Type' => $stored['type'], 'Idempotent-Replayed' => 'true']);
     }
 }

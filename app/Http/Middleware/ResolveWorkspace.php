@@ -34,7 +34,9 @@ class ResolveWorkspace
         $workspace ??= $renamed ? Workspace::find($id) : null;
         $member = $workspace ? $user->workspaces()->whereKey($workspace->id)->first() : null;
 
-        abort_unless($member, 404);
+        // 3-R19: a support session sees only the workspace it was opened for.
+        $support = $request->attributes->get('support_session');
+        abort_unless($member && (! $support || $support->workspace_id === $workspace->id), 404);
 
         if ($renamed) {
             $path = preg_replace('#^/'.preg_quote($slug, '#').'(?=/|$)#', '/'.$workspace->slug, '/'.ltrim($request->path(), '/'));
@@ -50,11 +52,12 @@ class ResolveWorkspace
         URL::defaults(['workspace' => $workspace->slug]);
         $route->forgetParameter('workspace');
 
-        if ($user->current_workspace_id !== $workspace->id) {
+        // Staff viewing as someone (3-D4) change nothing of theirs, not even these.
+        if (! $support && $user->current_workspace_id !== $workspace->id) {
             $user->forceFill(['current_workspace_id' => $workspace->id])->save();
         }
         $lastActive = $member->pivot->last_active_at;
-        if (! $lastActive || now()->diffInMinutes($lastActive, true) >= 5) {
+        if (! $support && (! $lastActive || now()->diffInMinutes($lastActive, true) >= 5)) {
             $workspace->members()->updateExistingPivot($user->id, ['last_active_at' => now()]);
         }
 
@@ -62,18 +65,32 @@ class ResolveWorkspace
     }
 
     /**
-     * A member's session that this workspace won't serve: scheduled for deletion, or signed in with a method it doesn't
-     * allow. Also used by the OAuth consent screen, which sits outside /{workspace}.
+     * A member's session that this workspace won't serve: scheduled for deletion, archived, or signed in with a method
+     * it doesn't allow. Also used by the OAuth consent screen, which sits outside /{workspace}.
      */
     public static function refuse(Request $request, Workspace $workspace, User $user): ?Response
     {
         if ($workspace->deletion_scheduled_at) {
             return WorkspaceController::scheduled($workspace, $user)->toResponse($request)->setStatusCode(403);
         }
+        // 3-R19: live channels too see only a support session's own workspace.
+        $session = $request->attributes->get('support_session');
+        if ($session && $session->workspace_id !== $workspace->id) {
+            return response('', 404);
+        }
+        // 3-R17: every page of an archived workspace; its Owners get Restore (not staff in a support session).
+        $support = (bool) $session;
+        if ($workspace->archived_at) {
+            return Inertia::render('Workspaces/Archived', [
+                'name' => $workspace->name,
+                'restoreUrl' => ! $support && $user->can('delete', $workspace) ? route('workspaces.restore', $workspace->slug) : null,
+            ])->toResponse($request)->setStatusCode(403);
+        }
 
         // Spec 7.0f: only sessions made with a method this workspace allows. Sessions from before step 0 PR 7 were passwords.
+        // A support session was verified by Platform management instead (3-R19).
         $allowed = $workspace->setting('sign_in_methods');
-        if (! in_array($request->session()->get('auth.method', 'password'), $allowed, true)) {
+        if (! $support && ! in_array($request->session()->get('auth.method', 'password'), $allowed, true)) {
             return Inertia::render('Workspaces/NoAccess', [
                 'message' => "{$workspace->name} allows sign-in with ".SocialSignInService::describe($allowed).'. Sign out, then sign in that way.',
                 'canCreate' => false,

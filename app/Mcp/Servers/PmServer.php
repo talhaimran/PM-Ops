@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Http\Middleware\EnsureWorkspaceWritable;
 use App\Mcp\Resources\IssueResource;
 use App\Mcp\Resources\ProjectResource;
 use App\Mcp\Tools\AddComment;
@@ -49,8 +50,10 @@ use App\Mcp\Tools\UpdateProject;
 use App\Mcp\Tools\UpdateSprint;
 use App\Mcp\Tools\WatchIssue;
 use App\Mcp\Tools\Whoami;
+use App\Models\Workspace;
 use App\Services\ActivityLogger;
 use App\Services\AgentService;
+use App\Services\CurrentWorkspace;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Laravel\Mcp\Exceptions\JsonRpcException;
 use Laravel\Mcp\Server;
@@ -164,6 +167,14 @@ class PmServer extends Server
         if ($token instanceof PersonalAccessToken && ! PersonalAccessToken::whereKey($token->id)
             ->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))->exists()) {
             throw new JsonRpcException(self::INVALID_TOKEN, -32001, $request->id);
+        }
+
+        // 3-R16: a write tool in a suspended (or archived) workspace; read fresh, so a long-lived stdio process sees a change.
+        $tool = $request->method === 'tools/call' ? $context->tools()->first(fn ($t) => $t->name() === $request->get('name')) : null;
+        $current = app(CurrentWorkspace::class)->id();
+        if ($tool && ! ($tool->annotations()['readOnlyHint'] ?? false)
+            && ($refusal = EnsureWorkspaceWritable::refusal($current ? Workspace::find($current) : null))) {
+            throw new JsonRpcException($refusal['message'], -32001, $request->id, $refusal);
         }
 
         return parent::runMethodHandle($request, $context);

@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "workspace.json",
+  "title": "Workspace (GET /internal/v1/workspaces/{id} and every write's answer)",
+  "type": "object",
+  "required": ["data"],
+  "properties": { "data": { "$ref": "#/definitions/workspace" } },
+  "definitions": {
+    "timestamp": { "type": ["string", "null"], "format": "date-time" },
+    "workspace": {
+      "type": "object",
+      "required": ["id", "name", "slug", "state", "owners", "entitlements", "usage", "suspended_at", "archived_at", "created_at", "updated_at"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "state": { "enum": ["active", "suspended", "archived"] },
+        "owners": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "email"],
+            "additionalProperties": false,
+            "properties": { "id": { "type": "integer" }, "name": { "type": "string" }, "email": { "type": "string" } }
+          }
+        },
+        "entitlements": {
+          "description": "Current limits by key; a missing key means unlimited (or, for informational keys, empty). plan_value is the plan's value under an override.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["value", "source", "plan_value"],
+            "additionalProperties": false,
+            "properties": {
+              "value": { "type": ["integer", "boolean", "string"] },
+              "source": { "enum": ["plan", "override", "default"] },
+              "plan_value": { "type": ["integer", "boolean", "string", "null"] }
+            }
+          }
+        },
+        "usage": { "$ref": "#/definitions/usage" },
+        "suspended_at": { "$ref": "#/definitions/timestamp" },
+        "archived_at": { "$ref": "#/definitions/timestamp" },
+        "created_at": { "$ref": "#/definitions/timestamp" },
+        "updated_at": { "$ref": "#/definitions/timestamp" }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "required": ["billed_users", "viewers", "pending_billed_invitations", "projects", "storage_mb", "agents", "api_calls_30d", "last_activity_at"],
+      "additionalProperties": false,
+      "properties": {
+        "billed_users": { "type": "integer", "minimum": 0, "description": "Members who are billed: Owners, Admins, and anyone Member or Admin in a project." },
+        "viewers": { "type": "integer", "minimum": 0, "description": "Members who aren't billed." },
+        "pending_billed_invitations": { "type": "integer", "minimum": 0, "description": "Extra billed people that pending invitations would add." },
+        "projects": { "type": "integer", "minimum": 0 },
+        "storage_mb": { "type": "integer", "minimum": 0, "description": "0 until attachments (step 6)." },
+        "agents": { "type": "integer", "minimum": 0, "description": "Agents that aren't revoked." },
+        "api_calls_30d": { "type": "integer", "minimum": 0, "description": "REST and MCP-over-HTTP calls by agents in the last 30 days." },
+        "last_activity_at": { "$ref": "#/definitions/timestamp", "description": "Latest of members' last visit, issue activity and agents' last use." }
+      }
+    }
+  },
+  "examples": [
+    {
+      "data": {
+        "id": 12, "name": "Acme", "slug": "acme", "state": "suspended",
+        "owners": [{ "id": 3, "name": "Olga Owner", "email": "olga@example.com" }],
+        "entitlements": {
+          "projects": { "value": 10, "source": "override", "plan_value": 5 },
+          "webhooks": { "value": true, "source": "plan", "plan_value": true },
+          "plan": { "value": "paid", "source": "plan", "plan_value": "paid" }
+        },
+        "usage": {
+          "billed_users": 4, "viewers": 2, "pending_billed_invitations": 1, "projects": 3, "storage_mb": 0,
+          "agents": 2, "api_calls_30d": 1840, "last_activity_at": "2026-11-24T16:05:00+00:00"
+        },
+        "suspended_at": "2026-11-25T09:00:00+00:00", "archived_at": null,
+        "created_at": "2026-01-10T08:00:00+00:00", "updated_at": "2026-11-25T09:00:00+00:00"
+      }
+    }
+  ]
+}

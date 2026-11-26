@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Web;
 
+use App\Http\Middleware\EnsureWorkspaceWritable;
 use App\Http\Middleware\RequireTwoFactor;
 use App\Http\Middleware\ResolveWorkspace;
 use App\Mcp\OAuth\AgentAccessTokenRepository;
@@ -115,9 +116,16 @@ class OAuthController extends AuthorizationController
     /** What the workspace's own pages would answer instead (ResolveWorkspace, RequireTwoFactor), or agents turned off. */
     private static function refusal(Request $request, Workspace $workspace, User $user): ?Response
     {
+        // Connecting a client makes an agent: a write, so a suspended workspace refuses it too (3-R16).
+        $message = match (true) {
+            ! $workspace->setting('agents_enabled') => AgentService::disabledMessage($workspace),
+            ! $workspace->isWritable() => EnsureWorkspaceWritable::refusal($workspace)['message'],
+            default => null,
+        };
+
         return ResolveWorkspace::refuse($request, $workspace, $user) ?? RequireTwoFactor::refuse($workspace, $user)
-            ?? ($workspace->setting('agents_enabled') ? null : Inertia::render('Workspaces/NoAccess', [
-                'message' => AgentService::disabledMessage($workspace), 'canCreate' => false, 'restoreUrl' => null,
+            ?? ($message === null ? null : Inertia::render('Workspaces/NoAccess', [
+                'message' => $message, 'canCreate' => false, 'restoreUrl' => null,
             ])->toResponse($request)->setStatusCode(403));
     }
 

@@ -6,6 +6,7 @@ import NotificationBell from '@/Components/NotificationBell';
 import { projectLinks } from '@/Components/ProjectNav';
 import ThemeToggle from '@/Components/ThemeToggle';
 import Toaster from '@/Components/Toaster';
+import WorkspaceBanners from '@/Components/WorkspaceBanners';
 import WorkspaceSwitcher from '@/Components/WorkspaceSwitcher';
 import { requestCreate } from '@/Components/useCreateShortcut';
 import { transition } from '@/motion';
@@ -208,6 +209,7 @@ export default function Authenticated({
             </AnimatePresence>
 
             <main className="min-w-0">
+                <WorkspaceBanners />
                 {header && <header className="px-4 pb-2 pt-6 md:px-8">{header}</header>}
                 {children}
             </main>

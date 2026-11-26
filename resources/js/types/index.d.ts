@@ -17,6 +17,8 @@ export interface CurrentWorkspace {
     name: string;
     slug: string;
     role: WorkspaceRole | null;
+    /** 3-R16/3-R17: suspended shows the read-only notice; archived pages render Workspaces/Archived instead. */
+    state: 'active' | 'suspended' | 'archived';
 }
 
 export type PageProps<
@@ -31,6 +33,8 @@ export type PageProps<
     ai: { enabled: boolean };
     /** 3-R25: unread inbox items you can still see, in the current workspace. */
     unread_notifications: number;
+    /** 3-R19: staff viewing as this user, read-only; ends_at is HH:MM server time. */
+    support_session: { staff: string; user: string; ends_at: string } | null;
 };
 
 export type ProjectRole = 'admin' | 'member' | 'viewer';

@@ -13,6 +13,10 @@ return [
     // Invitation emails per hour per user (web and API), so the server can't be used to spam.
     'invite_rate_limit' => (int) env('PM_INVITE_RATE_LIMIT', 30),
 
+    // 3-R18: the internal admin API (/internal/v1) is on only with a token; _next is also accepted while rotating.
+    'internal_api_token' => env('PM_INTERNAL_API_TOKEN'),
+    'internal_api_token_next' => env('PM_INTERNAL_API_TOKEN_NEXT'),
+
     // API token the stdio MCP server (`php artisan mcp:start pm`) acts as. Create an agent at /{workspace}/settings/agents.
     'mcp_token' => env('PM_MCP_TOKEN'),
 

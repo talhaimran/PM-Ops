@@ -38,6 +38,13 @@ class AuditLogger
         $this->write($workspace?->id, $action, $target, $metadata, null, 'system');
     }
 
+    /** The internal admin API (3-R18): actor type staff with their name and email, or system when none was sent. */
+    public function staff(string $action, ?Model $target, Workspace $workspace, ?array $staff, array $metadata = []): void
+    {
+        $staff = $staff ? ['name' => $staff['name'], 'email' => $staff['email']] : null;
+        $this->write($workspace->id, $action, $target, $staff ? [...$metadata, 'staff' => $staff] : $metadata, null, $staff ? 'staff' : 'system');
+    }
+
     /** Sign-in events go to every workspace the user belongs to; with no user or no workspace, one unscoped row. */
     public function forEveryWorkspaceOf(?User $user, string $action, array $metadata = []): void
     {
@@ -50,13 +57,18 @@ class AuditLogger
     private function write(?int $workspaceId, string $action, ?Model $target, array $metadata, ?User $actor, string $actorType): void
     {
         $request = app()->bound('request') ? request() : null;
+        // 3-R19: in a support session the staff member acted, not the user they view as.
+        if ($actorType === 'user' && ($support = $request?->attributes->get('support_session'))) {
+            [$actor, $actorType] = [null, 'staff'];
+            $metadata = [...$metadata, 'staff' => ['name' => $support->staff_name, 'email' => $support->staff_email]];
+        }
 
         $log = AuditLog::create([
             'workspace_id' => $workspaceId,
             'actor_user_id' => $actor?->id,
             'actor_type' => $actorType,
             'agent_id' => $actor?->agent()?->id,
-            'via' => $actorType === 'system' ? 'system' : ActivityLogger::via($actor),
+            'via' => $actorType === 'user' ? ActivityLogger::via($actor) : 'system',
             'action' => $action,
             'target_type' => $target ? $this->type($target) : null,
             'target_id' => $target?->getKey(),

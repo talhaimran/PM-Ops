@@ -19,6 +19,11 @@ class RequireTwoFactor
 
     public function handle(Request $request, Closure $next): Response
     {
+        // 3-R19: staff in a support session were verified by Platform management.
+        if ($request->attributes->has('support_session')) {
+            return $next($request);
+        }
+
         return self::refuse($this->current->get(), $request->user()) ?? $next($request);
     }
 

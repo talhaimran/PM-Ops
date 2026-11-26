@@ -56,7 +56,9 @@ class AuditLogController extends Controller
             fputcsv($out, ['When', 'Actor', 'Action', 'Target', 'Via', 'IP'], escape: '');
             foreach ($rows as $row) {
                 fputcsv($out, array_map($this->cell(...), [
-                    $row->created_at->toIso8601String(), $row->actor?->name ?? ($row->actor_type === 'system' ? 'System' : ''),
+                    $row->created_at->toIso8601String(), $row->actor?->name ?? match ($row->actor_type) {
+                        'system' => 'System', 'staff' => 'Staff: '.($row->metadata['staff']['name'] ?? ''), default => '',
+                    },
                     $row->action, $row->target_label, $row->via, $row->ip,
                 ]), escape: '');
             }
