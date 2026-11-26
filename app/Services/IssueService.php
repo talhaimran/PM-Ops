@@ -291,8 +291,8 @@ class IssueService
             }
             $this->shiftSuccessors($issue, $actor, $data, $action, isset($changes['due_date']));
             // The full texts, not the shortened ones in the log.
-            // Only a person's or agent's own write of the text mentions: not an Undo or an approval.
-            $issue->warnings = isset($changes['description']) && in_array($action, ['updated', 'overwrote'], true) ? $this->mentions->sync($issue, null, $before['description'], $after['description'] ?? '', $actor) : [];
+            // Only a person's or agent's own write of the text mentions: not an approval. An Undo takes back the rows the edit added but never notifies.
+            $issue->warnings = isset($changes['description']) && in_array($action, ['updated', 'overwrote', 'undid'], true) ? $this->mentions->sync($issue, null, $before['description'], $after['description'] ?? '', $actor, notify: $action !== 'undid') : [];
 
             return $issue;
         });

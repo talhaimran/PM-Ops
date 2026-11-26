@@ -72,6 +72,18 @@ Spec section 5 lists the conventions for all new code; these are how step 0 buil
 - Clone caps (`pm.clone_limit`) are checked before any lock and again inside the transaction.
 - Focus is `DashboardService::withFocus` (My issues rows only; REST `/me/issues` and MCP `my_issues`).
 
+## Collaboration and events (step 3)
+- Watchers: `WatcherService` is the only writer of `issue_watchers`; naming another person is authorized (`IssuePolicy::watchOthers` / `unwatchOthers`) before the email is looked up. An agent's watch is its owner's.
+- Notifications are written only by `NotificationService::notify` (model `InboxItem`; never `$user->notifications()`), called from `NotifyOnActivity` (listens to `ActivityRecorded`) and `MentionService`. Never notify the actor; read everything through `InboxItem::visibleTo`. Batching and the daily agent summary live in `NotificationService`.
+- Mentions: `MentionService::sync` is the only writer of `mentions`; parse and render through `RenderedText`. Non-member and over-limit mentions are `warnings`, never errors. Reactions go through `ReactionService` (no activity row, no version bump).
+- Broadcasts carry ids, keys and kind only (`ProjectChanged`, `NotificationsChanged`, empty `broadcastWith()`); dispatch after commit via `BroadcastChanges` or the service. Channels (`routes/channels.php`): people only, member of that workspace, then `accessibleProjects()`; `user.{u}` only for u. Pages use `useLiveReload` (30 s poll without Reverb).
+- Writable check: `Workspace::isWritable()` is the one rule (suspended or archived); `EnsureWorkspaceWritable` covers web/REST writes and `PmServer` MCP tools without `readOnlyHint`. Scheduled jobs still run.
+- Support sessions: `SupportSessionService` issues and ends them; `EndSupportSession` confines the request to the session's workspace pages and the `support_session` request attribute marks it. They never write and skip 2FA.
+- Internal admin API (`/internal/v1`, `routes/internal.php`): 404 when `PM_INTERNAL_API_TOKEN` is empty, `Idempotency-Key` on writes, logic in `AdminApiService`.
+- System events: audit rows (`AuditRecorded`) become `system_events` through `RecordSystemEvents`; `SystemEventService::record` writes the outbox row and `dispatchPending` re-queues stalled ones. Never send from the request; `DeliverSystemEvent` carries only the id.
+- Billing link: `BillingLink` builds the signed 5-minute token; Owners only, hidden when unset or in a support session.
+- Contract: JSON Schemas in `docs/contract/` (admin-api, events, billing-token) are validated by `ContractTest`; change a payload and its schema together.
+
 ## UI rules (step U)
 - Tokens: `tailwind.config.js` reads `docs/design-system/tokens.json`; use the token classes (`bg-card`, `text-muted`, `tint-amber`, `rounded-ctl`, `h-control-h`…). No hex colours, no default Tailwind colours, no `/40`-style opacity on token colours (they are CSS variables). `tests/Feature/Ui/DesignTokensTest.php` enforces this.
 - Motion: timings only from `resources/js/motion.ts` (`transition('drawerIn')`), never number literals in components. Reduced motion is handled there and in `app.css`.

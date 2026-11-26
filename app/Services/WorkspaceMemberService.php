@@ -8,6 +8,7 @@ use App\Enums\WorkspaceRole;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Workspace;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -99,11 +100,45 @@ class WorkspaceMemberService
         });
     }
 
+    /**
+     * Account deletion leaves every workspace at once: revokes their agents and writes the member.removed (plus owner.removed for an
+     * Owner) audit rows, with role and billed read before the rows cascade away, so Platform management's billing feed sees it (3-R21).
+     * shortcut: the workspace rows aren't locked, so a concurrent role change can leave the row's role a moment stale; the caller checks sole Owners first.
+     */
+    public function deleteAccount(User $user): void
+    {
+        DB::transaction(function () use ($user) {
+            // Lock their workspaces (id order) and re-check, so two Owners deleting at once can't both pass the page's check.
+            $workspaces = Workspace::whereIn('id', $user->workspaces()->pluck('workspaces.id'))->orderBy('id')->lockForUpdate()->get();
+            $this->ensureNotSoleOwner($user);
+            foreach ($workspaces as $workspace) {
+                $role = $workspace->members()->whereKey($user->id)->firstOrFail()->pivot->role;
+                $billed = $this->usage->memberBilled($workspace, $user->email) === true;
+                $this->agents->revokeAllOf($user, $workspace, 'owner_deleted');
+                $this->audit->log('member.removed', $user, ['role' => $role, 'billed' => $billed], $workspace, $user);
+                if ($role === WorkspaceRole::Owner->value) {
+                    $this->audit->log('owner.removed', $user, ['from' => $role, 'to' => null], $workspace, $user);
+                }
+            }
+            $user->delete();
+        });
+    }
+
     /** Spec 7.0b: a workspace Owner or Admin joins any project as its Admin (authorized by ProjectPolicy::join). */
     public function joinProjectAsAdmin(Project $project, User $actor): void
     {
         $this->memberships->add($project, $actor, ProjectRole::Admin);
         $this->audit->log('project.admin_joined', $project, [], $project->workspace()->first(), $actor);
+    }
+
+    /** E7: refuses while $user is the only Owner of a workspace. */
+    public function ensureNotSoleOwner(User $user): void
+    {
+        if ($names = $this->soleOwnerOf($user)) {
+            throw ValidationException::withMessages([
+                'password' => 'You are the last Owner of '.implode(', ', $names).'. Make someone else an Owner or delete those workspaces first.',
+            ]);
+        }
     }
 
     /** E7: names of workspaces $user is the only Owner of; their account can't be deleted while this isn't empty. */

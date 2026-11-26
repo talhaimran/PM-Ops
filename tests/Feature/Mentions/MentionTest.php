@@ -11,6 +11,8 @@ use App\Services\IssueService;
 use App\Services\MentionService;
 use App\Services\WatcherService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\RateLimiter;
 
 // Spec 7.10 (3-R9..R11): @email mentions in comments and descriptions.
@@ -218,4 +220,38 @@ test('two comments by one author in the same second: the mention row belongs to 
     app(CommentService::class)->add($this->issue, $this->ann, 'second, no mention');
 
     expect(InboxItem::where('user_id', $this->sam->id)->orderBy('id')->pluck('event')->all())->toBe(['mention', 'commented']);
+});
+
+test('the mention notification is written after the writer commits, not under its issue lock (final review I2)', function () {
+    DB::transaction(function () {
+        app(CommentService::class)->add($this->issue, $this->ann, 'Hi @sam@example.com');
+        expect(Mention::where('mentioned_user_id', $this->sam->id)->count())->toBe(1)
+            ->and(mentionRows($this->sam))->toHaveCount(0);
+    });
+
+    expect(mentionRows($this->sam))->toHaveCount(1);
+});
+
+test('Undo of a description edit takes back the mentions that edit added (final review M5)', function () {
+    $issue = app(IssueService::class)->create($this->project, $this->ann, ['title' => 'U', 'description' => 'plain']);
+    app(IssueService::class)->update($issue->refresh(), $this->ann, ['description' => 'plain @sam@example.com']);
+    expect(Mention::where('issue_id', $issue->id)->count())->toBe(1);
+    InboxItem::query()->delete();
+
+    app(IssueService::class)->update($issue->refresh(), $this->ann, ['description' => 'plain'], 'undid');
+
+    expect(Mention::where('issue_id', $issue->id)->count())->toBe(0)->and(InboxItem::count())->toBe(0);
+});
+
+test('a mention notification that fails after commit is reported; the comment saves and the other mentions still notify (PR 50 review)', function () {
+    Exceptions::fake();
+    InboxItem::creating(fn (InboxItem $item) => $item->user_id === $this->sam->id ? throw new RuntimeException('inbox write failed') : null);
+    $this->actingAs($this->ann);
+
+    $this->post(w('/issues/WEB-1/comments'), ['body' => 'Look @sam@example.com and @alex@example.com'])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($this->issue->comments()->count())->toBe(1)
+        ->and(mentionRows($this->alex))->toHaveCount(1)
+        ->and(mentionRows($this->sam))->toHaveCount(0);
+    Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'inbox write failed');
 });

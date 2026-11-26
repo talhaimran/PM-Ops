@@ -6,9 +6,9 @@ import { useLiveReload } from '@/useLiveReload';
 /** `row` and `rest` are the sidebar's row classes and its inactive colours, so this link switches between them like the others. */
 export default function NotificationBell({ row, rest }: { row: string; rest: string }) {
     const { unread_notifications: unread, auth } = usePage().props;
-    // 3-R15: the count follows new notifications and reads in other tabs.
-    useLiveReload(`user.${auth.user.id}`, ['unread_notifications']);
     const current = route().current('notifications.index');
+    // 3-R15: the count follows new notifications and reads in other tabs; on the Inbox page its list does too (one subscription per channel, so it lives here).
+    useLiveReload(`user.${auth.user.id}`, current ? ['unread_notifications', 'items'] : ['unread_notifications']);
 
     return (
         <Link

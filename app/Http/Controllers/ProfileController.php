@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
-use App\Services\AgentService;
 use App\Services\MembershipService;
 use App\Services\SocialSignInService;
 use App\Services\TwoFactorService;
@@ -76,7 +75,7 @@ class ProfileController extends Controller
     /**
      * Delete the user's account.
      */
-    public function destroy(Request $request, MembershipService $memberships, WorkspaceMemberService $workspaceMembers, AgentService $agents): RedirectResponse
+    public function destroy(Request $request, MembershipService $memberships, WorkspaceMemberService $workspaceMembers): RedirectResponse
     {
         $request->validate([
             'password' => ['required', 'current_password'],
@@ -84,12 +83,8 @@ class ProfileController extends Controller
 
         $user = $request->user();
 
-        // E7: a workspace always keeps an Owner.
-        if ($names = $workspaceMembers->soleOwnerOf($user)) {
-            throw ValidationException::withMessages([
-                'password' => 'You are the last Owner of '.implode(', ', $names).'. Make someone else an Owner or delete those workspaces first.',
-            ]);
-        }
+        // E7: a workspace always keeps an Owner (checked again under the lock in deleteAccount).
+        $workspaceMembers->ensureNotSoleOwner($user);
 
         if ($keys = $memberships->soleAdminProjectKeys($user)) {
             throw ValidationException::withMessages([
@@ -97,12 +92,12 @@ class ProfileController extends Controller
             ]);
         }
 
-        // The agent rows go with the user; revoke them first so each one leaves an agent.revoked audit row.
-        $user->workspaces()->get()->each(fn ($workspace) => $agents->revokeAllOf($user, $workspace, 'owner_deleted'));
+        // Revokes their agents and logs the removal from each workspace, then deletes, in one transaction. It can still refuse
+        // (the last-Owner check under the lock), so the person is signed out only after it succeeds.
+        $workspaceMembers->deleteAccount($user);
 
-        Auth::logout();
-
-        $user->delete();
+        // Not logout(): that would save the deleted user's remember token back (re-inserting the row) and audit a logout for them.
+        Auth::logoutCurrentDevice();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

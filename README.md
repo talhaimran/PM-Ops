@@ -160,7 +160,7 @@ For production, run `npm run build` and serve `public/` with any PHP host over H
 - Set `SESSION_SECURE_COOKIE=true`.
 - For live updates, run Reverb and a queue worker as their own processes (see Live updates above).
 - Configure real SMTP so verification and invitation emails arrive.
-- Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge` and `workspaces:purge` daily.
+- Run the scheduler (`php artisan schedule:work`, or cron with `schedule:run`). It runs `issues:purge`, `workspaces:purge`, `approvals:expire`, `links:reconcile-duplicates`, `notifications:agent-summary`, `system-events:activity`, `system-events:pending` and `support-sessions:end` (see `routes/console.php`).
 - On `cloud`, registration is open to anyone. On `self_hosted`, only the first person and invited people can register.
 - Leave `PM_INTERNAL_API_TOKEN` and `PM_INTERNAL_API_TOKEN_NEXT` empty unless Platform management calls this install; when set, use long random values (`openssl rand -hex 32`), serve `/internal/v1` over HTTPS only, and never log or commit them.
 
@@ -201,6 +201,23 @@ npm run build             # TypeScript check + production build
 - **Start dates and shifting:** issues have an optional start date (not after the due date). When a due date moves later, issues it `precedes` that would now start too early can move by the same gap, keeping their duration. Only issues you can edit move, resolved ones never do, and each moved issue gets its own history entry. **Profile → When a due date moves later** sets ask every time (the default: the date is saved and you choose in a dialog), always, or never. Shifting more than `PM_SHIFT_LIMIT` issues is refused. Undoing a due date doesn't undo the shifts.
 - **Cloning:** **More actions → Clone** (REST `POST /api/v1/issues/{key}/clone`, MCP `clone_issue`) copies title, description, type, labels and story points into a new unassigned To Do issue with no sprint, epic or dates, linked "clones" the original. Optionally copy its sub-tasks and its blocks, precedes and relates to links (only to issues you can see). Comments and history aren't copied, and each option stops at `PM_CLONE_LIMIT`.
 - **Focus:** the dashboard's My issues groups your open issues by what needs you: Waiting on you (approvals), Blocking others, Urgent or overdue, Due in the next 3 days, In progress, To do. Switch to grouping by status, priority, project or sprint from the same menu; the choice is remembered. Grouping applies to the issues loaded, so very long lists can be cut off.
+
+## Watching, inbox, mentions and reactions
+
+- **Watching:** the **Watch** button on an issue shows the watcher count. You watch what you create, are assigned or comment on (turn this off under *Profile*); project Admins can add or remove other members. The issue list has a *Watching* filter, and the dashboard lists what you watch. REST `POST`/`DELETE /api/v1/issues/{key}/watchers`, MCP `watch_issue` / `unwatch_issue`; an agent watching counts as its owner watching.
+- **Inbox:** **Inbox** in the sidebar (with an unread badge) lists changes to issues you watch: comments, status and assignee changes, resolve and reopen. You are never notified of your own changes, quick changes by one person join one item (`PM_NOTIFICATION_BATCH_MINUTES`, default 5), and an agent's changes reach its owner as one daily summary (`notifications:agent-summary`, 00:10 server time). Approval requests from your agents arrive at once. Opening an item marks it read. Agents read the same stream with `get_updates` (`GET /api/v1/me/updates`).
+- **Mentions:** write `@` and a member's email in a comment or description (`@sam@example.com`; the editor suggests members). They are told at once and start watching. A non-member is saved as plain text and the author is warned (Admins get an invite prompt); agents can't be mentioned, and an agent may send `PM_AGENT_MENTION_LIMIT` mentions an hour. Mentions inside code or links count for nothing. An assigned issue where you were mentioned and haven't answered shows under *Waiting on you*. Issue keys in text (`WEB-12`) link, with a hover card, only for readers who can see that issue.
+- **Reactions:** react to a comment with one of 👍 ✅ 👀 🎉 ❤️ 😄 (REST `POST`/`DELETE /api/v1/comments/{id}/reactions`, MCP `add_reaction` / `remove_reaction`). They don't notify anyone.
+
+## Internal admin API, suspension and system events
+
+For Platform management on Cloud; self-hosted installs leave all of it off.
+
+- **Internal admin API** (`/internal/v1`, bearer `PM_INTERNAL_API_TOKEN` or `_NEXT`): list and show workspaces, usage, plan entitlements and overrides, suspend/unsuspend, archive/restore and support sessions. Writes need an `Idempotency-Key`. Schemas are in `docs/contract/admin-api/`.
+- **Suspended and archived workspaces** are read-only on web, REST and MCP (403 `workspace_suspended` / `workspace_archived`); scheduled upkeep keeps running. An Owner can restore an archived workspace.
+- **Support sessions:** staff open a read-only, time-boxed (1-60 minutes) session through a single-use link; they never write, and a banner shows while one is open. `support-sessions:end` runs every minute.
+- **System events:** members, projects and workspace changes are recorded in an outbox and POSTed, signed, to `PM_SYSTEM_EVENTS_URL` (see the env table; schemas in `docs/contract/events/`). `system-events:activity` runs daily at 00:20 and `system-events:pending` every 10 minutes to queue events that were never attempted (a failed delivery retries on its own, with backoff, for 24 hours). Delivery runs on the queue, so system events need a running queue worker.
+- **Billing link:** with `PM_BILLING_URL` and `PM_BILLING_LINK_SECRET` set, Owners get a **Billing** link that redirects with a signed 5-minute token (`docs/contract/billing-token.json`). Banners tell Owners about a trial ending, a past-due or canceling plan, and everyone about going over a limit.
 
 ## Agents
 
@@ -353,7 +370,7 @@ All business logic lives in `app/Services`. Web controllers (`app/Http/Controlle
 
 ## Known gaps
 
-Out of scope by design: a workflows engine, custom fields, plugins, time tracking, SSO, email notifications and real-time collaboration (other people's changes appear when you reload).
+Out of scope by design: a workflows engine, custom fields, plugins, time tracking, SSO, email notifications and presence (live updates refresh pages; there are no shared cursors or typing indicators).
 
 Also not done:
 - The board and backlog load at most 500 and 1000 issues, with a notice when they're cut off.

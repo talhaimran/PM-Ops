@@ -7,8 +7,12 @@ use App\Enums\SprintState;
 use App\Enums\WorkspaceRole;
 use App\Models\Agent;
 use App\Models\ApprovalRequest;
+use App\Models\CommentReaction;
+use App\Models\InboxItem;
 use App\Models\Issue;
 use App\Models\IssueLink;
+use App\Models\IssueWatcher;
+use App\Models\Mention;
 use App\Models\Project;
 use App\Models\Status;
 use App\Models\User;
@@ -93,4 +97,18 @@ test('seeding twice skips instead of failing', function () {
     $this->artisan('db:seed')->expectsOutputToContain('already seeded')->assertSuccessful();
 
     expect(User::where('email', 'demo@example.com')->count())->toBe(1);
+});
+
+test('demo seed has watchers, a mention of demo, a reaction and an unread inbox', function () {
+    $this->artisan('db:seed')->assertSuccessful();
+    $demo = User::where('email', 'demo@example.com')->sole();
+    $sam = User::where('email', 'sam@example.com')->sole();
+    $web10 = Issue::where('number', 10)->sole();
+
+    expect(IssueWatcher::where('user_id', $demo->id)->count())->toBeGreaterThan(2)
+        ->and(IssueWatcher::where('user_id', $sam->id)->exists())->toBeTrue()
+        ->and(Mention::where('mentioned_user_id', $demo->id)->where('by_user_id', User::firstWhere('email', 'alex@example.com')->id)->exists())->toBeTrue()
+        ->and(CommentReaction::count())->toBeGreaterThan(0)
+        ->and(InboxItem::where('user_id', $demo->id)->whereNull('read_at')->count())->toBeGreaterThan(1)
+        ->and(InboxItem::where('user_id', $demo->id)->where('issue_id', $web10->id)->exists())->toBeTrue();
 });

@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\ProjectRole;
+use App\Enums\Reaction;
 use App\Enums\WorkspaceRole;
 use App\Models\User;
 use App\Services\AgentService;
@@ -13,8 +14,10 @@ use App\Services\IssueService;
 use App\Services\LabelService;
 use App\Services\LinkService;
 use App\Services\ProjectService;
+use App\Services\ReactionService;
 use App\Services\SprintService;
 use App\Services\StatusService;
+use App\Services\WatcherService;
 use App\Services\WorkspaceService;
 use Illuminate\Database\Seeder;
 
@@ -141,9 +144,18 @@ class DemoSeeder extends Seeder
 
         $comment = fn (string $key, User $who, string $body) => $comments->add($issues->resolve($demo, $key), $who, $body);
         $comment('WEB-10', $alex, 'Reproduced on staging. Looks like we round each discount instead of the total.');
-        $comment('WEB-10', $demo, 'Agreed. Moving the math to integer cents; sub-tasks added.');
+        $agreed = $comment('WEB-10', $demo, 'Agreed. Moving the math to integer cents; sub-tasks added.');
         $comment('WEB-7', $demo, "Design review notes:\n\n1. Keep the summary sticky on desktop\n2. Show delivery estimate before payment");
         $comment('WEB-5', $alex, 'Looks great. One nit: the loading spinner shifts the label by 2px.');
+
+        // Collaboration (spec 7.10, 7.11): alex mentions demo, sam watches a couple of issues, demo gets a reaction; demo's inbox fills from the above.
+        $mention = $comment('WEB-9', $alex, '@demo@example.com can you confirm the Apple Pay sandbox keys are in 1Password?');
+        $watchers = app(WatcherService::class);
+        foreach (['WEB-7', 'WEB-10'] as $key) {
+            $watchers->watch($issues->resolve($demo, $key), $sam, $sam);
+        }
+        app(ReactionService::class)->add($mention, Reaction::Eyes, $demo);
+        app(ReactionService::class)->add($agreed, Reaction::ThumbsUp, $alex);
 
         // A custom status colour (spec 7.4) so the pills show something other than the category colours.
         $statuses = app(StatusService::class);

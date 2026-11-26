@@ -13,12 +13,13 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 #[Signature('system-events:activity {day? : YYYY-MM-DD, default yesterday}')]
-#[Description('Send workspace.activity for each workspace with an issue change or audit row that day (once per workspace and day)')]
+#[Description('Send workspace.activity for each workspace with an issue change or an audit row by a person or agent that day (once per workspace and day)')]
 class SendWorkspaceActivity extends Command
 {
     public function handle(SystemEventService $events): int
     {
         $day = ($this->argument('day') ? Carbon::parse($this->argument('day')) : now()->subDay())->startOfDay();
+        // An audit row counts only when a person or agent made it: staff and system rows (Platform's own archive, support sessions) and failed sign-ins aren't customer activity.
         // One run per day at a time, so two runs can't both pass the "already sent" check below.
         $lock = Cache::lock('pm:system-events:activity:'.$day->toDateString(), 600);
         if (! $lock->get()) {
@@ -41,7 +42,7 @@ class SendWorkspaceActivity extends Command
         // shortcut: one query per source, then one event each; chunk it when thousands of workspaces are active in a day.
         $active = DB::table('activities')->join('issues', 'issues.id', '=', 'activities.issue_id')->join('projects', 'projects.id', '=', 'issues.project_id')
             ->whereBetween('activities.created_at', $range)->select('projects.workspace_id')
-            ->union(DB::table('audit_logs')->whereNotNull('workspace_id')->whereBetween('created_at', $range)->select('workspace_id'))
+            ->union(DB::table('audit_logs')->whereNotNull('workspace_id')->where('actor_type', 'user')->where('action', '!=', 'auth.login_failed')->whereBetween('created_at', $range)->select('workspace_id'))
             ->pluck('workspace_id');
         $done = SystemEvent::where('type', 'workspace.activity')->where('payload->day', $day->toDateString())->pluck('workspace_id');
 

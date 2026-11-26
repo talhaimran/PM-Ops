@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * One line in a person's inbox (spec 7.10). The table is `notifications`, but the model isn't named Notification: User uses Laravel's
  * Notifiable trait, whose `notifications()` points at the same table. Never call $user->notifications().
+ * shortcut: items are kept forever (3-R25); add a 90-day purge when the table grows.
  * `changes` is a list of {action, from, to}; `count` is how many changes were batched into the row (3-R6).
  */
 #[Fillable(['workspace_id', 'user_id', 'issue_id', 'event', 'actor_user_id', 'agent_id', 'via', 'changes', 'count', 'read_at'])]

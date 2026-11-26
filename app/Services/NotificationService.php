@@ -62,7 +62,7 @@ class NotificationService
                 'workspace_id' => $workspaceId, 'user_id' => $to->id, 'issue_id' => $issue->id, 'event' => $event,
                 'actor_user_id' => $actor?->id, 'agent_id' => $agent?->id, 'via' => $via, 'changes' => [$change],
             ]);
-        });
+        }, 3); // Two first changes for one recipient can deadlock on the empty-range lock above; InnoDB kills one, so retry it.
     }
 
     /** $user's items in $workspace they can still see, newest first. Needs $workspace to be the current one. */

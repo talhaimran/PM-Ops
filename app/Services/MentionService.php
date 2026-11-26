@@ -21,11 +21,11 @@ class MentionService
     /**
      * $new's mentions that $old (null on a first save) didn't have. Members are told at once (never batched), auto-watch the issue
      * and get a row (Waiting on you, 3-R10). An agent's mentions are capped per hour (3-R11): over it, nothing is stored or sent.
-     * A warning names only the email the writer typed. Call inside the writer's transaction.
+     * With $notify false (an Undo) only the dropped half runs. A warning names only the email the writer typed. Call inside the writer's transaction; the notices go out after it commits.
      *
      * @return list<array{code: string, message: string, email?: string}>
      */
-    public function sync(Issue $issue, ?Comment $comment, ?string $old, string $new, User $actor): array
+    public function sync(Issue $issue, ?Comment $comment, ?string $old, string $new, User $actor, bool $notify = true): array
     {
         $before = $old === null ? [] : $this->text->mentions($old);
         $now = $this->text->mentions($new);
@@ -34,7 +34,7 @@ class MentionService
             Mention::where(['issue_id' => $issue->id, 'comment_id' => $comment?->id])->whereIn('mentioned_user_id', User::whereIn('email', $dropped)->select('id'))->delete();
         }
         $added = array_values(array_diff($now, $before));
-        if (! $added) {
+        if (! $added || ! $notify) {
             return [];
         }
         $project = $issue->project;
@@ -70,7 +70,15 @@ class MentionService
             }
             $budget--;
             Mention::create(['issue_id' => $issue->id, 'comment_id' => $comment?->id, 'mentioned_user_id' => $user->id, 'by_user_id' => $actor->id, 'agent_id' => $agent?->id, 'via' => $via]);
-            $this->notifications->notify($user, $issue, 'mention', ['action' => 'mention', 'from' => null, 'to' => null], $actor, $agent, $via, batch: false);
+            // After commit: the inbox row's workspace FK share-locks the workspace row, which must not happen under the issue lock.
+            // The text is already saved by then, so a failure is reported, not thrown: the request succeeds and the other mentions still go out.
+            DB::afterCommit(function () use ($user, $issue, $actor, $agent, $via) {
+                try {
+                    $this->notifications->notify($user, $issue, 'mention', ['action' => 'mention', 'from' => null, 'to' => null], $actor, $agent, $via, batch: false);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            });
             $this->watchers->autoWatch($issue, $user);
         }
         if ($limited) {

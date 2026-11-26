@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\WatcherService;
 use Illuminate\Support\Arr;
+use Throwable;
 
 /**
  * 3-R5: an issue change tells the issue's watchers (never the person who made it; an agent's change is its owner's, who gets
@@ -20,7 +21,17 @@ class NotifyOnActivity
 {
     public function __construct(private NotificationService $notifications, private WatcherService $watchers) {}
 
+    /** Runs in the request after the change committed: a failure here is reported, never turned into a 500 the client would retry. */
     public function handle(ActivityRecorded $event): void
+    {
+        try {
+            $this->notify($event);
+        } catch (Throwable $e) {
+            report($e);
+        }
+    }
+
+    private function notify(ActivityRecorded $event): void
     {
         $activity = $event->activity;
         // approval_request is the link to a request a person decided, not a field.

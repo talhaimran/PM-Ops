@@ -4,6 +4,8 @@ use App\Enums\ProjectRole;
 use App\Models\User;
 use App\Services\CommentService;
 use App\Services\IssueService;
+use App\Services\RenderedText;
+use Illuminate\Support\Facades\URL;
 
 // Review Focus 3: mentions and issue keys in rendered text. No mention from code, no nested links, no injected HTML.
 
@@ -64,4 +66,38 @@ test('a key to a deleted issue stays plain text', function () {
     app(IssueService::class)->delete($gone, $this->ann);
 
     expect(($this->html)("see {$gone->key}"))->not->toContain('data-key');
+});
+
+test('one lookup per render for members and keys, across the description and every comment (3-R12, final review M4)', function () {
+    app(IssueService::class)->update($this->first, $this->ann, ['description' => 'See WEB-1 and @sam@example.com']);
+    foreach (range(1, 6) as $i) {
+        app(CommentService::class)->add($this->first, $this->ann, "Comment {$i}: @sam@example.com wrote about WEB-1");
+    }
+    $queries = [];
+    DB::listen(function ($q) use (&$queries) {
+        $queries[] = $q->sql;
+    });
+
+    $props = $this->actingAs($this->ann)->get(w('/issues/WEB-1'))->assertOk()->viewData('page')['props'];
+
+    $count = fn (string $needle) => count(array_filter($queries, fn ($sql) => str_contains($sql, $needle)));
+    expect($count('`statuses`.`name` as `status`'))->toBe(1)
+        ->and($count('`users`.`name`, `users`.`email`'))->toBe(1)
+        ->and($props['issue']['description_html'])->toContain('<span class="mention">@Sam Smith</span>')->toContain('data-key="WEB-1"')
+        ->and(collect($props['issue']['comments'])->pluck('body_html')->every(fn ($h) => str_contains($h, '@Sam Smith') && str_contains($h, 'data-key="WEB-1"')))->toBeTrue();
+});
+
+test('the 50-key cap applies to each text, not to the whole page (PR 50 review)', function () {
+    foreach (range(2, 60) as $n) {
+        makeIssue($this->project, $this->ann, ['title' => "Issue {$n}"]);
+    }
+    $keys = fn (int $from, int $to) => collect(range($from, $to))->map(fn ($n) => "WEB-{$n}")->implode(' ');
+    URL::defaults(['workspace' => $this->project->workspace->slug]);
+    $render = fn (array $texts) => app(RenderedText::class)->htmlMany($texts, $this->ann, $this->project);
+
+    [$description, $comment] = $render([$keys(1, 30), $keys(31, 60)]);
+    expect(substr_count($description, '<a '))->toBe(30)->and(substr_count($comment, '<a '))->toBe(30);
+
+    [$long] = $render([$keys(1, 51)]);
+    expect(substr_count($long, '<a '))->toBe(50);
 });
