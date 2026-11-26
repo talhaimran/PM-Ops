@@ -222,6 +222,8 @@ test('a support session shows nothing of the user\'s other workspaces', function
     $auth = fn ($ws, $project) => $this->postJson('/broadcasting/auth', ['socket_id' => '1234.5678', 'channel_name' => "private-workspace.{$ws->id}.project.{$project->id}"]);
     $auth($other, $otherProject)->assertForbidden();
     $auth($this->ws, $this->project)->assertOk();
+    // Owner review of PR 5: the user's own channel tells when anything reaches them, from any workspace.
+    $this->postJson('/broadcasting/auth', ['socket_id' => '1234.5678', 'channel_name' => "private-user.{$this->target->id}"])->assertForbidden();
 });
 
 // Scan of PR 5, F4: the replay cache keeps no readable copy of the one-time URL.

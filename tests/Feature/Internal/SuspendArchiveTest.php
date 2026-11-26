@@ -15,6 +15,8 @@ use App\Models\Issue;
 use App\Models\User;
 use App\Models\WorkspaceInvitation;
 use App\Services\InvitationService;
+use App\Services\IssueService;
+use App\Services\WorkspaceService;
 use Illuminate\Support\Facades\Mail;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -258,3 +260,15 @@ test('accepting from the pending list is refused in a suspended or archived work
     'suspended' => ['suspended_at', SUSPENDED],
     'archived' => ['archived_at', 'This workspace was archived after 12 months without activity. An Owner can restore it in the web app.'],
 ]);
+
+// Owner ruling on the PR 5 review: suspension stops people, agents and staff, not upkeep. Every scheduled job still runs
+// (routes/console.php lists why); pinned here with the one that deletes data.
+test('scheduled upkeep still runs in a suspended workspace: issues:purge removes 30-day-old trash', function () {
+    $old = makeIssue($this->project, $this->owner, ['title' => 'Old']);
+    $this->travelTo(now()->subDays(31), fn () => app(IssueService::class)->delete($old, $this->owner));
+    app(WorkspaceService::class)->changeState($this->ws, 'workspace.suspended', null, ['name' => 'Sue', 'email' => 'sue@pmops.test'], 'Chargeback');
+
+    $this->artisan('issues:purge')->assertSuccessful();
+
+    expect(Issue::withTrashed()->pluck('title')->all())->toEqual(['First']);
+});

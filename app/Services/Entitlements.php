@@ -161,7 +161,7 @@ class Entitlements
             foreach ($plan as $name => $value) {
                 $row = $rows[$name] ?? null;
                 if ($row?->source === 'override') {
-                    $row->update(['plan_value' => $value]);
+                    $this->setPlanUnderOverride($workspace, $row, $value, $staff);
                 } else {
                     $workspace->entitlements()->updateOrCreate(['key' => $name], ['value' => $value, 'plan_value' => $value, 'source' => 'plan']);
                     $this->logChange($workspace, Entitlement::from($name), $row, $value, 'plan', $staff);
@@ -175,10 +175,26 @@ class Entitlements
                     $row->delete();
                     $this->logChange($workspace, Entitlement::from($name), $row, null, null, $staff);
                 } elseif ($row->plan_value !== null) {
-                    $row->update(['plan_value' => null]);
+                    $this->setPlanUnderOverride($workspace, $row, null, $staff);
                 }
             }
         });
+    }
+
+    /**
+     * The override keeps its value; the plan under it changes. Logged too (owner review of PR 5), so removing the override
+     * later is explained by the audit log.
+     */
+    private function setPlanUnderOverride(Workspace $workspace, WorkspaceEntitlement $row, string|int|bool|null $value, ?array $staff): void
+    {
+        $before = $row->plan_value;
+        $row->update(['plan_value' => $value]);
+        $after = $row->fresh()->plan_value;
+        if ($before !== $after) {
+            $this->audit->staff('entitlement.changed', null, $workspace, $staff, [
+                'key' => $row->key, 'before' => $row->value, 'after' => $row->value, 'source' => 'override', 'plan_before' => $before, 'plan_after' => $after,
+            ]);
+        }
     }
 
     /** One entitlement.changed row per real change (value or source), as staff when given, else system. */

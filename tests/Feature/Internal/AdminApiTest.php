@@ -178,13 +178,20 @@ test('an override over a default keeps it as the plan value: removing the overri
         ->assertJsonPath('data.entitlements.projects.value', 1);
 });
 
-test('only effective changes are logged: a new plan value under an override writes no audit row', function () {
+// Owner review of PR 5: a plan change under an override is audited too, so removing the override later is explained.
+test('a new plan value under an override writes one audit row with the plan before and after; repeating it writes none', function () {
     internalApi('PUT', "workspaces/{$this->ws->id}/entitlements/projects", ['value' => 10, 'reason' => 'x'])->assertOk();
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 3]])->assertOk();
     $rows = AuditLog::where('action', 'entitlement.changed')->count();
 
-    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 3]])->assertOk();
     internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 4]])->assertOk();
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => ['projects' => 4]])->assertOk();
+    internalApi('PUT', "workspaces/{$this->ws->id}/entitlements", ['entitlements' => []])->assertOk();
 
-    expect(entitlementRow($this->ws, 'projects'))->toBe(['value' => '10', 'source' => 'override', 'plan_value' => '4'])
-        ->and(AuditLog::where('action', 'entitlement.changed')->count())->toBe($rows);
+    expect(entitlementRow($this->ws, 'projects'))->toBe(['value' => '10', 'source' => 'override', 'plan_value' => null]);
+    $logged = AuditLog::where('action', 'entitlement.changed')->orderBy('id')->get()->slice($rows)->values();
+    expect($logged)->toHaveCount(2)
+        ->and($logged[0]->metadata)->toMatchArray(['key' => 'projects', 'before' => '10', 'after' => '10', 'source' => 'override', 'plan_before' => '3', 'plan_after' => '4'])
+        ->and($logged[1]->metadata)->toMatchArray(['key' => 'projects', 'plan_before' => '4', 'plan_after' => null])
+        ->and($logged[0]->actor_type)->toBe('system');
 });

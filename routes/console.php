@@ -8,6 +8,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// 3-R16, owner ruling on the PR 5 review: every job below also runs in suspended workspaces. Suspension stops people,
+// agents and staff from changing things; this is upkeep they already chose or the system owes (trash retention, the
+// Owner's scheduled deletion, approval expiry, link repair, support-session end, yesterday's agent summary).
+
 // Soft-deleted issues and comments are removed for good after 30 days (spec 5.1, leaning).
 Schedule::command('issues:purge')->daily();
 
