@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "project.created, project.deleted",
+  "type": "object",
+  "required": ["id", "type", "occurred_at", "workspace_id", "usage", "project"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "type": {"enum": ["project.created", "project.deleted"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "workspace_id": {"type": "integer"},
+    "usage": {"$ref": "usage.json"},
+    "project": {"type": "object", "required": ["id", "key", "name"], "properties": {"id": {"type": "integer"}, "key": {"type": "string"}, "name": {"type": ["string", "null"]}}}
+  },
+  "examples": [
+    {"id": "9b2f6c1e-2f0a-4d57-9d1c-0a4b2f6c1e33", "type": "project.created", "occurred_at": "2026-12-05T10:00:00+00:00", "workspace_id": 1,
+     "usage": {"billed_users": 1, "viewers": 0, "pending_billed_invitations": 0, "projects": 1, "storage_mb": 0},
+     "project": {"id": 1, "key": "WEB", "name": "Website"}}
+  ]
+}

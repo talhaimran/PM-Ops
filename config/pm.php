@@ -8,7 +8,13 @@ return [
     'api_rate_limit' => (int) env('PM_API_RATE_LIMIT', 120),
 
     // Where Owners upgrade when a plan limit is reached (spec 7.0c). Empty: the plan-limit dialog shows no upgrade button.
-    'billing_url' => env('PM_BILLING_URL'),
+    'billing_url' => env('PM_BILLING_URL') ?: null,
+    // 3-R23: signs the Billing link's token. The Billing link needs both this and billing_url.
+    'billing_link_secret' => env('PM_BILLING_LINK_SECRET') ?: null,
+
+    // 3-R22: system events (spec 9) go to this URL, signed with the secret. Both must be set, else nothing is recorded.
+    'system_events_url' => env('PM_SYSTEM_EVENTS_URL') ?: null,
+    'system_events_secret' => env('PM_SYSTEM_EVENTS_SECRET') ?: null,
 
     // Invitation emails per hour per user (web and API), so the server can't be used to spam.
     'invite_rate_limit' => (int) env('PM_INVITE_RATE_LIMIT', 30),

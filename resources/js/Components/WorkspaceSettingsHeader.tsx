@@ -13,7 +13,8 @@ const tabs = [
 
 /** Title and tabs shared by the workspace settings pages (spec 7.0b). */
 export default function WorkspaceSettingsHeader() {
-    const role = usePage().props.workspace?.role;
+    const { workspace, billing } = usePage().props;
+    const role = workspace?.role;
     const admin = role === 'owner' || role === 'admin';
     return (
         <div>
@@ -32,6 +33,11 @@ export default function WorkspaceSettingsHeader() {
                         </Link>
                     );
                 })}
+                {billing?.link && (
+                    <a href={billing.link} className="-mb-px flex h-control-h shrink-0 items-center whitespace-nowrap border-b-2 border-transparent px-3 text-md text-muted hover:text-text">
+                        Billing
+                    </a>
+                )}
             </nav>
         </div>
     );

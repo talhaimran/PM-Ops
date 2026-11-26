@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
 /** Workspace invitations (spec 7.0a): 14 days, emailed token stored hashed, one per workspace and email. */
 class InvitationService
 {
-    public function __construct(private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage) {}
+    public function __construct(private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private MembershipService $memberships) {}
 
     public const DAYS = 14;
 
@@ -156,11 +156,15 @@ class InvitationService
             $this->checkRoom($locked);
 
             $role = $user->workspaceRole($locked->workspace);
-            if (! $role) {
+            $joined = ! $role;
+            if ($joined) {
                 $locked->workspace->addMember($user, $role = $locked->role);
             }
-            $locked->project?->members()->syncWithoutDetaching([$user->id => ['role' => $locked->project_role->value]]);
-            $this->audit->log('member.joined', $user, array_filter(['role' => $role->value, 'project' => $locked->project?->key]), $locked->workspace, $user);
+            // A new member's billed status is member.added's; only someone already in can flip (3-R21).
+            $joined || ! $locked->project
+                ? $locked->project?->members()->syncWithoutDetaching([$user->id => ['role' => $locked->project_role->value]])
+                : $this->memberships->add($locked->project, $user, $locked->project_role);
+            $this->audit->log('member.joined', $user, array_filter(['role' => $role->value, 'project' => $locked->project?->key, 'already_member' => ! $joined]), $locked->workspace, $user);
             $user->forceFill(['current_workspace_id' => $locked->workspace_id])->save();
             $locked->delete();
 

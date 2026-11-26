@@ -29,6 +29,7 @@ class WorkspaceMemberService
             $now = $this->usage->isBilled($workspace, $member->email);
             $this->entitlements->ensurePerson($workspace, $now, $now === true || $role !== WorkspaceRole::Member);
             $current = $this->lockAndCheck($workspace, $actor, $member, $role === WorkspaceRole::Owner, 'role');
+            $billedBefore = $this->usage->memberBilled($workspace, $member->email) === true;
             if ($current === WorkspaceRole::Owner && $role !== WorkspaceRole::Owner) {
                 $this->ensureAnotherOwner($workspace, $member, 'role');
             }
@@ -40,7 +41,11 @@ class WorkspaceMemberService
                     $current => 'owner.removed',
                     default => 'member.role_changed',
                 };
-                $this->audit->log($action, $member, ['from' => $current->value, 'to' => $role->value], $workspace, $actor);
+                // billed_before/after: member.role_changed's system event says whether the change flipped billing (3-R21).
+                $this->audit->log($action, $member, [
+                    'from' => $current->value, 'to' => $role->value,
+                    ...($action === 'member.role_changed' ? ['billed_before' => $billedBefore, 'billed_after' => $this->usage->memberBilled($workspace, $member->email) === true] : []),
+                ], $workspace, $actor);
             }
         });
     }
@@ -82,21 +87,22 @@ class WorkspaceMemberService
                         "new_admins.{$key}" => "Pick a member of {$workspace->name} other than {$member->email} as the new admin of {$key}.",
                     ]);
                 }
-                $workspace->projects()->firstWhere('key', $key)->members()->syncWithoutDetaching([$admin->id => ['role' => ProjectRole::Admin->value]]);
+                $this->memberships->add($workspace->projects()->firstWhere('key', $key), $admin, ProjectRole::Admin);
             }
 
+            $billed = $this->usage->memberBilled($workspace, $member->email) === true;
             $member->projects()->detach($workspace->projects()->pluck('id'));
             $this->agents->revokeAllOf($member, $workspace);
             $member->tokens()->where('workspace_id', $workspace->id)->delete();
             $workspace->members()->detach($member->id);
-            $this->audit->log('member.removed', $member, array_filter(['role' => $role->value, 'new_admins' => $newAdmins ? array_intersect_key($newAdmins, array_flip($keys)) : null]), $workspace, $actor);
+            $this->audit->log('member.removed', $member, [...array_filter(['role' => $role->value, 'new_admins' => $newAdmins ? array_intersect_key($newAdmins, array_flip($keys)) : null]), 'billed' => $billed], $workspace, $actor);
         });
     }
 
     /** Spec 7.0b: a workspace Owner or Admin joins any project as its Admin (authorized by ProjectPolicy::join). */
     public function joinProjectAsAdmin(Project $project, User $actor): void
     {
-        $project->members()->syncWithoutDetaching([$actor->id => ['role' => ProjectRole::Admin->value]]);
+        $this->memberships->add($project, $actor, ProjectRole::Admin);
         $this->audit->log('project.admin_joined', $project, [], $project->workspace()->first(), $actor);
     }
 

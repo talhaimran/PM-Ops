@@ -108,6 +108,15 @@ test('the session is only for its workspace', function () {
     $this->get('/acme/dashboard')->assertOk();
 });
 
+test('the Billing redirect is refused during a support session, even for an Owner target', function () {
+    config(['pm.billing_url' => 'https://billing.example.test', 'pm.billing_link_secret' => 'billing-secret']);
+    openSupportUrl($this, startSupport($this, ['target_user_id' => $this->owner->id])->json('data.url'));
+
+    $this->get('/acme/settings/billing')->assertNotFound();
+    // No link is offered either (the header and banners would point at that 404).
+    $this->get('/acme/settings/usage')->assertInertia(fn (Assert $page) => $page->where('billing.link', null));
+});
+
 test('the session ends at ends_at: signed out, staff.support_session_ended logged once', function () {
     openSupportUrl($this, startSupport($this, ['minutes' => 10])->json('data.url'));
     $this->get('/acme/dashboard')->assertOk();

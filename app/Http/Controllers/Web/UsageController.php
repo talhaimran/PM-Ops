@@ -22,6 +22,8 @@ class UsageController extends Controller
         $labels = [Entitlement::BilledUsers->value => 'Billed users', Entitlement::Viewers->value => 'Viewers', Entitlement::Projects->value => 'Projects'];
 
         return Inertia::render('Workspaces/Settings/Usage', [
+            // 3-R24: informational, set by Platform management.
+            'plan' => ($plan = $entitlements->get($workspace, Entitlement::Plan)) ? ucfirst((string) $plan) : null,
             'workspaceLimits' => $request->user()->can('manageMembers', $workspace)
                 ? array_map(fn ($key) => [
                     'key' => $key, 'label' => $labels[$key],

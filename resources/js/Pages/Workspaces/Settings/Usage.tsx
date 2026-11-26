@@ -7,12 +7,17 @@ type Limit = { key: string; label: string; current: number; allowed: number | nu
 const card = 'rounded-card bg-card p-5 shadow sm:p-6';
 
 /** Spec 7.0c: usage against each limit enforced so far. No limit set means unlimited. */
-export default function Usage({ workspaceLimits, tokenLimits }: { workspaceLimits: Limit[] | null; tokenLimits: { per_minute: number; per_day: number | null } }) {
+export default function Usage({ plan, workspaceLimits, tokenLimits }: { plan: string | null; workspaceLimits: Limit[] | null; tokenLimits: { per_minute: number; per_day: number | null } }) {
     return (
         <AuthenticatedLayout header={<WorkspaceSettingsHeader />}>
             <Head title="Usage and limits" />
 
             <div className="max-w-3xl space-y-6 px-4 pb-10 md:px-8">
+                {plan && (
+                    <p className="text-md text-muted">
+                        Plan: <span className="text-text">{plan}</span>
+                    </p>
+                )}
                 {workspaceLimits && (
                     <section className={card}>
                         <h2 className="text-lg text-text">Workspace</h2>

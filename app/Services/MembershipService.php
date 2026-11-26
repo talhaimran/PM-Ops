@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 
 class MembershipService
 {
-    public function __construct(private Entitlements $entitlements, private WorkspaceUsage $usage) {}
+    public function __construct(private Entitlements $entitlements, private WorkspaceUsage $usage, private AuditLogger $audit) {}
 
     public function changeRole(Project $project, User $member, ProjectRole $role): void
     {
@@ -23,7 +23,14 @@ class MembershipService
             if ($role !== ProjectRole::Admin) {
                 $this->ensureNotLastAdmin($project, $member, 'role');
             }
+            $from = $project->members()->whereKey($member->id)->first()?->pivot->role;
+            $billedBefore = $this->usage->memberBilled($workspace, $member->email) === true;
             $project->members()->updateExistingPivot($member->id, ['role' => $role->value]);
+            // Platform management hears of it only when the change flips billing (3-R21).
+            $this->audit->log('project.member_role_changed', $member, [
+                'project' => $project->key, 'from' => $from, 'to' => $role->value, 'user_id' => $member->id, 'email' => $member->email,
+                'billed_before' => $billedBefore, 'billed_after' => $this->usage->memberBilled($workspace, $member->email) === true,
+            ], $workspace);
         });
     }
 
@@ -31,8 +38,36 @@ class MembershipService
     {
         DB::transaction(function () use ($project, $member) {
             $this->ensureNotLastAdmin($project, $member, 'member');
+            $role = $project->members()->whereKey($member->id)->first()?->pivot->role;
+            $before = $this->billed($project, $member);
             $project->members()->detach($member->id);
+            $this->auditMember('project.member_removed', $project, $member, $role, $before);
         });
+    }
+
+    /** Puts $user in $project (or sets their role), and logs it with billed before/after: it can turn a Viewer into a billed person (3-R21). */
+    public function add(Project $project, User $user, ProjectRole $role): void
+    {
+        $before = $this->billed($project, $user);
+        $project->members()->syncWithoutDetaching([$user->id => ['role' => $role->value]]);
+        $this->auditMember('project.member_added', $project, $user, $role->value, $before);
+    }
+
+    private function billed(Project $project, User $user): bool
+    {
+        return $this->usage->memberBilled($project->workspace()->first(), $user->email) === true;
+    }
+
+    /** Only a billed flip is logged: a no-change add or remove is already in the project's own history. */
+    private function auditMember(string $action, Project $project, User $user, ?string $role, bool $before): void
+    {
+        if ($before === $this->billed($project, $user)) {
+            return;
+        }
+        $this->audit->log($action, $user, [
+            'project' => $project->key, 'user_id' => $user->id, 'email' => $user->email, 'role' => $role,
+            'billed_before' => $before, 'billed_after' => $this->billed($project, $user),
+        ], $project->workspace()->first());
     }
 
     /** Keys of projects where $user is the only admin (they'd be left unmanageable without them), optionally in one workspace. */

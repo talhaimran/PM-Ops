@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "workspace.created, workspace.updated, workspace.deleted, workspace.activity",
+  "type": "object",
+  "required": ["id", "type", "occurred_at", "workspace_id", "usage"],
+  "properties": {
+    "id": {"type": "string", "format": "uuid"},
+    "type": {"enum": ["workspace.created", "workspace.updated", "workspace.deleted", "workspace.activity"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "workspace_id": {"type": "integer"},
+    "usage": {"$ref": "usage.json"},
+    "name": {"type": "string"},
+    "slug": {"type": "string"},
+    "owner": {"$ref": "#/definitions/user"},
+    "changes": {
+      "type": "object",
+      "required": ["before", "after"],
+      "properties": {"before": {"type": "object"}, "after": {"type": "object"}}
+    },
+    "day": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}
+  },
+  "allOf": [
+    {"if": {"properties": {"type": {"const": "workspace.created"}}}, "then": {"required": ["name", "slug", "owner"]}},
+    {"if": {"properties": {"type": {"const": "workspace.updated"}}}, "then": {"required": ["changes"]}},
+    {"if": {"properties": {"type": {"const": "workspace.deleted"}}}, "then": {"required": ["slug"]}},
+    {"if": {"properties": {"type": {"const": "workspace.activity"}}}, "then": {"required": ["day"]}}
+  ],
+  "definitions": {
+    "user": {
+      "type": "object",
+      "required": ["id", "email", "name"],
+      "properties": {"id": {"type": "integer"}, "email": {"type": "string"}, "name": {"type": ["string", "null"]}}
+    }
+  },
+  "examples": [
+    {"id": "9b2f6c1e-2f0a-4d57-9d1c-0a4b2f6c1e2f", "type": "workspace.created", "occurred_at": "2026-12-05T10:00:00+00:00", "workspace_id": 1,
+     "usage": {"billed_users": 1, "viewers": 0, "pending_billed_invitations": 0, "projects": 0, "storage_mb": 0},
+     "name": "Acme", "slug": "acme", "owner": {"id": 1, "email": "owner@example.com", "name": "Olive Owner"}},
+    {"id": "9b2f6c1e-2f0a-4d57-9d1c-0a4b2f6c1e30", "type": "workspace.activity", "occurred_at": "2026-12-05T00:20:00+00:00", "workspace_id": 1,
+     "usage": {"billed_users": 1, "viewers": 0, "pending_billed_invitations": 0, "projects": 1, "storage_mb": 0}, "day": "2026-12-04"}
+  ]
+}
