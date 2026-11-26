@@ -9,6 +9,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 #[Signature('system-events:activity {day? : YYYY-MM-DD, default yesterday}')]
@@ -18,6 +19,22 @@ class SendWorkspaceActivity extends Command
     public function handle(SystemEventService $events): int
     {
         $day = ($this->argument('day') ? Carbon::parse($this->argument('day')) : now()->subDay())->startOfDay();
+        // One run per day at a time, so two runs can't both pass the "already sent" check below.
+        $lock = Cache::lock('pm:system-events:activity:'.$day->toDateString(), 600);
+        if (! $lock->get()) {
+            $this->error("A workspace.activity run for {$day->toDateString()} is already running.");
+
+            return self::FAILURE;
+        }
+        try {
+            return $this->send($events, $day);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function send(SystemEventService $events, Carbon $day): int
+    {
         $range = [$day, $day->copy()->endOfDay()];
         $sent = 0;
 

@@ -93,8 +93,8 @@ When a limit is reached, the web app shows a dialog naming it (with an upgrade l
 | `PM_SHIFT_LIMIT` | `500` | Most issues one due-date change may shift through `precedes` links. Over it, nothing is shifted (422 when you asked for the shift). |
 | `PM_CLONE_LIMIT` | `100` | Most sub-tasks, and separately most links, one clone copies. Over it the clone is refused and nothing is saved. |
 | `PM_BILLING_URL` | — | Upgrade link in the plan-limit dialog, and where Owners' **Billing** link goes. Leave empty on self-hosted. |
-| `PM_BILLING_LINK_SECRET` | — | Signs the Billing link's 5-minute token. The link is hidden unless this and `PM_BILLING_URL` are set. |
-| `PM_SYSTEM_EVENTS_URL`, `PM_SYSTEM_EVENTS_SECRET` | — | Where Cloud sends signed system events (members, projects, workspace changes) for Platform management; retried for 24 hours. Both empty: nothing is recorded. |
+| `PM_BILLING_LINK_SECRET` | — | Signs the Billing link's 5-minute token. The link is hidden unless this and `PM_BILLING_URL` are set. The token rides in the URL and its claims are readable: the billing side should accept each nonce once and keep the query string out of its logs. |
+| `PM_SYSTEM_EVENTS_URL`, `PM_SYSTEM_EVENTS_SECRET` | — | Where Cloud sends signed system events (members, projects, workspace changes) for Platform management; retried for 24 hours. Delivery is at least once, so the receiver should dedupe by `X-Pm-Event-Id`. Both empty: nothing is recorded. |
 | `PM_INTERNAL_API_TOKEN`, `PM_INTERNAL_API_TOKEN_NEXT` | — | Service token(s) for the internal admin API (`/internal/v1`) Platform management calls on Cloud. Empty: the API is off and every path answers 404. `_NEXT` is accepted too, so you can rotate: set the new token as `_NEXT`, switch Platform management to it, then move it to `PM_INTERNAL_API_TOKEN`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | — | Google sign-in. Leave empty to hide the button. See below. |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | — | GitHub sign-in. Leave empty to hide the button. See below. |

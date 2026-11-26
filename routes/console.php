@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\SystemEventService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -32,3 +33,5 @@ Schedule::command('notifications:agent-summary')->dailyAt('00:10')->onOneServer(
 
 // 3-R21: tell Platform management which workspaces were active yesterday (does nothing without PM_SYSTEM_EVENTS_URL).
 Schedule::command('system-events:activity')->dailyAt('00:20')->onOneServer()->withoutOverlapping();
+// 3-R22: an outbox row whose delivery job never ran gets queued again (PR 49 review).
+Schedule::call(fn () => app(SystemEventService::class)->dispatchPending())->name('system-events:pending')->everyTenMinutes()->onOneServer()->withoutOverlapping();

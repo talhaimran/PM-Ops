@@ -164,7 +164,7 @@ class InvitationService
             $joined || ! $locked->project
                 ? $locked->project?->members()->syncWithoutDetaching([$user->id => ['role' => $locked->project_role->value]])
                 : $this->memberships->add($locked->project, $user, $locked->project_role);
-            $this->audit->log('member.joined', $user, array_filter(['role' => $role->value, 'project' => $locked->project?->key]), $locked->workspace, $user);
+            $this->audit->log('member.joined', $user, array_filter(['role' => $role->value, 'project' => $locked->project?->key, 'already_member' => ! $joined]), $locked->workspace, $user);
             $user->forceFill(['current_workspace_id' => $locked->workspace_id])->save();
             $locked->delete();
 

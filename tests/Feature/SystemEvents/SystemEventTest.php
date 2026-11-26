@@ -9,8 +9,10 @@ use App\Models\User;
 use App\Services\InvitationService;
 use App\Services\MembershipService;
 use App\Services\ProjectService;
+use App\Services\SystemEventService;
 use App\Services\WorkspaceMemberService;
 use App\Services\WorkspaceService;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use JsonSchema\Validator;
@@ -218,4 +220,54 @@ test('a project add or remove that keeps the billed status sends nothing', funct
 
     expect(SystemEvent::count())->toBe(0)
         ->and(AuditLog::whereIn('action', ['project.member_added', 'project.member_removed'])->count())->toBe(0);
+});
+
+test('an existing member accepting a project invitation sends no member.added (PR 49 review)', function () {
+    $this->actingAs($this->owner);
+    $project = makeProject($this->owner, 'WEB');
+    $member = User::factory()->create(['email' => 'mia@example.com']);
+    $this->ws->addMember($member, WorkspaceRole::Member);
+    SystemEvent::query()->delete();
+
+    $inv = app(InvitationService::class)->invite($this->ws, $this->owner, 'mia@example.com', WorkspaceRole::Member, $project, ProjectRole::Viewer);
+    app(InvitationService::class)->accept($inv, $member);
+
+    expect(AuditLog::where('action', 'member.joined')->where('target_id', $member->id)->exists())->toBeTrue()
+        ->and(events('member.added'))->toHaveCount(0);
+});
+
+test('an event whose delivery job was never queued is queued again after 10 minutes, at most once per 10 minutes (PR 49 review)', function () {
+    $this->freezeSecond();
+    $stranded = SystemEvent::where('type', 'workspace.created')->sole();
+    $fresh = app(SystemEventService::class)->record('workspace.updated', $this->ws, ['changes' => ['before' => [], 'after' => []]]);
+    $delivered = app(SystemEventService::class)->record('workspace.updated', $this->ws, ['changes' => ['before' => [], 'after' => []]]);
+    $tried = app(SystemEventService::class)->record('workspace.updated', $this->ws, ['changes' => ['before' => [], 'after' => []]]);
+    SystemEvent::whereKey([$stranded->id, $delivered->id, $tried->id])->update(['created_at' => now()->subMinutes(11), 'updated_at' => now()->subMinutes(11)]);
+    $delivered->forceFill(['delivered_at' => now()])->saveQuietly();
+    SystemEvent::whereKey($delivered->id)->update(['updated_at' => now()->subMinutes(11)]);
+    SystemEvent::whereKey($tried->id)->update(['attempts' => 1]);
+    Queue::fake();
+
+    expect(app(SystemEventService::class)->dispatchPending())->toBe(1);
+    Queue::assertPushed(DeliverSystemEvent::class, 1);
+    Queue::assertPushed(DeliverSystemEvent::class, fn ($job) => $job->eventId === $stranded->id);
+
+    expect(app(SystemEventService::class)->dispatchPending())->toBe(0);
+    $this->travel(11)->minutes();
+    expect(app(SystemEventService::class)->dispatchPending())->toBe(2); // $stranded again, and $fresh now
+});
+
+test('a second workspace.activity run for the same day waits its turn instead of racing (PR 49 review)', function () {
+    useWorkspace($this->ws, $this->owner);
+    $this->actingAs($this->owner);
+    makeIssue(makeProject($this->owner, 'WEB'), $this->owner);
+    $lock = Cache::lock('pm:system-events:activity:'.now()->toDateString(), 60);
+    $lock->get();
+
+    $this->artisan('system-events:activity', ['day' => now()->toDateString()])->expectsOutputToContain('already running')->assertFailed();
+    expect(events('workspace.activity'))->toHaveCount(0);
+
+    $lock->release();
+    $this->artisan('system-events:activity', ['day' => now()->toDateString()])->assertSuccessful();
+    expect(events('workspace.activity'))->toHaveCount(1);
 });

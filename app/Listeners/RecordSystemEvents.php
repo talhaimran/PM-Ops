@@ -32,7 +32,8 @@ class RecordSystemEvents
             'workspace.updated' => ['workspace.updated', ['changes' => ['before' => $meta['before'] ?? [], 'after' => $meta['after'] ?? []]]],
             'workspace.deleted' => ['workspace.deleted', ['workspace_id' => $log->target_id, 'slug' => $meta['slug'] ?? null]],
             'owner.added', 'owner.removed' => ['workspace.owner_changed', ['user' => $this->user($log->target_id, $log->target_label), 'change' => $log->action === 'owner.added' ? 'added' : 'removed']],
-            'member.joined' => ['member.added', [
+            // Someone already in the workspace who accepts a project invitation wasn't added to it.
+            'member.joined' => ($meta['already_member'] ?? false) ? null : ['member.added', [
                 'user' => $this->user($log->target_id, $log->target_label), 'role' => $meta['role'] ?? null,
                 'billed' => $workspace ? $this->usage->memberBilled($workspace, $log->target_label) === true : false,
             ]],
