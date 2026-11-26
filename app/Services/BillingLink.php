@@ -41,7 +41,7 @@ class BillingLink
      *
      * @return array{link: ?string, trial_days: ?int, notice: ?string}
      */
-    public function banners(Workspace $workspace, User $user): array
+    public function banners(Workspace $workspace, User $user, bool $supportSession = false): array
     {
         $owner = $user->workspaceRole($workspace) === WorkspaceRole::Owner;
         $notice = $this->entitlements->get($workspace, Entitlement::BillingNotice);
@@ -49,7 +49,8 @@ class BillingLink
         $days = $ends ? (int) today()->diffInDays(Carbon::parse($ends)->startOfDay(), false) : null;
 
         return [
-            'link' => $owner && self::enabled() ? route('settings.billing', [], false) : null,
+            // No link in a support session: the redirect is refused there.
+            'link' => $owner && ! $supportSession && self::enabled() ? route('settings.billing', [], false) : null,
             'trial_days' => $days !== null && $days >= 0 ? $days : null,
             'notice' => in_array($notice, self::NOTICES, true) && ($owner || $notice === 'read_only') ? $notice : null,
         ];

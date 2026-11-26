@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
 
 class ProjectService
 {
-    public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents, private StatusService $statuses) {}
+    public function __construct(private CurrentWorkspace $current, private AuditLogger $audit, private Entitlements $entitlements, private WorkspaceUsage $usage, private AgentService $agents, private StatusService $statuses, private MembershipService $memberships) {}
 
     public function listFor(User $user, int $perPage = 25, ?int $page = null, ?string $cursor = null, int $max = 100): LengthAwarePaginator
     {
@@ -43,7 +43,7 @@ class ProjectService
             $project = new Project([...$data, 'key' => strtoupper($data['key'])]);
             $project->workspace_id = $this->current->get()->id;
             $project->save();
-            $project->members()->attach($creator, ['role' => ProjectRole::Admin->value]);
+            $this->memberships->add($project, $creator, ProjectRole::Admin);
             foreach (array_keys(Column::DEFAULTS) as $i => $name) {
                 $column = $project->columns()->create(['name' => $name, 'position' => $i])->setRelation('project', $project);
                 $this->statuses->attach($column, $this->statuses->forColumn($workspace, $name, Column::DEFAULTS[$name], $project->key, $creator));

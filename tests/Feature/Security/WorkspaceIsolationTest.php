@@ -193,8 +193,8 @@ function isolationRouteCases(): array
         'GET {workspace}/settings/audit-log/export' => ['alpha/settings/audit-log/export?actor={U}', []],
         // Takes no id: it must count only A's people and projects (B has more of both).
         'GET {workspace}/settings/usage' => ['alpha/settings/usage', []],
-        // Takes no id and reads the signed-in user's role in A: the redirect names A only (404 here: no billing env).
-        'GET {workspace}/settings/billing' => ['alpha/settings/billing', []],
+        // Takes no id: the redirect token (fresh nonce each time, so not compared) names A only; B's slug is the separate test below.
+        'GET {workspace}/settings/billing' => ['alpha/settings/billing', [], false],
         'GET {workspace}/settings/security' => ['alpha/settings/security', []],
         'PATCH {workspace}/settings/security' => ['alpha/settings/security', ['require_2fa' => false]],
         'PATCH {workspace}/settings/sign-in-methods' => ['alpha/settings/sign-in-methods', ['sign_in_methods' => ['password']]],
@@ -382,6 +382,8 @@ function workspaceSnapshot(Workspace $w): string
 }
 
 beforeEach(function () {
+    // On, so the billing route's 404 for B means "not yours", not "billing is off".
+    config(['pm.billing_url' => 'https://billing.example.test', 'pm.billing_link_secret' => 'billing-secret']);
     $this->ann = User::factory()->create(['email' => 'ann@example.com']);
     $this->bob = User::factory()->create(['email' => 'bob@example.com']);
 
@@ -604,6 +606,16 @@ test('the web restore of an archived workspace never reaches one you don\'t own 
     $this->actingAs($this->ann)->post('/workspaces/bravo/restore')->assertForbidden();
     $this->actingAs($carol)->post('/workspaces/bravo/restore')->assertNotFound();
     expect($this->b->fresh()->archived_at)->not->toBeNull();
+});
+
+test('the Billing link never reaches a workspace you are not an Owner of', function () {
+    $carol = User::factory()->create();
+    makeWorkspace($carol, 'carol');
+
+    $this->actingAs($carol)->get('/bravo/settings/billing')->assertNotFound();
+    // ann is a plain member of B.
+    $this->actingAs($this->ann)->get('/bravo/settings/billing')->assertForbidden();
+    $this->actingAs($this->bob)->get('/bravo/settings/billing')->assertRedirectContains('https://billing.example.test/session?token=');
 });
 
 test('a support session opened in A never shows B, even though its user is in B', function () {

@@ -14,7 +14,7 @@
     "billed": {"type": "boolean"},
     "scope": {"enum": ["workspace", "project"]},
     "project": {"type": ["string", "null"]},
-    "roles": {"type": "object", "required": ["before", "after"], "properties": {"before": {"type": "string"}, "after": {"type": "string"}}},
+    "roles": {"type": "object", "required": ["before", "after"], "properties": {"before": {"type": ["string", "null"]}, "after": {"type": ["string", "null"]}}},
     "billed_change": {"type": "object", "required": ["before", "after"], "properties": {"before": {"type": "boolean"}, "after": {"type": "boolean"}}}
   },
   "allOf": [

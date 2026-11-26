@@ -41,9 +41,14 @@ class RecordSystemEvents
                 'user' => $this->user($log->target_id, $log->target_label), 'scope' => 'workspace', 'project' => null, 'roles' => $roles(),
                 'billed_change' => ['before' => $meta['billed_before'] ?? false, 'after' => $meta['billed_after'] ?? false],
             ]],
-            // A project role change only matters to billing when it flips the person's billed status.
-            'project.member_role_changed' => ($meta['billed_before'] ?? null) === ($meta['billed_after'] ?? null) ? null : ['member.role_changed', [
-                'user' => $this->user($meta['user_id'] ?? null, $meta['email'] ?? null), 'scope' => 'project', 'project' => $meta['project'] ?? null, 'roles' => $roles(),
+            // A project membership change only matters to billing when it flips the person's billed status.
+            'project.member_role_changed', 'project.member_added', 'project.member_removed' => ($meta['billed_before'] ?? null) === ($meta['billed_after'] ?? null) ? null : ['member.role_changed', [
+                'user' => $this->user($meta['user_id'] ?? null, $meta['email'] ?? null), 'scope' => 'project', 'project' => $meta['project'] ?? null,
+                'roles' => match ($log->action) {
+                    'project.member_added' => ['before' => null, 'after' => $meta['role'] ?? null],
+                    'project.member_removed' => ['before' => $meta['role'] ?? null, 'after' => null],
+                    default => $roles(),
+                },
                 'billed_change' => ['before' => $meta['billed_before'], 'after' => $meta['billed_after']],
             ]],
             'project.created', 'project.deleted' => [$log->action, ['project' => ['id' => $log->target_id, 'key' => $log->target_label, 'name' => $meta['name'] ?? null]]],

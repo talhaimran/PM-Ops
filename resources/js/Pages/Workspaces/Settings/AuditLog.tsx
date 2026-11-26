@@ -47,6 +47,8 @@ const sentences: Record<string, string> = {
     'member.joined': 'Joined',
     'member.role_changed': 'Changed the role of',
     'project.member_role_changed': 'Changed the project role of',
+    'project.member_added': 'Added to a project:',
+    'project.member_removed': 'Removed from a project:',
     'owner.added': 'Made an Owner:',
     'owner.removed': 'Removed as Owner:',
     'member.removed': 'Removed',

@@ -55,7 +55,7 @@ class HandleInertiaRequests extends Middleware
                 : null,
             // 3-R24: the Billing link and banners (WorkspaceBanners).
             'billing' => fn () => ($workspace = app(CurrentWorkspace::class)->id() ? app(CurrentWorkspace::class)->get() : null) && $request->user()
-                ? app(BillingLink::class)->banners($workspace, $request->user()) : null,
+                ? app(BillingLink::class)->banners($workspace, $request->user(), $request->attributes->has('support_session')) : null,
             'workspaces' => fn () => $request->user()?->workspaces()
                 ->when($request->attributes->get('support_session'), fn ($q, $s) => $q->whereKey($s->workspace_id))
                 ->orderBy('name')->get(['name', 'slug'])

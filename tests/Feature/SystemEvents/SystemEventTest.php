@@ -3,6 +3,7 @@
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
 use App\Jobs\DeliverSystemEvent;
+use App\Models\AuditLog;
 use App\Models\SystemEvent;
 use App\Models\User;
 use App\Services\InvitationService;
@@ -181,3 +182,40 @@ test('the schemas carry examples that validate', function (string $file) {
         expect($validator->getErrors())->toBe([], basename($file));
     }
 })->with(fn () => glob(__DIR__.'/../../../docs/contract/events/*.json'));
+
+test('adding a workspace Viewer to a project as Member sends one member.role_changed; removing them from their last billed project sends another', function () {
+    $this->actingAs($this->owner);
+    $project = makeProject($this->owner, 'WEB');
+    $viewer = User::factory()->create();
+    $this->ws->addMember($viewer, WorkspaceRole::Member);
+    SystemEvent::query()->delete();
+
+    app(MembershipService::class)->add($project, $viewer, ProjectRole::Member);
+    expect(events('member.role_changed'))->toHaveCount(1)
+        ->and(events('member.role_changed')->sole()->payload)->toMatchArray([
+            'scope' => 'project', 'project' => 'WEB', 'roles' => ['before' => null, 'after' => 'member'], 'billed_change' => ['before' => false, 'after' => true],
+        ])
+        ->and(eventErrors(events('member.role_changed')->sole()))->toBe([]);
+
+    SystemEvent::query()->delete();
+    app(MembershipService::class)->remove($project, $viewer);
+    expect(events('member.role_changed'))->toHaveCount(1)
+        ->and(events('member.role_changed')->sole()->payload)->toMatchArray([
+            'scope' => 'project', 'project' => 'WEB', 'roles' => ['before' => 'member', 'after' => null], 'billed_change' => ['before' => true, 'after' => false],
+        ])
+        ->and(eventErrors(events('member.role_changed')->sole()))->toBe([]);
+});
+
+test('a project add or remove that keeps the billed status sends nothing', function () {
+    $this->actingAs($this->owner);
+    $project = makeProject($this->owner, 'WEB');
+    $admin = User::factory()->create();
+    $this->ws->addMember($admin, WorkspaceRole::Admin);
+    SystemEvent::query()->delete();
+
+    app(MembershipService::class)->add($project, $admin, ProjectRole::Member);
+    app(MembershipService::class)->remove($project, $admin);
+
+    expect(SystemEvent::count())->toBe(0)
+        ->and(AuditLog::whereIn('action', ['project.member_added', 'project.member_removed'])->count())->toBe(0);
+});

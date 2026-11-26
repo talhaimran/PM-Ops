@@ -87,7 +87,7 @@ class WorkspaceMemberService
                         "new_admins.{$key}" => "Pick a member of {$workspace->name} other than {$member->email} as the new admin of {$key}.",
                     ]);
                 }
-                $workspace->projects()->firstWhere('key', $key)->members()->syncWithoutDetaching([$admin->id => ['role' => ProjectRole::Admin->value]]);
+                $this->memberships->add($workspace->projects()->firstWhere('key', $key), $admin, ProjectRole::Admin);
             }
 
             $billed = $this->usage->memberBilled($workspace, $member->email) === true;
@@ -102,7 +102,7 @@ class WorkspaceMemberService
     /** Spec 7.0b: a workspace Owner or Admin joins any project as its Admin (authorized by ProjectPolicy::join). */
     public function joinProjectAsAdmin(Project $project, User $actor): void
     {
-        $project->members()->syncWithoutDetaching([$actor->id => ['role' => ProjectRole::Admin->value]]);
+        $this->memberships->add($project, $actor, ProjectRole::Admin);
         $this->audit->log('project.admin_joined', $project, [], $project->workspace()->first(), $actor);
     }
 

@@ -43,7 +43,7 @@ export default function WorkspaceBanners() {
             )}
             {billing?.trial_days != null && (
                 <Banner icon={<CreditCard className={icon} aria-hidden="true" />}>
-                    Trial: {billing.trial_days} {billing.trial_days === 1 ? 'day' : 'days'} left. <BillingLink href={billing.link} />
+                    Trial: {billing.trial_days} {billing.trial_days === 1 ? 'day' : 'days'} left <BillingLink href={billing.link} />
                 </Banner>
             )}
             {billing?.notice && (
