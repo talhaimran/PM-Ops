@@ -169,8 +169,48 @@ test('reads tool arguments sent as an object, or not as JSON at all', function (
         ['id' => 'x', 'function' => ['name' => 'search_issues', 'arguments' => 'not json']],
     ]]]]])]);
 
-    expect(app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30))->toEqual(new AiReply(null, [
+    expect(app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30)->toolCalls)->toEqual([
         ['id' => 'call_0', 'name' => 'read_issue', 'args' => ['key' => 'WEB-3']],
         ['id' => 'x', 'name' => 'search_issues', 'args' => []],
-    ], 0, 0));
+    ]);
+});
+
+// Unknown usage is never counted as zero: it is estimated at ceil(bytes / 3) and the reply says so.
+test('estimates the tokens a provider did not report', function (array $usage, ?int $in, ?int $out) {
+    connectAi($this->ws, AiProviderType::OpenAi);
+    $message = ['role' => 'assistant', 'content' => 'Hello there', 'tool_calls' => [['id' => 'c1', 'type' => 'function', 'function' => ['name' => 'read_issue', 'arguments' => '{"key":"WEB-2"}']]]];
+    Http::fake(['*' => Http::response(['choices' => [['message' => $message]], ...($usage ? ['usage' => $usage] : [])])]);
+
+    $reply = app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30);
+
+    $sent = strlen(Http::recorded()->first()[0]->body());
+    $outBytes = strlen('Hello there') + strlen(json_encode(['read_issue', ['key' => 'WEB-2']]));
+    expect($reply->usageEstimated)->toBeTrue()
+        ->and($reply->tokensIn)->toBe($in ?? (int) ceil($sent / 3))
+        ->and($reply->tokensOut)->toBe($out ?? (int) ceil($outBytes / 3));
+})->with([
+    'no usage' => [[], null, null],
+    'only the input' => [['prompt_tokens' => 120], 120, null],
+    'junk' => [['prompt_tokens' => 'lots', 'completion_tokens' => -5], null, null],
+]);
+
+test('estimates an Anthropic reply without usage', function () {
+    connectAi($this->ws, AiProviderType::Anthropic);
+    Http::fake(['*' => Http::response(['content' => [['type' => 'text', 'text' => 'Done.']]])]);
+
+    $reply = app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30);
+
+    expect($reply->usageEstimated)->toBeTrue()
+        ->and($reply->tokensIn)->toBe((int) ceil(strlen(Http::recorded()->first()[0]->body()) / 3))
+        ->and($reply->tokensOut)->toBe((int) ceil(strlen('Done.') / 3));
+});
+
+test('reads a real-shaped Google reply exactly', function () {
+    connectAi($this->ws, AiProviderType::Google, 'https://generativelanguage.googleapis.com/v1beta/openai');
+    Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => null,
+        'tool_calls' => [['id' => 'call_9', 'type' => 'function', 'function' => ['name' => 'read_issue', 'arguments' => '{"key":"WEB-2"}']]]]]],
+        'usage' => ['prompt_tokens' => 55, 'completion_tokens' => 7, 'total_tokens' => 62]])]);
+
+    expect(app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30))
+        ->toEqual(new AiReply(null, [['id' => 'call_9', 'name' => 'read_issue', 'args' => ['key' => 'WEB-2']]], 55, 7));
 });

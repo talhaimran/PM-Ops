@@ -48,9 +48,8 @@ class OpenAiAdapter
                 // Some servers send an object rather than a JSON string; arguments that aren't JSON become [] and the tool's own validation reports what is missing.
                 'args' => is_array($raw = $c['function']['arguments'] ?? null) ? $raw : (is_array($args = json_decode((string) $raw, true)) ? $args : []),
             ], $message['tool_calls'] ?? [], array_keys($message['tool_calls'] ?? [])),
-            // shortcut: a reply without usage counts 0 tokens, so budgets and the cap undercount; verify Google's non-streamed usage with a live key.
-            (int) ($json['usage']['prompt_tokens'] ?? 0),
-            (int) ($json['usage']['completion_tokens'] ?? 0),
+            AiReply::count($json['usage']['prompt_tokens'] ?? null),
+            AiReply::count($json['usage']['completion_tokens'] ?? null),
         );
     }
 }

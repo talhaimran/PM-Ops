@@ -33,8 +33,14 @@ class AiClient
         }, '/');
         $adapter = $provider === AiProviderType::Anthropic ? new AnthropicAdapter : new OpenAiAdapter;
 
+        $sent = 0;
         try {
-            $response = $adapter->send(AiRequestGuard::http($base)->timeout($timeout), $base, $connection['model'], $this->settings->key($workspace), $system, $messages, $tools);
+            $http = AiRequestGuard::http($base)->timeout($timeout)->withRequestMiddleware(function ($request) use (&$sent) {
+                $sent = (int) $request->getBody()->getSize();
+
+                return $request;
+            });
+            $response = $adapter->send($http, $base, $connection['model'], $this->settings->key($workspace), $system, $messages, $tools);
         } catch (ConnectionException) {
             // Not chained: the original names the URL.
             throw new AiProviderError("The AI provider didn't answer in time. Try again later.");
@@ -56,6 +62,13 @@ class AiClient
             $reply = null;
         }
 
-        return $reply ?? throw new AiProviderError("The AI provider's reply couldn't be read. Try again later.");
+        if ($reply === null) {
+            throw new AiProviderError("The AI provider's reply couldn't be read. Try again later.");
+        }
+        $in = $reply->tokensIn ?? (int) ceil($sent / 3);
+        // shortcut: unknown usage is estimated at 3 bytes per token, use the provider's tokenizer if estimates prove far off
+        $out = $reply->tokensOut ?? (int) ceil((strlen((string) $reply->text) + array_sum(array_map(fn ($c) => strlen(json_encode([$c['name'], $c['args']])), $reply->toolCalls))) / 3);
+
+        return new AiReply($reply->text, $reply->toolCalls, $in, $out, $reply->tokensIn === null || $reply->tokensOut === null);
     }
 }
