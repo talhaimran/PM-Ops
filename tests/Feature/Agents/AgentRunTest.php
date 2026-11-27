@@ -4,6 +4,7 @@ use App\Enums\AgentLevel;
 use App\Enums\AgentRunChangeStatus;
 use App\Enums\AgentRunStatus;
 use App\Enums\Entitlement;
+use App\Enums\ProjectRole;
 use App\Events\AgentRunChanged;
 use App\Exceptions\PlanLimitReached;
 use App\Jobs\RunAgent;
@@ -13,7 +14,9 @@ use App\Models\AgentRun;
 use App\Models\AiProvider;
 use App\Models\AuditLog;
 use App\Models\InboxItem;
+use App\Models\IssueStatusHistory;
 use App\Models\ProjectAgentSettings;
+use App\Models\Status;
 use App\Models\User;
 use App\Services\ActivityLogger;
 use App\Services\AgentRunService;
@@ -22,7 +25,9 @@ use App\Services\Ai\AiProviderError;
 use App\Services\Ai\AiReply;
 use App\Services\Ai\RunTools;
 use App\Services\AuditLogger;
+use App\Services\CurrentWorkspace;
 use App\Services\Entitlements;
+use App\Services\HistoryRecorder;
 use App\Services\IssueService;
 use App\Services\NotificationService;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -342,7 +347,9 @@ test('B-R1: inside a run, the starter acts as the run\'s agent and every row nam
     $other = User::factory()->create();
 
     ActivityLogger::forRun($run, function () use ($run, $other) {
-        expect(ActivityLogger::attribution($this->owner))->toBe(['user_id' => $this->owner->id, 'agent_id' => $this->agent->id, 'via' => 'agent_run', 'agent_run_id' => $run->id])
+        // The history rows' attribution has no run id (no such column); activity, audit and inbox rows add it.
+        expect(ActivityLogger::attribution($this->owner))->toBe(['user_id' => $this->owner->id, 'agent_id' => $this->agent->id, 'via' => 'agent_run'])
+            ->and(ActivityLogger::run($this->owner)?->id)->toBe($run->id)
             ->and($this->owner->agent()?->id)->toBe($this->agent->id)
             ->and($this->owner->viaToken())->toBeTrue()
             ->and($other->agent())->toBeNull();
@@ -453,4 +460,67 @@ test('prune: a run older than 30 days keeps who, what and tokens and drops its d
             ['type', ['value' => 'task'], ['value' => 'bug']], ['priority', null, []], [null, null, []],
         ])
         ->and($recent->fresh()->steps)->not->toBeNull();
+});
+
+test('fix 1: a run whose issue was deleted after it started fails with a plain reason and notifies nobody', function () {
+    $run = startTriage($this);
+    app(IssueService::class)->delete($this->issue, $this->owner);
+    $ai = scriptAi([toolReply('read_issue', ['key' => 'WEB-1'])]);
+
+    $run = runAgentNow($run);
+
+    expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'WEB-1 was deleted, or the agent can no longer see it.'])
+        ->and($ai->calls)->toBe([])
+        ->and(InboxItem::count())->toBe(0);
+});
+
+test('fix 2: start refuses a Viewer of the issue\'s project and a workspace that can\'t be changed', function () {
+    $viewer = addMember($this->web, User::factory()->create(), ProjectRole::Viewer);
+    [$viewersAgent] = makeAgent($viewer, AgentLevel::Write);
+    expect(fn () => $this->runs->start($viewer, $viewersAgent, $this->issue, ($this->role)('Triage'), null))
+        ->toThrow(AuthorizationException::class, "viewers can't make changes");
+
+    $this->ws->forceFill(['suspended_at' => now()])->save();
+    expect(refusal(fn () => startTriage($this)))->toBe('This workspace is suspended. You can view and export, but not make changes.')
+        ->and(AgentRun::count())->toBe(0);
+});
+
+test('fix 2: a workspace suspended mid-run stops the run at its next step', function () {
+    $ai = scriptAi([
+        function () {
+            $this->ws->forceFill(['suspended_at' => now()])->save();
+
+            return toolReply('read_issue', ['key' => 'WEB-1']);
+        },
+        toolReply('read_issue', ['key' => 'WEB-1']),
+    ]);
+
+    $run = runAgentNow(startTriage($this));
+
+    expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'This workspace is suspended. You can view and export, but not make changes.'])
+        ->and($ai->calls)->toHaveCount(1);
+});
+
+test('fix 3: history rows are recorded inside a run', function () {
+    $run = startTriage($this);
+    $inProgress = Status::where('workspace_id', $this->ws->id)->where('name', 'In Progress')->sole();
+
+    ActivityLogger::forRun($run, function () use ($inProgress) {
+        app(IssueService::class)->update($this->issue->fresh(), $this->owner, ['status' => 'In Progress']);
+        // The bulk form inserts without the model (a column delete moving its issues).
+        app(HistoryRecorder::class)->statusesMoved(collect([(object) ['id' => $this->issue->id, 'status_id' => $inProgress->id - 1]]), $inProgress, $this->owner);
+    });
+
+    expect(IssueStatusHistory::where('issue_id', $this->issue->id)->where('via', 'agent_run')->where('agent_id', $this->agent->id)->count())->toBe(2);
+});
+
+test('fix 4: a run the worker gave up on ends failed and notifies the starter, with no workspace set', function () {
+    $run = startTriage($this);
+    AgentRun::whereKey($run->id)->update(['status' => AgentRunStatus::Running, 'started_at' => now()]);
+    app(CurrentWorkspace::class)->forget();
+
+    (new RunAgent($run->id))->failed(new RuntimeException('timed out'));
+
+    expect($run->fresh()->only(['status', 'error']))->toEqual(['status' => AgentRunStatus::Failed, 'error' => 'The run stopped unexpectedly. Try again.'])
+        ->and(InboxItem::where('user_id', $this->owner->id)->sole()->only(['event', 'agent_run_id']))->toEqual(['event' => 'agent_run.failed', 'agent_run_id' => $run->id]);
 });

@@ -42,6 +42,7 @@ class ActivityLogger
             // An OAuth token has no name of its own: it is the agent's.
             'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
             ...self::attribution($user),
+            'agent_run_id' => self::run($user)?->id,
         ]);
         // 3-R1: after commit, so a rolled-back change emits nothing.
         event(new ActivityRecorded($activity));
@@ -132,10 +133,8 @@ class ActivityLogger
     /** Who, which agent and how: the one source for activity and history rows. */
     public static function attribution(?User $user): array
     {
-        $who = ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
-
-        // Only inside a run: the history tables have no agent_run_id column (statusesMoved() inserts without the model).
-        return ($run = self::run($user)) ? [...$who, 'agent_run_id' => $run->id] : $who;
+        // No agent_run_id: the history tables have none. Activity, audit and inbox rows add it from run().
+        return ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
     }
 
     /** The run being worked, when $user is its starter (or, with no $user, any bound run). */

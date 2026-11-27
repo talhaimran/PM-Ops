@@ -6,6 +6,7 @@ use App\Enums\AgentRunChangeStatus;
 use App\Enums\AgentRunStatus;
 use App\Enums\Entitlement;
 use App\Events\AgentRunChanged;
+use App\Http\Middleware\EnsureWorkspaceWritable;
 use App\Jobs\RunAgent;
 use App\Models\Agent;
 use App\Models\AgentRole;
@@ -22,6 +23,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -74,6 +76,9 @@ class AgentRunService
             throw ValidationException::withMessages(['role' => 'Pick a role or type an instruction.']);
         }
         $workspace = $this->current->get();
+        if ($stop = $this->readOnly($workspace)) {
+            throw ValidationException::withMessages(['workspace' => $stop]);
+        }
         if ($role && $role->workspace_id !== null && $role->workspace_id !== $workspace->id) {
             throw ValidationException::withMessages(['role' => 'That role was not found.'])->status(404);
         }
@@ -87,6 +92,8 @@ class AgentRunService
         $asAgent = (new AgentRun(['user_id' => $starter->id]))->setRelation('agent', $agent);
         foreach ($issues as $issue) {
             $issue->loadMissing('project');
+            // A run's proposals are changes to the issue: the starter must be able to make them (Viewers can't).
+            Gate::forUser($starter)->authorize('update', $issue);
             if (! $this->ai->modeCEnabled($issue->project)) {
                 throw ValidationException::withMessages(['issue' => self::MODE_C_OFF]);
             }
@@ -231,14 +238,17 @@ class AgentRunService
         }
     }
 
-    /** B-R15, before each step, in order: agent usable, Mode C on, steps, budget, time, the month's cap. Null: go on. */
+    /** B-R15, before each step, in order: agent usable, workspace writable, Mode C on, steps, budget, time, the month's cap. Null: go on. */
     private function stopReason(AgentRun $run, Issue $issue, Workspace $workspace, int $step, Carbon $deadline): ?string
     {
+        // Fresh each step: a suspension or a settings change made during the run counts.
+        $workspace->refresh();
         $maxSteps = (int) $workspace->setting('run_max_steps');
         $budget = (int) $workspace->setting('run_token_budget');
         $seconds = (int) $workspace->setting('run_timeout_seconds');
 
         return $this->tools->unusable($run->agent)
+            ?? $this->readOnly($workspace)
             ?? (! $this->ai->modeCEnabled($issue->project) ? self::MODE_C_OFF : null)
             ?? ($step > $maxSteps ? "Stopped: reached the {$maxSteps}-step limit" : null)
             ?? ($run->tokens_in + $run->tokens_out >= $budget ? 'Stopped: reached the '.number_format($budget).'-token budget' : null)
@@ -254,6 +264,12 @@ class AgentRunService
         return $cap !== null && $used >= $cap
             ? 'Your workspace used its '.number_format($cap).' AI tokens for '.now()->utc()->format('F').'. An Owner or Admin can raise the cap in Settings → AI.'
             : null;
+    }
+
+    /** Why nothing may change in $workspace (suspended or archived), or null. */
+    private function readOnly(Workspace $workspace): ?string
+    {
+        return $workspace->isWritable() ? null : EnsureWorkspaceWritable::MESSAGES[$workspace->state()];
     }
 
     private function cancelled(AgentRun $run): bool
@@ -277,12 +293,13 @@ class AgentRunService
             if (! $ended) {
                 return;
             }
+            // Loaded here: crashed() and the issue-gone path come with nothing loaded.
+            $run->loadMissing(['issue.project', 'user', 'agent']);
             $issue = $run->issue;
             if (filled($reply)) {
                 AgentRunChange::create(['run_id' => $run->id, 'kind' => 'comment', 'after' => ['body' => $reply], 'issue_version' => $issue?->version, 'status' => AgentRunChangeStatus::Proposed]);
             }
             if ($issue && $run->user) {
-                $issue->loadMissing('project');
                 ActivityLogger::forRun($run, fn () => $this->notifications->notify($run->user, $issue, "agent_run.{$status->value}",
                     ['action' => $status->value, 'from' => null, 'to' => $error], null, $run->agent, 'agent_run', batch: false));
             }
