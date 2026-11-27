@@ -175,7 +175,8 @@ test('reads tool arguments sent as an object, or not as JSON at all', function (
     ]);
 });
 
-// Unknown usage is never counted as zero: it is estimated at ceil(bytes / 3) and the reply says so.
+// Unknown usage is never counted as zero: each unknown side is approximated at ceil(bytes / 3) of the raw request or
+// reply body, and the reply says it is an estimate.
 test('estimates the tokens a provider did not report', function (array $usage, ?int $in, ?int $out) {
     connectAi($this->ws, AiProviderType::OpenAi);
     $message = ['role' => 'assistant', 'content' => 'Hello there', 'tool_calls' => [['id' => 'c1', 'type' => 'function', 'function' => ['name' => 'read_issue', 'arguments' => '{"key":"WEB-2"}']]]];
@@ -184,7 +185,7 @@ test('estimates the tokens a provider did not report', function (array $usage, ?
     $reply = app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30);
 
     $sent = strlen(Http::recorded()->first()[0]->body());
-    $outBytes = strlen('Hello there') + strlen(json_encode(['read_issue', ['key' => 'WEB-2']]));
+    $outBytes = strlen(Http::recorded()->first()[1]->body());
     expect($reply->usageEstimated)->toBeTrue()
         ->and($reply->tokensIn)->toBe($in ?? (int) ceil($sent / 3))
         ->and($reply->tokensOut)->toBe($out ?? (int) ceil($outBytes / 3));
@@ -202,7 +203,29 @@ test('estimates an Anthropic reply without usage', function () {
 
     expect($reply->usageEstimated)->toBeTrue()
         ->and($reply->tokensIn)->toBe((int) ceil(strlen(Http::recorded()->first()[0]->body()) / 3))
-        ->and($reply->tokensOut)->toBe((int) ceil(strlen('Done.') / 3));
+        ->and($reply->tokensOut)->toBe((int) ceil(strlen(Http::recorded()->first()[1]->body()) / 3));
+});
+
+test('estimates output the adapter does not extract, such as reasoning', function () {
+    connectAi($this->ws, AiProviderType::OpenAi, 'https://gw.example.com/v1');
+    $reasoning = str_repeat('Thinking about the issue step by step. ', 50);
+    Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Ok.', 'reasoning_content' => $reasoning]]]])]);
+
+    $reply = app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30);
+
+    expect($reply->usageEstimated)->toBeTrue()->and($reply->tokensOut)->toBeGreaterThan((int) ceil(strlen($reasoning) / 3));
+});
+
+test('estimates Unicode-heavy input and large tool payloads at least one token per character', function () {
+    connectAi($this->ws, AiProviderType::OpenAi, 'https://gw.example.com/v1');
+    Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Ok.']]]])]);
+    $text = str_repeat('課題を確認してください 🚀🔥 ', 200);
+    $tools = array_map(fn ($i) => ['name' => "tool_$i", 'description' => str_repeat('Reads one issue by key. ', 20), 'parameters' => $this->parameters], range(1, 20));
+
+    $reply = app(AiClient::class)->chat($this->ws, 'You triage.', [['role' => 'user', 'content' => $text]], $tools, 30);
+
+    // The request is JSON with escaped Unicode (\uXXXX), so each non-ASCII character is 6+ bytes before the divide.
+    expect($reply->tokensIn)->toBeGreaterThanOrEqual(mb_strlen($text) + (int) ceil(strlen(json_encode($tools)) / 3));
 });
 
 test('reads a real-shaped Google reply exactly', function () {

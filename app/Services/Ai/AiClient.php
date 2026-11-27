@@ -65,9 +65,11 @@ class AiClient
         if ($reply === null) {
             throw new AiProviderError("The AI provider's reply couldn't be read. Try again later.");
         }
+        // Unknown usage is approximated from the raw bodies (JSON overhead and output the adapter doesn't extract, such as
+        // reasoning, included). Not a guaranteed bound: usageEstimated tells callers not to treat it as the provider's count.
+        // shortcut: 3 bytes per token can undercount unusual tokenizers or hidden output, use a provider tokenizer if it proves off
         $in = $reply->tokensIn ?? (int) ceil($sent / 3);
-        // shortcut: unknown usage is estimated at 3 bytes per token, use the provider's tokenizer if estimates prove far off
-        $out = $reply->tokensOut ?? (int) ceil((strlen((string) $reply->text) + array_sum(array_map(fn ($c) => strlen(json_encode([$c['name'], $c['args']])), $reply->toolCalls))) / 3);
+        $out = $reply->tokensOut ?? (int) ceil(strlen($response->body()) / 3);
 
         return new AiReply($reply->text, $reply->toolCalls, $in, $out, $reply->tokensIn === null || $reply->tokensOut === null);
     }
