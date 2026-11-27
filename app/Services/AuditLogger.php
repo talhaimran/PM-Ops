@@ -68,6 +68,7 @@ class AuditLogger
             'actor_user_id' => $actor?->id,
             'actor_type' => $actorType,
             'agent_id' => $actor?->agent()?->id,
+            'agent_run_id' => ActivityLogger::run($actor)?->id,
             'via' => $actorType === 'user' ? ActivityLogger::via($actor) : 'system',
             'action' => $action,
             'target_type' => $target ? $this->type($target) : null,

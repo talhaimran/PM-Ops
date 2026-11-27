@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Events\ActivityRecorded;
 use App\Models\Activity;
 use App\Models\Agent;
+use App\Models\AgentRun;
 use App\Models\ApprovalRequest;
 use App\Models\Issue;
 use App\Models\User;
@@ -20,6 +21,9 @@ class ActivityLogger
 
     /** Container key set while a person decides an approval request, so the entry links the agent and the request. */
     private const APPROVAL_BINDING = 'pm.approval';
+
+    /** Container key set while an in-app agent run works (B-R1): its starter acts as the run's agent. */
+    public const RUN_BINDING = 'pm.run';
 
     /** @param array<string, array{from: mixed, to: mixed}>|null $changes */
     public function log(Issue $issue, ?User $user, string $action, ?array $changes = null): Activity
@@ -128,7 +132,30 @@ class ActivityLogger
     /** Who, which agent and how: the one source for activity and history rows. */
     public static function attribution(?User $user): array
     {
-        return ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
+        $who = ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
+
+        // Only inside a run: the history tables have no agent_run_id column (statusesMoved() inserts without the model).
+        return ($run = self::run($user)) ? [...$who, 'agent_run_id' => $run->id] : $who;
+    }
+
+    /** The run being worked, when $user is its starter (or, with no $user, any bound run). */
+    public static function run(?User $user = null): ?AgentRun
+    {
+        $run = app()->bound(self::RUN_BINDING) ? app(self::RUN_BINDING) : null;
+
+        return $run && ($user === null || $run->user_id === $user->id) ? $run : null;
+    }
+
+    /** B-R1: run $work as $run's agent, so every row it writes names the agent and the run. The previous binding comes back after. */
+    public static function forRun(AgentRun $run, callable $work): mixed
+    {
+        $previous = self::run();
+        app()->instance(self::RUN_BINDING, $run);
+        try {
+            return $work();
+        } finally {
+            $previous ? app()->instance(self::RUN_BINDING, $previous) : app()->forgetInstance(self::RUN_BINDING);
+        }
     }
 
     private static function approval(): ?ApprovalRequest
@@ -147,9 +174,13 @@ class ActivityLogger
         }
     }
 
-    /** How the change came in: mcp (set by the MCP server), api (a bearer token), else web. AuditLogger uses it too. */
+    /** How the change came in: agent_run (an in-app run), mcp (set by the MCP server), api (a bearer token), else web. AuditLogger uses it too. */
     public static function via(?User $user): string
     {
+        if (self::run($user)) {
+            return 'agent_run';
+        }
+
         return app()->bound(self::VIA_BINDING) ? app(self::VIA_BINDING) : ($user?->viaToken() ? 'api' : 'web');
     }
 

@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\DB;
  * shortcut: items are kept forever (3-R25); add a 90-day purge when the table grows.
  * `changes` is a list of {action, from, to}; `count` is how many changes were batched into the row (3-R6).
  */
-#[Fillable(['workspace_id', 'user_id', 'issue_id', 'event', 'actor_user_id', 'agent_id', 'via', 'changes', 'count', 'read_at'])]
+#[Fillable(['workspace_id', 'user_id', 'issue_id', 'event', 'actor_user_id', 'agent_id', 'agent_run_id', 'via', 'changes', 'count', 'read_at'])]
 class InboxItem extends Model
 {
     protected $table = 'notifications';
