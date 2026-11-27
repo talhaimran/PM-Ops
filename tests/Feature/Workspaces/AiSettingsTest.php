@@ -1,8 +1,10 @@
 <?php
 
+use App\Enums\AgentRunStatus;
 use App\Enums\AiProviderType;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
+use App\Models\AgentRun;
 use App\Models\AiProvider;
 use App\Models\AuditLog;
 use App\Models\ProjectAgentSettings;
@@ -200,7 +202,9 @@ test('removing the provider deletes the key and logs ai_provider.removed; removi
 test('removing the provider keeps the monthly cap and this month\'s usage, which are still there after setting a provider again', function () {
     $this->actingAs($this->owner)->patch(w('/settings/ai'), $this->payload);
     $this->patch(w('/settings/ai/cap'), ['monthly_token_cap' => 5000]);
-    AiProvider::sole()->update(['tokens_used_month' => 1234]);
+    // B-R9: this month's usage comes from runs.
+    AgentRun::create(['workspace_id' => $this->ws->id, 'issue_key' => 'WEB-1', 'user_id' => $this->owner->id, 'role_name' => 'Triage',
+        'status' => AgentRunStatus::Finished, 'tokens_in' => 1000, 'tokens_out' => 234]);
 
     $this->delete(w('/settings/ai'))->assertRedirect();
     expect($this->ai->usage($this->ws))->toBe(['cap' => 5000, 'used' => 1234])

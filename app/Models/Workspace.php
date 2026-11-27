@@ -12,7 +12,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Workspace extends Model
 {
     /** Spec 7.0a defaults; sign_in_methods "all" means every method the install offers. */
-    public const DEFAULT_SETTINGS = ['members_can_create_projects' => true, 'require_2fa' => false, 'agents_enabled' => true, 'mode_c_enabled' => true, 'sign_in_methods' => ['password', 'google', 'github']];
+    public const DEFAULT_SETTINGS = [
+        'members_can_create_projects' => true, 'require_2fa' => false, 'agents_enabled' => true, 'mode_c_enabled' => true, 'sign_in_methods' => ['password', 'google', 'github'],
+        // Step B: limits on one in-app agent run.
+        'run_max_steps' => 15, 'run_token_budget' => 50000, 'run_timeout_seconds' => 180,
+    ];
 
     /** E1: words a slug may not be, so /{slug} never shadows an app path. */
     public const RESERVED_SLUGS = [

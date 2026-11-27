@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AiProviderType;
+use App\Models\AgentRun;
 use App\Models\AiProvider;
 use App\Models\Project;
 use App\Models\ProjectAgentSettings;
@@ -44,12 +45,12 @@ class AiSettingsService
             : AiProvider::where('workspace_id', $workspace->id)->whereNotNull('key')->exists();
     }
 
-    /** @return array{cap: ?int, used: int} Kept in the workspace's row whether the provider is the server's or its own. */
+    /** @return array{cap: ?int, used: int} The cap is kept in the workspace's row whether the provider is the server's or its own. */
     public function usage(Workspace $workspace): array
     {
-        $row = $this->row($workspace);
-
-        return ['cap' => $row?->monthly_token_cap, 'used' => $row?->tokens_used_month ?? 0];
+        // B-R9: this month's usage is counted from the workspace's runs (tokens_used_month is no longer read).
+        // shortcut: only runs count, add search (step 4) and release notes (step 8) to the sum in their steps.
+        return ['cap' => $this->row($workspace)?->monthly_token_cap, 'used' => AgentRun::monthTokens($workspace)];
     }
 
     /** The key belongs to one provider and endpoint: moving either means the old key must not go along. */
