@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\AgentRunStatus;
+use App\Enums\WorkspaceRole;
 use App\Models\AgentRole;
 use App\Models\AgentRun;
 use App\Models\AiProvider;
@@ -33,6 +34,19 @@ test('counts month usage from runs', function () {
     expect(AgentRun::monthTokens($ws))->toBe(175)
         ->and(app(AiSettingsService::class)->usage($ws))->toBe(['cap' => 5000, 'used' => 175])
         ->and(app(AiSettingsService::class)->usage($other))->toBe(['cap' => null, 'used' => 8000]);
+});
+
+test('deleting an account keeps its runs and the month usage', function () {
+    $owner = User::factory()->create();
+    $ws = makeWorkspace($owner, 'acme');
+    $member = User::factory()->create();
+    $ws->addMember($member, WorkspaceRole::Member);
+    $run = runOf($ws, $member, 100, 20);
+
+    $member->delete();
+
+    expect($run->fresh()->user_id)->toBeNull()
+        ->and(app(AiSettingsService::class)->usage($ws)['used'])->toBe(120);
 });
 
 test('the four built-in roles are seeded with their B-R5 tool sets', function () {

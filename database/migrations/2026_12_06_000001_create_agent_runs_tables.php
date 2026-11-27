@@ -48,8 +48,8 @@ return new class extends Migration
                 // The key and role name stay readable after the issue or role is gone.
                 $table->foreignId('issue_id')->nullable()->constrained()->nullOnDelete();
                 $table->string('issue_key');
-                // Account deletion hard-deletes the person; their runs go with them (and leave the month's usage).
-                $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+                // Account deletion hard-deletes the person; the run stays so the month's usage doesn't drop.
+                $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();
                 $table->foreignId('agent_id')->nullable()->constrained()->nullOnDelete();
                 $table->foreignId('role_id')->nullable()->constrained('agent_roles')->nullOnDelete();
                 $table->string('role_name');

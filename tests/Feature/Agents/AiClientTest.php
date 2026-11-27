@@ -120,6 +120,8 @@ test('fails safely', function (int|string $status, string $message) {
     Http::fake(['*' => match ($status) {
         'offline' => Http::failedConnection('cURL error 28 for https://api.openai.com/v1 sk-SECRET-123'),
         'not json' => Http::response('<html>Sign in again, sk-SECRET-123 Incorrect API key</html>', 200),
+        // A gateway reporting an error with a 200.
+        'error with 200' => Http::response(['error' => ['message' => 'Incorrect API key provided: sk-SECRET-123']], 200),
         default => Http::response(['error' => ['message' => 'Incorrect API key provided: sk-SECRET-123']], $status),
     }]);
     $logged = [];
@@ -143,6 +145,21 @@ test('fails safely', function (int|string $status, string $message) {
     [500, "The AI provider didn't answer (HTTP 500). Try again later."],
     ['offline', "The AI provider didn't answer in time. Try again later."],
     ['not json', "The AI provider's reply couldn't be read. Try again later."],
+    ['error with 200', "The AI provider's reply couldn't be read. Try again later."],
+    [401, 'The AI provider refused the request (HTTP 401). Check the key and model in Settings → AI.'],
+    [403, 'The AI provider refused the request (HTTP 403). Check the key and model in Settings → AI.'],
+    [404, 'The AI provider refused the request (HTTP 404). Check the key and model in Settings → AI.'],
+]);
+
+test('an Anthropic reply that can\'t be read fails safely', function (array $body) {
+    connectAi($this->ws, AiProviderType::Anthropic);
+    Http::fake(['*' => Http::response($body)]);
+
+    expect(fn () => app(AiClient::class)->chat($this->ws, 'You triage.', $this->messages, $this->tools, 30))
+        ->toThrow(AiProviderError::class, "The AI provider's reply couldn't be read. Try again later.");
+})->with([
+    'no content' => [['error' => ['message' => 'sk-SECRET-123']]],
+    'a tool_use without id' => [['content' => [['type' => 'tool_use', 'name' => 'read_issue', 'input' => []]], 'usage' => ['input_tokens' => 1, 'output_tokens' => 1]]],
 ]);
 
 test('reads tool arguments sent as an object, or not as JSON at all', function () {

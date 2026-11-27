@@ -6,7 +6,9 @@ use App\Enums\AiProviderType;
 use App\Models\Workspace;
 use App\Services\AiRequestGuard;
 use App\Services\AiSettingsService;
+use ErrorException;
 use Illuminate\Http\Client\ConnectionException;
+use TypeError;
 
 /**
  * Step B (B-D1, B-R3): one buffered chat call to the workspace's AI provider, in a neutral shape the run loop uses for
@@ -37,17 +39,23 @@ class AiClient
             // Not chained: the original names the URL.
             throw new AiProviderError("The AI provider didn't answer in time. Try again later.");
         }
+        // The body may echo the key or the prompt, so only the status is kept.
+        $status = $response->status();
+        if (in_array($status, [401, 403, 404], true)) {
+            throw new AiProviderError("The AI provider refused the request (HTTP {$status}). Check the key and model in Settings → AI.");
+        }
         if (! $response->successful()) {
-            // The body may echo the key or the prompt, so only the status is kept.
-            throw new AiProviderError("The AI provider didn't answer (HTTP {$response->status()}). Try again later.");
+            throw new AiProviderError("The AI provider didn't answer (HTTP {$status}). Try again later.");
         }
 
-        $json = $response->json();
-        if (! is_array($json)) {
-            // E.g. a gateway's HTML page with a 200.
-            throw new AiProviderError("The AI provider's reply couldn't be read. Try again later.");
+        // E.g. a gateway's HTML page, or an error object, sent with a 200. Not chained: a parse error can quote the body.
+        try {
+            $json = $response->json();
+            $reply = is_array($json) ? $adapter->reply($json) : null;
+        } catch (ErrorException|TypeError) {
+            $reply = null;
         }
 
-        return $adapter->reply($json);
+        return $reply ?? throw new AiProviderError("The AI provider's reply couldn't be read. Try again later.");
     }
 }

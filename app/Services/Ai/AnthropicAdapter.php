@@ -42,14 +42,19 @@ class AnthropicAdapter
         ]);
     }
 
-    public function reply(array $json): AiReply
+    /** Null when it isn't a Messages reply; a block missing its fields throws, which AiClient also reads as unreadable. */
+    public function reply(array $json): ?AiReply
     {
-        $blocks = collect($json['content'] ?? []);
+        if (! is_array($json['content'] ?? null)) {
+            return null;
+        }
+        $blocks = collect($json['content']);
         $text = $blocks->where('type', 'text')->pluck('text')->implode("\n");
 
         return new AiReply(
             $text !== '' ? $text : null,
             $blocks->where('type', 'tool_use')->map(fn ($b) => ['id' => (string) $b['id'], 'name' => (string) $b['name'], 'args' => (array) ($b['input'] ?? [])])->values()->all(),
+            // shortcut: a reply without usage counts 0 tokens, so budgets and the cap undercount; verify Google's non-streamed usage with a live key.
             (int) ($json['usage']['input_tokens'] ?? 0),
             (int) ($json['usage']['output_tokens'] ?? 0),
         );
