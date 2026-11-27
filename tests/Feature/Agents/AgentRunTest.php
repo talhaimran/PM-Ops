@@ -32,6 +32,7 @@ use App\Services\IssueService;
 use App\Services\NotificationService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\Events\ShouldDispatchAfterCommit;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
@@ -331,6 +332,36 @@ test('a provider error fails the run with its own plain message', function () {
     scriptAi([fn () => throw new RuntimeException('SQLSTATE secret detail sk-RUN-SECRET')]);
     $run = runAgentNow(startTriage($this));
     expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'The run stopped because of an error. Try again.']);
+});
+
+test('security fix B: a reply that crosses the token budget is not acted on', function () {
+    $this->ws->forceFill(['settings' => [...($this->ws->settings ?? []), 'run_token_budget' => 1000]])->save();
+    scriptAi([toolReply('propose_fields', ['priority' => 'high'], 600, 600)]);
+    $run = runAgentNow(startTriage($this));
+    expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'Stopped: reached the 1,000-token budget'])
+        ->and($run->changes()->count())->toBe(0)
+        ->and($run->steps)->toHaveCount(1)
+        ->and($run->steps[0])->not->toHaveKey('calls');
+
+    scriptAi([new AiReply('Final words', [], 600, 600)]);
+    $run = runAgentNow(startTriage($this));
+    expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'Stopped: reached the 1,000-token budget'])
+        ->and($run->changes()->count())->toBe(0);
+});
+
+test('security fix D: a crash is logged with the run id and class only, never its message', function () {
+    $logged = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $e) use (&$logged) {
+        $logged[] = $e;
+    });
+    scriptAi([fn () => throw new RuntimeException('Bearer sk-secret-123 {"raw":"provider body"}')]);
+    $run = runAgentNow(startTriage($this));
+
+    expect([$run->status, $run->error])->toBe([AgentRunStatus::Failed, 'The run stopped because of an error. Try again.'])
+        ->and($logged)->toHaveCount(1)
+        ->and([$logged[0]->level, $logged[0]->message])->toBe(['error', 'Agent run crashed'])
+        ->and($logged[0]->context)->toMatchArray(['run_id' => $run->id, 'exception' => RuntimeException::class])
+        ->and(json_encode(array_map(fn ($e) => [$e->message, $e->context], $logged)))->not->toContain('sk-secret-123')->not->toContain('provider body');
 });
 
 test('a reply without usage marks its step estimated', function () {

@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -101,11 +102,11 @@ class AgentRunService
                 throw ValidationException::withMessages(['issue' => "{$agent->label()} can't see {$issue->key}. Add its project to the agent in Settings → Agents."]);
             }
         }
-        if ($stop = $this->overCap($workspace)) {
-            throw ValidationException::withMessages(['issue' => $stop]);
-        }
-
         $runs = $this->entitlements->locked($workspace, function () use ($workspace, $starter, $agent, $issues, $role, $instruction) {
+            // Inside the lock, so concurrent starts are serialized on the month's cap.
+            if ($stop = $this->overCap($workspace)) {
+                throw ValidationException::withMessages(['issue' => $stop]);
+            }
             $today = AgentRun::where('workspace_id', $workspace->id)->where('user_id', $starter->id)->where('created_at', '>=', now()->utc()->startOfDay())->count();
             $this->entitlements->ensureCount($workspace, Entitlement::AgentRunsPerDay, $today, $issues->count());
 
@@ -156,7 +157,8 @@ class AgentRunService
             // The guard refusing the provider's address: its message names the rule, not the key.
             $this->end($run, AgentRunStatus::Failed, collect($e->errors())->flatten()->first());
         } catch (Throwable $e) {
-            report($e);
+            // Never the message, trace or previous: they can carry a provider body, issue data or headers.
+            Log::error('Agent run crashed', ['run_id' => $runId, 'exception' => $e::class, 'at' => basename($e->getFile()).':'.$e->getLine()]);
             $this->end($run, AgentRunStatus::Failed, 'The run stopped because of an error. Try again.');
         } finally {
             $previous ? $this->current->set($previous) : $this->current->forget();
@@ -216,6 +218,13 @@ class AgentRunService
 
                 return;
             }
+            // A reply that crosses the budget is not acted on: its calls aren't run and its text isn't proposed.
+            if ($stop = $this->overBudget($run, (int) $workspace->setting('run_token_budget'))) {
+                $this->save($run, [...$steps, $entry]);
+                $this->end($run, AgentRunStatus::Failed, $stop);
+
+                return;
+            }
             if (! $reply->toolCalls) {
                 $this->save($run, [...$steps, $entry]);
                 $this->end($run, AgentRunStatus::Finished, null, $reply->text);
@@ -229,8 +238,8 @@ class AgentRunService
                 $failed = isset($result['error']);
                 // shortcut: results are cut to RESULT_CHARS in the stored log (the model got them whole), keep more if the run panel needs it.
                 $entry['calls'][] = ['tool' => $call['name'], 'args' => $call['args'], ...($failed ? ['error' => $result['error']] : ['result' => Str::limit(json_encode($result, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), self::RESULT_CHARS)])];
-                // Results are issue data, so they go back marked like the first message.
-                $messages[] = ['role' => 'tool', 'tool_call_id' => $call['id'], 'name' => $call['name'], 'content' => $failed ? $result['error'] : RunPrompt::untrusted($result)];
+                // Results (errors too: they can echo model or issue text) are issue data, so they go back marked like the first message.
+                $messages[] = ['role' => 'tool', 'tool_call_id' => $call['id'], 'name' => $call['name'], 'content' => RunPrompt::untrusted($result)];
             }
             $steps[] = $entry;
             $this->save($run, $steps);
@@ -251,9 +260,14 @@ class AgentRunService
             ?? $this->readOnly($workspace)
             ?? (! $this->ai->modeCEnabled($issue->project) ? self::MODE_C_OFF : null)
             ?? ($step > $maxSteps ? "Stopped: reached the {$maxSteps}-step limit" : null)
-            ?? ($run->tokens_in + $run->tokens_out >= $budget ? 'Stopped: reached the '.number_format($budget).'-token budget' : null)
+            ?? $this->overBudget($run, $budget)
             ?? (now()->gte($deadline) ? 'Stopped: reached the '.($seconds % 60 ? "{$seconds}-second" : ($seconds / 60).'-minute').' time limit' : null)
             ?? $this->overCap($workspace);
+    }
+
+    private function overBudget(AgentRun $run, int $budget): ?string
+    {
+        return $run->tokens_in + $run->tokens_out >= $budget ? 'Stopped: reached the '.number_format($budget).'-token budget' : null;
     }
 
     /** B-D10: the month's usage reached the workspace's cap (none set: no cap). */
