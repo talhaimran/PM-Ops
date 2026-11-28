@@ -16,10 +16,12 @@ use App\Models\Issue;
 use App\Models\IssueLink;
 use App\Models\ProjectAgentSettings;
 use App\Models\User;
+use App\Services\ActivityLogger;
 use App\Services\AgentRunService;
 use App\Services\Ai\AiReply;
 use App\Services\ChangeSetService;
 use App\Services\IssueService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
 // Step B (B-D3, B-D6, B-R6..B-R8, B-R11, B-R17): applying and discarding what a run proposed, and the run web routes.
@@ -122,6 +124,19 @@ test('Review Focus 3: a field someone changed after the proposal is a conflict s
     expect($priority->fresh()->status)->toBe(AgentRunChangeStatus::Discarded);
 });
 
+test('a field change whose history since the proposal is cut off is a conflict', function () {
+    $run = proposingRun($this);
+    $issue = $this->issue->fresh();
+    $row = ['issue_id' => $issue->id, 'action' => 'updated', 'changes' => json_encode(['story_points' => ['from' => null, 'to' => 1]]), 'via' => 'web', 'created_at' => now()];
+    Activity::insert(array_map(fn ($v) => [...$row, 'issue_version' => $v], range($issue->version + 1, $issue->version + ActivityLogger::CHANGES_CAP + 1)));
+    $issue->forceFill(['version' => $issue->version + ActivityLogger::CHANGES_CAP + 1])->saveQuietly();
+
+    $result = app(ChangeSetService::class)->apply($run, $this->owner, $priority = changeOf($run, 'field', 'priority'));
+
+    expect($result['conflicts'])->toEqual([['id' => $priority->id, 'message' => 'WEB-1 changed too much since this was proposed to check this field. Discard it, or start a new run to propose it again.']])
+        ->and($this->issue->fresh()->priority)->toBe(IssuePriority::Medium);
+});
+
 test('a link to an issue that is gone, or a child the issue can\'t take, is a conflict with the reason', function () {
     $run = proposingRun($this);
     app(IssueService::class)->delete($this->other, $this->owner);
@@ -188,10 +203,16 @@ test('B-R6/B-R1: a role switched to apply applies in the job as the agent; a Rea
     $triage = ($this->role)('Triage');
     $this->ws->forceFill(['settings' => [...($this->ws->settings ?? []), 'agent_role_apply' => [$triage->id => 'apply']]])->save();
     scriptAi([toolReply('propose_fields', ['priority' => 'high']), new AiReply('Raised it.', [], 1, 1)]);
+    // Fix round 1: the final comment is applied after end()'s transaction, at the same depth as the field change.
+    $depth = [];
+    Activity::created(function (Activity $a) use (&$depth) {
+        $depth[$a->action] = DB::transactionLevel();
+    });
 
     $run = runAgentNow($this->runs->start($this->owner, $this->agent, $this->issue, $triage, null));
 
-    expect($run->status)->toBe(AgentRunStatus::Finished)
+    expect($depth['commented'])->toBe($depth['updated'])
+        ->and($run->status)->toBe(AgentRunStatus::Finished)
         ->and($run->changes()->pluck('status')->unique()->all())->toEqual([AgentRunChangeStatus::Applied])
         ->and($this->issue->fresh()->priority)->toBe(IssuePriority::High)
         ->and(Comment::sole()->only(['user_id', 'agent_id']))->toEqual(['user_id' => $this->owner->id, 'agent_id' => $this->agent->id])
@@ -206,6 +227,20 @@ test('B-R6/B-R1: a role switched to apply applies in the job as the agent; a Rea
     expect($readRun->changes()->pluck('status')->unique()->all())->toEqual([AgentRunChangeStatus::Proposed])
         ->and($typed->changes()->pluck('status')->unique()->all())->toEqual([AgentRunChangeStatus::Proposed])
         ->and($this->issue->fresh()->priority)->toBe(IssuePriority::High);
+});
+
+test('a cancel landing during a propose call stops its direct apply', function () {
+    $triage = ($this->role)('Triage');
+    $this->ws->forceFill(['settings' => [...($this->ws->settings ?? []), 'agent_role_apply' => [$triage->id => 'apply']]])->save();
+    scriptAi([toolReply('propose_fields', ['priority' => 'high'])]);
+    $run = $this->runs->start($this->owner, $this->agent, $this->issue, $triage, null);
+    AgentRunChange::created(fn () => $this->runs->cancel($run, $this->owner));
+
+    $run = runAgentNow($run);
+
+    expect($run->status)->toBe(AgentRunStatus::Cancelled)
+        ->and($run->changes()->pluck('status')->all())->toEqual([AgentRunChangeStatus::Proposed])
+        ->and($this->issue->fresh()->priority)->toBe(IssuePriority::Medium);
 });
 
 test('a custom role\'s apply_mode switches direct apply', function () {

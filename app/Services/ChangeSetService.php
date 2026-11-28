@@ -120,7 +120,11 @@ class ChangeSetService
                 // B-R8, per field: a newer edit of another field doesn't stop this one. The version read first, so an
                 // edit after the check still fails IssueService's own version check (EditConflict).
                 $version = Issue::whereKey($issue->id)->value('version');
-                $touched = collect($this->activity->changesSince($issue, (int) $change->issue_version, $by))->firstWhere('field', $change->target);
+                $touched = collect($this->activity->changesSince($issue, (int) $change->issue_version, $by, $truncated))->firstWhere('field', $change->target);
+                if ($truncated && ! $touched) {
+                    // Older rows were left out, so an edit of this field may be among them: never overwrite it unseen.
+                    return "{$issue->key} changed too much since this was proposed to check this field. Discard it, or start a new run to propose it again.";
+                }
                 if ($touched) {
                     return ActivityLogger::describe([$touched], $issue->key).' since this was proposed.';
                 }

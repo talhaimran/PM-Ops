@@ -241,7 +241,8 @@ class AgentRunService
                 }
                 $result = $this->tools->call($run, (string) $call['name'], (array) $call['args']);
                 $failed = isset($result['error']);
-                if (! $failed && isset($result['proposed'])) {
+                // A cancel that landed during the call: the change stays proposed.
+                if (! $failed && isset($result['proposed']) && ! $this->cancelled($run)) {
                     $this->applyDirectly($run);
                 }
                 // shortcut: results are cut to RESULT_CHARS in the stored log (the model got them whole), keep more if the run panel needs it.
@@ -326,27 +327,32 @@ class AgentRunService
         $run->save();
     }
 
-    /** Ends a run still queued or running (a cancelled one stays cancelled); the reply becomes a proposed comment (B-D8); the starter hears (B-R12). */
+    /** Ends a run still queued or running (a cancelled one stays cancelled); the reply becomes a proposed comment (B-D8), applied after commit when the role applies directly; the starter hears (B-R12). */
     private function end(AgentRun $run, AgentRunStatus $status, ?string $error, ?string $reply = null): void
     {
-        DB::transaction(function () use ($run, $status, $error, $reply) {
+        $ended = DB::transaction(function () use ($run, $status, $error, $reply) {
             $ended = AgentRun::whereKey($run->id)->whereIn('status', [AgentRunStatus::Queued, AgentRunStatus::Running])
                 ->update(['status' => $status, 'error' => $error === null ? null : Str::limit($error, 250), 'finished_at' => now()]);
             if (! $ended) {
-                return;
+                return false;
             }
             // Loaded here: crashed() and the issue-gone path come with nothing loaded.
             $run->loadMissing(['issue.project', 'user', 'agent']);
             $issue = $run->issue;
             if (filled($reply)) {
                 AgentRunChange::create(['run_id' => $run->id, 'kind' => 'comment', 'after' => ['body' => $reply], 'issue_version' => $issue?->version, 'status' => AgentRunChangeStatus::Proposed]);
-                $this->applyDirectly($run);
             }
             if ($issue && $run->user) {
                 ActivityLogger::forRun($run, fn () => $this->notifications->notify($run->user, $issue, "agent_run.{$status->value}",
                     ['action' => $status->value, 'from' => null, 'to' => $error], null, $run->agent, 'agent_run', batch: false));
             }
             event(new AgentRunChanged($run->user_id, $run->id, $status->value));
+
+            return true;
         });
+        // After the commit: applying takes the link lock and row locks, never while the run row is held (2-R4).
+        if ($ended && filled($reply)) {
+            $this->applyDirectly($run);
+        }
     }
 }
