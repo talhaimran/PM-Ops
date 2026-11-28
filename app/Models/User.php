@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Enums\WorkspaceRole;
+use App\Services\ActivityLogger;
 use App\Services\CurrentWorkspace;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -93,12 +94,18 @@ class User extends Authenticatable
             ->selectSub(DB::table('project_user')->select('role')->whereColumn('project_id', 'projects.id')->where('user_id', $this->id), 'my_role')
             ->where('projects.workspace_id', $current->id() ?? 0)
             ->unless($seesAll, fn ($q) => $q->whereHas('members', fn ($m) => $m->whereKey($this->id)))
-            ->when($this->tokenProjectIds(), fn ($q, $ids) => $q->whereIn('projects.id', $ids));
+            ->when($this->tokenProjectIds(), fn ($q, $ids) => $q->whereIn('projects.id', $ids))
+            // A run sends what it reads to the AI provider: projects whose Admins turned Mode C off are out of its reach.
+            ->when(ActivityLogger::run($this), fn ($q) => $q->whereNotExists(fn ($s) => $s->from('project_agent_settings')
+                ->whereColumn('project_agent_settings.project_id', 'projects.id')->where('mode_c_enabled', false)));
     }
 
-    /** The agent whose token made this request (spec 8, A-D1); null for people. Cached for the token in use. */
+    /** The agent whose token made this request (spec 8, A-D1), or whose in-app run is working (B-R1); null for people. Cached for the token in use. */
     public function agent(): ?Agent
     {
+        if ($run = ActivityLogger::run($this)) {
+            return $run->agent;
+        }
         $token = $this->currentAccessToken();
         $agentId = $token instanceof PersonalAccessToken || $token instanceof OAuthToken ? $token->agent_id : null;
         if (! $agentId) {
@@ -114,6 +121,10 @@ class User extends Authenticatable
     /** The request came with a bearer token (an agent's Sanctum token, or an MCP client's OAuth token), not a session. */
     public function viaToken(): bool
     {
+        // B-R1: an in-app run acts like the agent's token, so every agent rule applies to it.
+        if (ActivityLogger::run($this)) {
+            return true;
+        }
         $token = $this->currentAccessToken();
 
         return $token instanceof PersonalAccessToken || $token instanceof OAuthToken || $token instanceof OAuthTransientToken;

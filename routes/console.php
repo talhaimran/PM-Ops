@@ -11,7 +11,7 @@ Artisan::command('inspire', function () {
 
 // 3-R16, owner ruling on the PR 5 review: every job below also runs in suspended workspaces. Suspension stops people,
 // agents and staff from changing things; this is upkeep they already chose or the system owes (trash retention, the
-// Owner's scheduled deletion, approval expiry, link repair, support-session end, yesterday's agent summary).
+// Owner's scheduled deletion, approval expiry, run-log pruning, link repair, support-session end, yesterday's agent summary).
 
 // Soft-deleted issues and comments are removed for good after 30 days (spec 5.1, leaning).
 Schedule::command('issues:purge')->daily();
@@ -21,6 +21,9 @@ Schedule::command('links:reconcile-duplicates')->daily();
 
 // D2: workspaces scheduled for deletion go for good after 7 days.
 Schedule::command('workspaces:purge')->daily();
+
+// B-D5: agent runs keep full detail for 30 days, then who, when, the issue and tokens.
+Schedule::command('agent-runs:prune')->daily();
 
 // A2: approval requests expire after 7 days; the agent can ask again.
 Schedule::command('approvals:expire')->hourly();

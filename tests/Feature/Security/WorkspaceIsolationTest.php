@@ -1,12 +1,15 @@
 <?php
 
+use App\Enums\AgentRunStatus;
 use App\Enums\AgentStatus;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
+use App\Events\AgentRunChanged;
 use App\Mcp\Servers\LocalPmServer;
 use App\Mcp\Servers\PmServer;
 use App\Mcp\Tools;
 use App\Models\Agent;
+use App\Models\AgentRun;
 use App\Models\AiProvider;
 use App\Models\Column;
 use App\Models\Comment;
@@ -584,6 +587,23 @@ test('live channels: acting in A never subscribes to B\'s projects, and a user c
     // The legitimate ones still work.
     channelAuth($this->ann, "workspace.{$this->a->id}.project.{$web->id}")->assertOk();
     channelAuth($this->bob, "workspace.{$this->b->id}.project.{$ops->id}")->assertOk();
+});
+
+test('agent runs: a run of another workspace or another person is never listed, and its live event goes to its starter only', function () {
+    useReverbForChannelAuth();
+    $run = fn (Workspace $ws, User $user) => AgentRun::create(['workspace_id' => $ws->id, 'issue_key' => 'WEB-1', 'user_id' => $user->id, 'role_name' => 'Triage', 'status' => AgentRunStatus::Finished]);
+    $bRun = $run($this->b, $this->ann);
+    $carol = User::factory()->create();
+    $this->a->addMember($carol, WorkspaceRole::Admin);
+    $carolsRun = $run($this->a, $carol);
+    $annsRun = $run($this->a, $this->ann);
+
+    expect(AgentRun::visibleTo($this->ann)->pluck('id')->all())->toBe([$annsRun->id])
+        ->and(AgentRun::visibleTo($carol)->pluck('id')->all())->toBe([$carolsRun->id])
+        ->and(AgentRun::visibleTo($this->ann)->whereKey($bRun->id)->exists())->toBeFalse()
+        ->and((new AgentRunChanged($this->ann->id, $annsRun->id, 'finished'))->broadcastOn()->name)->toBe("private-user.{$this->ann->id}");
+    channelAuth($carol, "user.{$this->ann->id}")->assertForbidden();
+    channelAuth($this->bob, "user.{$this->ann->id}")->assertForbidden();
 });
 
 test('the internal admin API answers a user\'s Sanctum or OAuth token, from either workspace, with a bare 401', function () {

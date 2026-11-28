@@ -23,7 +23,7 @@ use Illuminate\Validation\ValidationException;
 class NotificationService
 {
     /** Events that always get their own row: they are never joined, and never join another row. */
-    private const OWN_ROW = ['mention', 'approval_request', 'agent_summary'];
+    private const OWN_ROW = ['mention', 'approval_request', 'agent_summary', 'agent_run.finished', 'agent_run.failed'];
 
     /** Most issue keys a summary shows (its text says how many in all). shortcut: first 50 keys, page them if owners ask. */
     public const SUMMARY_KEYS = 50;
@@ -61,6 +61,8 @@ class NotificationService
             return InboxItem::create([
                 'workspace_id' => $workspaceId, 'user_id' => $to->id, 'issue_id' => $issue->id, 'event' => $event,
                 'actor_user_id' => $actor?->id, 'agent_id' => $agent?->id, 'via' => $via, 'changes' => [$change],
+                // B-R1: whatever an in-app run causes names it.
+                'agent_run_id' => ActivityLogger::run()?->id,
             ]);
         }, 3); // Two first changes for one recipient can deadlock on the empty-range lock above; InnoDB kills one, so retry it.
     }
@@ -194,6 +196,8 @@ class NotificationService
             'reopened' => "{$who} reopened {$key}",
             'approval_request' => "{$who} asked to move {$key} to {$last['to']}",
             'mention' => "{$who} mentioned you on {$key}",
+            'agent_run.finished' => "{$who} finished its run on {$key}",
+            'agent_run.failed' => "{$who}'s run on {$key} stopped: {$last['to']}",
             default => "{$who} changed {$key}",
         };
     }

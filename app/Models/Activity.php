@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['issue_id', 'user_id', 'action', 'changes', 'via', 'token_name', 'agent_id', 'issue_version'])]
+#[Fillable(['issue_id', 'user_id', 'action', 'changes', 'via', 'token_name', 'agent_id', 'agent_run_id', 'issue_version'])]
 class Activity extends Model
 {
     public const UPDATED_AT = null;

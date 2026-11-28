@@ -3,13 +3,19 @@
 use App\Enums\AgentLevel;
 use App\Enums\ProjectRole;
 use App\Enums\WorkspaceRole;
+use App\Jobs\RunAgent;
 use App\Models\Agent;
+use App\Models\AgentRun;
+use App\Models\AiProvider;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
+use App\Services\AgentRunService;
 use App\Services\AgentService;
+use App\Services\Ai\AiClient;
+use App\Services\Ai\AiReply;
 use App\Services\CurrentWorkspace;
 use App\Services\InvitationService;
 use App\Services\IssueService;
@@ -334,4 +340,49 @@ function internalApi(string $method, string $uri, array $data = [], ?string $key
     }
 
     return test()->withHeaders($headers)->json($method, '/internal/v1/'.$uri, $data);
+}
+
+/** Step B: a usable AI provider for $workspace (Anthropic, a stored test key), so Mode C can run. */
+function aiReady(Workspace $workspace, array $attributes = []): AiProvider
+{
+    return AiProvider::updateOrCreate(['workspace_id' => $workspace->id], ['provider' => 'anthropic', 'model' => 'test-model', 'key' => 'sk-RUN-SECRET', ...$attributes]);
+}
+
+/**
+ * Step B: binds a scripted AiClient. Each chat() takes the next item: an AiReply, or a Closure returning one (to act
+ * mid-run). The script running out ends the run with "Done.". `calls` keeps what each chat() was sent.
+ */
+function scriptAi(array $script): AiClient
+{
+    $fake = new class($script) extends AiClient
+    {
+        public array $calls = [];
+
+        public function __construct(public array $script) {}
+
+        public function chat(Workspace $workspace, string $system, array $messages, array $tools, int $timeout): AiReply
+        {
+            $this->calls[] = compact('system', 'messages', 'tools', 'timeout');
+            $next = array_shift($this->script) ?? new AiReply('Done.', [], 1, 1);
+
+            return $next instanceof Closure ? $next() : $next;
+        }
+    };
+    app()->instance(AiClient::class, $fake);
+
+    return $fake;
+}
+
+/** A provider reply asking for one tool call. */
+function toolReply(string $name, array $args, int $in = 100, int $out = 20, ?string $id = null): AiReply
+{
+    return new AiReply(null, [['id' => $id ?? 'call_'.Str::random(6), 'name' => $name, 'args' => $args]], $in, $out);
+}
+
+/** Runs a queued agent run's job now, as the worker would, and returns the run as stored. */
+function runAgentNow(AgentRun $run): AgentRun
+{
+    (new RunAgent($run->id))->handle(app(AgentRunService::class));
+
+    return $run->fresh();
 }
