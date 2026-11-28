@@ -13,7 +13,9 @@ export interface AskPreset {
 
 /** "Ask agent" (spec 8): one of your own active agents, a role or a typed instruction. Progress shows in the run panel. */
 export default function AskAgent({ issueKey, ask, preset, onClose }: { issueKey: string; ask: AskAgentData; preset: AskPreset; onClose: () => void }) {
-    const form = useForm({ agent: String(preset.agent ?? ask.agents[0]?.id ?? ''), role: String(preset.role ?? ''), instruction: preset.instruction ?? '' });
+    // A preset agent that is no longer one of yours falls back to the first.
+    const agent = ask.agents.some((a) => a.id === preset.agent) ? preset.agent : ask.agents[0]?.id;
+    const form = useForm({ agent: String(agent ?? ''), role: String(preset.role ?? ''), instruction: preset.instruction ?? '' });
 
     if (!ask.agents.length) {
         return (
@@ -62,7 +64,8 @@ export default function AskAgent({ issueKey, ask, preset, onClose }: { issueKey:
                 value={form.data.instruction}
                 onChange={(e) => form.setData('instruction', e.target.value)}
             />
-            <InputError message={form.errors.agent ?? form.errors.role ?? form.errors.instruction} />
+            {/* Any refusal: the cap, Mode C off, a suspended workspace, an agent that can't see the project. */}
+            <InputError message={Object.values(form.errors)[0]} />
             <div className="flex justify-end gap-2">
                 <SecondaryButton onClick={onClose}>Cancel</SecondaryButton>
                 <PrimaryButton disabled={form.processing}>Ask</PrimaryButton>

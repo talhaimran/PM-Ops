@@ -62,7 +62,7 @@ trait PresentsIssue
         $workspaceId = $issue->project->workspace_id;
         $ask = null;
         if (app(AiSettingsService::class)->modeCEnabled($issue->project) && $user->can('contribute', $issue->project)) {
-            $lastRun = AgentRun::selectRaw('agent_id, max(id) as last_run')->groupBy('agent_id');
+            $lastRun = AgentRun::where('user_id', $user->id)->selectRaw('agent_id, max(id) as last_run')->groupBy('agent_id');
             $ask = [
                 'agents' => Agent::where('agents.owner_user_id', $user->id)->where('agents.workspace_id', $workspaceId)->where('status', AgentStatus::Active)
                     ->leftJoinSub($lastRun, 'lr', 'lr.agent_id', '=', 'agents.id')->orderByRaw('lr.last_run is null')->orderByDesc('lr.last_run')->orderBy('agents.name')

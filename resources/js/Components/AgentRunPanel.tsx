@@ -1,5 +1,6 @@
 import { isActive, runActions, shortArgs } from '@/agentRun';
 import Avatar from '@/Components/Avatar';
+import InputError from '@/Components/InputError';
 import ChangeSetDiff from '@/Components/ChangeSetDiff';
 import { useWarningConfirm } from '@/Components/WarningConfirm';
 import { AgentRun, AgentRunStatus } from '@/types';
@@ -17,16 +18,26 @@ const statusTint: Record<AgentRunStatus, [string, string]> = {
 
 /**
  * Design system agent run panel: who ran, what it read and called (collapsed), and the change set it proposes with
- * Apply all / per-change Apply and Discard. `onProposeAgain` starts the run again (B-R8).
+ * Apply all / per-change Apply and Discard. Propose again starts the same run (`canRepeat`) or opens Ask (`onAsk`, B-R8).
+ * A refusal (applied meanwhile, issue gone, the month's cap…) shows under the panel.
  */
-export default function AgentRunPanel({ run, onProposeAgain }: { run: AgentRun; onProposeAgain: () => void }) {
+export default function AgentRunPanel({ run, issueKey, canRepeat, onAsk }: { run: AgentRun; issueKey: string; canRepeat: boolean; onAsk: () => void }) {
     const [busy, setBusy] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [ask, dialog] = useWarningConfirm();
     const act = runActions(run);
     const [label, tint] = statusTint[run.status];
     const calls = (run.steps ?? []).flatMap((s) => s.calls ?? []);
-    const post = (name: string, params: number[]) =>
-        router.post(route(name, params), {}, { preserveScroll: true, preserveState: true, onStart: () => setBusy(true), onFinish: () => setBusy(false) });
+    const send = (url: string, data: Record<string, unknown> = {}) =>
+        router.post(url, data as never, {
+            preserveScroll: true,
+            preserveState: true,
+            onStart: () => (setBusy(true), setError(null)),
+            onError: (errors) => setError(Object.values(errors)[0] ?? null),
+            onFinish: () => setBusy(false),
+        });
+    const post = (name: string, params: number[]) => send(route(name, params));
+    const proposeAgain = () => (canRepeat ? send(route('runs.store', issueKey), { agent: run.agent_id, role: run.role_id, instruction: run.instruction }) : onAsk());
 
     return (
         <article className="space-y-3 rounded-card border border-line bg-card p-4" aria-label="Agent run">
@@ -62,7 +73,7 @@ export default function AgentRunPanel({ run, onProposeAgain }: { run: AgentRun; 
             {(act.apply > 0 || act.discard > 0 || act.propose) && !isActive(run) && (
                 <div className="flex flex-wrap justify-end gap-2">
                     {act.propose && (
-                        <button type="button" disabled={busy} className={`${button} border border-line-2 text-text hover:bg-card-2`} onClick={onProposeAgain}>
+                        <button type="button" disabled={busy} className={`${button} border border-line-2 text-text hover:bg-card-2`} onClick={proposeAgain}>
                             Propose again
                         </button>
                     )}
@@ -90,6 +101,7 @@ export default function AgentRunPanel({ run, onProposeAgain }: { run: AgentRun; 
                     )}
                 </div>
             )}
+            <InputError message={error ?? undefined} />
             {dialog}
         </article>
     );
