@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AgentRunChangeStatus;
+use App\Enums\AgentRunStatus;
 use App\Enums\IssueType;
 use App\Events\AgentRunChanged;
 use App\Exceptions\EditConflict;
@@ -44,20 +45,19 @@ class ChangeSetService
     /**
      * Applies $only, or every proposed change in order. A field someone changed since the proposal, a link whose other
      * issue is gone or hidden, or anything a service refuses is marked `conflict` with the reason; the rest go on.
+     * $direct (inside the job): a change is left proposed once the run is cancelled, checked under the run's row lock.
      *
      * @return array{applied: int, conflicts: list<array{id: int, message: string}>}
      */
-    public function apply(AgentRun $run, User $by, ?AgentRunChange $only = null): array
+    public function apply(AgentRun $run, User $by, ?AgentRunChange $only = null, bool $direct = false): array
     {
-        $issue = $this->issue($run, $by, $only);
-        // B-R7: they must be allowed to make the change themselves (a Viewer can't).
-        Gate::forUser($by)->authorize('update', $issue);
+        $issue = $this->editable($run, $by, $only);
         $changes = $only ? collect([$only]) : $run->changes()->where('status', AgentRunChangeStatus::Proposed)->orderBy('id')->get();
         $applied = 0;
         $conflicts = [];
-        ActivityLogger::forRunApply($run, function () use ($changes, $issue, $by, $only, &$applied, &$conflicts) {
+        ActivityLogger::forRunApply($run, function () use ($changes, $issue, $by, $only, $direct, $run, &$applied, &$conflicts) {
             foreach ($changes as $change) {
-                $work = fn () => $this->applyOne($change->id, $issue, $by, (bool) $only);
+                $work = fn () => $this->applyOne($change->id, $issue, $by, (bool) $only, $direct ? $run->id : null);
                 // Links take the workspace's link lock before any transaction (2-R4).
                 $result = $change->kind === 'link' ? $this->links->withLinkLock($issue, $work) : $work();
                 if ($result === true) {
@@ -75,7 +75,7 @@ class ChangeSetService
     /** Discards $only, or every change not applied yet (proposed or conflict). Returns how many. */
     public function discard(AgentRun $run, User $by, ?AgentRunChange $only = null): int
     {
-        $this->issue($run, $by, $only);
+        $this->editable($run, $by, $only);
         // One conditional update: a change applied meanwhile is left alone.
         $count = $run->changes()->when($only, fn ($q) => $q->whereKey($only->id))
             ->whereIn('status', [AgentRunChangeStatus::Proposed, AgentRunChangeStatus::Conflict])->update(['status' => AgentRunChangeStatus::Discarded]);
@@ -88,9 +88,13 @@ class ChangeSetService
     }
 
     /** True when applied, false when skipped (apply all: settled meanwhile), else the conflict's message. */
-    private function applyOne(int $id, Issue $issue, User $by, bool $single): bool|string
+    private function applyOne(int $id, Issue $issue, User $by, bool $single, ?int $unlessCancelled): bool|string
     {
-        return DB::transaction(function () use ($id, $issue, $by, $single) {
+        return DB::transaction(function () use ($id, $issue, $by, $single, $unlessCancelled) {
+            // Held until commit, so cancel() waits for this write or this write sees the cancel (run row first, 2-R4).
+            if ($unlessCancelled && AgentRun::whereKey($unlessCancelled)->lockForUpdate()->value('status') === AgentRunStatus::Cancelled) {
+                return false;
+            }
             $change = AgentRunChange::whereKey($id)->lockForUpdate()->firstOrFail();
             if ($change->status !== AgentRunChangeStatus::Proposed) {
                 return $single ? throw self::settled($change) : false;
@@ -144,8 +148,11 @@ class ChangeSetService
         return null;
     }
 
-    /** The run's issue as $by (its starter) sees it now: deleted or out of their sight, nothing is applied or discarded. */
-    private function issue(AgentRun $run, User $by, ?AgentRunChange $only): Issue
+    /**
+     * The run's issue as $by (its starter) sees it now, if they may still edit it: deleted or out of their sight is
+     * "not found", a Viewer is refused (B-R7). Apply, discard and cancel all ask this.
+     */
+    public function editable(AgentRun $run, User $by, ?AgentRunChange $only = null): Issue
     {
         if ($run->user_id !== $by->id) {
             throw ValidationException::withMessages(['run' => "Run {$run->id} was not found."])->status(404);
@@ -154,8 +161,11 @@ class ChangeSetService
             throw ValidationException::withMessages(['change' => "Change {$only->id} was not found. Open the run to see its changes."])->status(404);
         }
 
-        return Issue::visibleTo($by)->with('project')->find($run->issue_id)
+        $issue = Issue::visibleTo($by)->with('project')->find($run->issue_id)
             ?? throw ValidationException::withMessages(['issue' => "{$run->issue_key} was deleted, or you can no longer see it."])->status(404);
+        Gate::forUser($by)->authorize('update', $issue);
+
+        return $issue;
     }
 
     private static function settled(AgentRunChange $change): ValidationException

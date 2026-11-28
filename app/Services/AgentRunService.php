@@ -124,12 +124,13 @@ class AgentRunService
         return $runs;
     }
 
-    /** The starter stops their run; a call in flight finishes first and its tokens count (B-R15). No notification. */
+    /** The starter stops their run, while they may still edit its issue; a call in flight finishes first and its tokens count (B-R15). No notification. */
     public function cancel(AgentRun $run, User $user): void
     {
         if (! AgentRun::visibleTo($user)->whereKey($run->id)->exists()) {
             throw ValidationException::withMessages(['run' => "Run {$run->id} was not found."])->status(404);
         }
+        $this->changes->editable($run, $user);
         if (AgentRun::whereKey($run->id)->whereIn('status', [AgentRunStatus::Queued, AgentRunStatus::Running])->update(['status' => AgentRunStatus::Cancelled, 'finished_at' => now()])) {
             event(new AgentRunChanged($run->user_id, $run->id, 'cancelled'));
         }
@@ -303,7 +304,7 @@ class AgentRunService
             return;
         }
         try {
-            $this->changes->apply($run, $run->user);
+            $this->changes->apply($run, $run->user, direct: true);
         } catch (AuthorizationException|ValidationException) {
             // Left proposed: the starter decides in the panel.
         }

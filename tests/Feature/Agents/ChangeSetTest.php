@@ -22,6 +22,7 @@ use App\Services\Ai\AiReply;
 use App\Services\ChangeSetService;
 use App\Services\IssueService;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 
 // Step B (B-D3, B-D6, B-R6..B-R8, B-R11, B-R17): applying and discarding what a run proposed, and the run web routes.
@@ -177,17 +178,24 @@ test('a starter who lost the project gets "not found"; a starter now a Viewer is
     addMember($this->web, $bob, ProjectRole::Member);
     [$bobsAgent] = makeAgent($bob, AgentLevel::Write);
     $run = proposingRun($this, $bob, $bobsAgent);
+    $queued = $this->runs->start($bob, $bobsAgent, $this->issue, ($this->role)('Triage'), null);
     $this->actingAs($bob);
 
+    // PR 53 review: cancel and discard follow the same rule as apply.
     $this->web->members()->updateExistingPivot($bob->id, ['role' => ProjectRole::Viewer->value]);
     $this->post(w("/runs/{$run->id}/apply"))->assertForbidden();
     $this->post(w("/runs/{$run->id}/changes/".changeOf($run, 'comment')->id.'/apply'))->assertForbidden();
+    $this->post(w("/runs/{$run->id}/discard"))->assertForbidden();
+    $this->post(w("/runs/{$run->id}/changes/".changeOf($run, 'comment')->id.'/discard'))->assertForbidden();
+    $this->post(w("/runs/{$queued->id}/cancel"))->assertForbidden();
 
     $this->web->members()->detach($bob->id);
     $gone = ['issue' => 'WEB-1 was deleted, or you can no longer see it.'];
     $this->post(w("/runs/{$run->id}/apply"))->assertSessionHasErrors($gone);
     $this->post(w("/runs/{$run->id}/discard"))->assertSessionHasErrors($gone);
+    $this->post(w("/runs/{$queued->id}/cancel"))->assertSessionHasErrors($gone);
     expect($run->changes()->pluck('status')->unique()->all())->toEqual([AgentRunChangeStatus::Proposed])
+        ->and($queued->fresh()->status)->toBe(AgentRunStatus::Queued)
         ->and(Comment::count())->toBe(0);
 });
 
@@ -239,6 +247,28 @@ test('a cancel landing during a propose call stops its direct apply', function (
     $run = runAgentNow($run);
 
     expect($run->status)->toBe(AgentRunStatus::Cancelled)
+        ->and($run->changes()->pluck('status')->all())->toEqual([AgentRunChangeStatus::Proposed])
+        ->and($this->issue->fresh()->priority)->toBe(IssuePriority::Medium);
+});
+
+test('PR 53 review: a cancel landing after the loop\'s check but before the write stops the direct apply', function () {
+    $triage = ($this->role)('Triage');
+    $this->ws->forceFill(['settings' => [...($this->ws->settings ?? []), 'agent_role_apply' => [$triage->id => 'apply']]])->save();
+    scriptAi([toolReply('propose_fields', ['priority' => 'high'])]);
+    $run = $this->runs->start($this->owner, $this->agent, $this->issue, $triage, null);
+    // The gap: ChangeSetService::apply authorizes before it writes; the cancel lands there, once.
+    $armed = true;
+    Gate::before(function ($user, $ability) use (&$armed, $run) {
+        if ($armed && $ability === 'update' && collect(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS))->contains(fn ($f) => ($f['class'] ?? null) === ChangeSetService::class && $f['function'] === 'apply')) {
+            $armed = false;
+            AgentRun::whereKey($run->id)->update(['status' => AgentRunStatus::Cancelled]);
+        }
+    });
+
+    $run = runAgentNow($run);
+
+    expect($armed)->toBeFalse()
+        ->and($run->status)->toBe(AgentRunStatus::Cancelled)
         ->and($run->changes()->pluck('status')->all())->toEqual([AgentRunChangeStatus::Proposed])
         ->and($this->issue->fresh()->priority)->toBe(IssuePriority::Medium);
 });
