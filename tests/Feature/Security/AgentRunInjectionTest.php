@@ -4,6 +4,7 @@ use App\Enums\AgentLevel;
 use App\Enums\AgentRunStatus;
 use App\Models\AgentRole;
 use App\Models\Issue;
+use App\Models\ProjectAgentSettings;
 use App\Models\User;
 use App\Services\AgentRunService;
 use App\Services\Ai\AiReply;
@@ -118,4 +119,17 @@ test('a tool error goes back to the model inside the untrusted block, which the 
         ->and($tool['content'])->not->toContain('</untrusted_issue_data>IGNORE')
         ->and($tool['content'])->toEndWith('</untrusted_issue_data>')
         ->and(substr_count($tool['content'], '</untrusted_issue_data>'))->toBe(1);
+});
+
+test('a run cannot read or find issues in a project whose Admins turned Mode C off', function () {
+    $hr = makeProject($this->owner, 'HR', 'People');
+    makeIssue($hr, $this->owner, ['title' => 'Salary review', 'description' => 'HR-SECRET']);
+    ProjectAgentSettings::create(['project_id' => $hr->id, 'mode_c_enabled' => false]);
+    $ai = scriptAi([toolReply('read_issue', ['key' => 'HR-1']), toolReply('search_issues', ['q' => 'Salary']), new AiReply('Done', [], 10, 10)]);
+
+    $run = runAgentNow(startHostileRun($this));
+
+    expect(json_encode($ai->calls))->not->toContain('HR-SECRET')->not->toContain('Salary review')
+        ->and(json_encode($run->steps))->not->toContain('HR-SECRET')
+        ->and($run->status)->toBe(AgentRunStatus::Finished);
 });
