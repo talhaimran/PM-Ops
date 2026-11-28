@@ -25,6 +25,9 @@ class ActivityLogger
     /** Container key set while an in-app agent run works (B-R1): its starter acts as the run's agent. */
     public const RUN_BINDING = 'pm.run';
 
+    /** Container key set while a person applies a run's changes (B-R7): the rows stay theirs but name the run and its agent. */
+    private const APPLY_BINDING = 'pm.run_apply';
+
     /** @param array<string, array{from: mixed, to: mixed}>|null $changes */
     public function log(Issue $issue, ?User $user, string $action, ?array $changes = null): Activity
     {
@@ -42,7 +45,7 @@ class ActivityLogger
             // An OAuth token has no name of its own: it is the agent's.
             'token_name' => self::token($user)?->name ?? $user?->agent()?->name,
             ...self::attribution($user),
-            'agent_run_id' => self::run($user)?->id,
+            'agent_run_id' => self::run($user)?->id ?? self::applying()?->id,
         ]);
         // 3-R1: after commit, so a rolled-back change emits nothing.
         event(new ActivityRecorded($activity));
@@ -134,7 +137,7 @@ class ActivityLogger
     public static function attribution(?User $user): array
     {
         // No agent_run_id: the history tables have none. Activity, audit and inbox rows add it from run().
-        return ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
+        return ['user_id' => $user?->id, 'agent_id' => self::approval()?->agent_id ?? self::applying()?->agent_id ?? $user?->agent()?->id, 'via' => self::via($user)];
     }
 
     /** The run being worked, when $user is its starter (or, with no $user, any bound run). */
@@ -155,6 +158,23 @@ class ActivityLogger
         } finally {
             $previous ? app()->instance(self::RUN_BINDING, $previous) : app()->forgetInstance(self::RUN_BINDING);
         }
+    }
+
+    /** B-R7: run $apply with its rows made by the person applying, linked to $run and its agent (via stays theirs). The previous binding comes back after. */
+    public static function forRunApply(AgentRun $run, callable $apply): mixed
+    {
+        $previous = self::applying();
+        app()->instance(self::APPLY_BINDING, $run);
+        try {
+            return $apply();
+        } finally {
+            $previous ? app()->instance(self::APPLY_BINDING, $previous) : app()->forgetInstance(self::APPLY_BINDING);
+        }
+    }
+
+    private static function applying(): ?AgentRun
+    {
+        return app()->bound(self::APPLY_BINDING) ? app(self::APPLY_BINDING) : null;
     }
 
     private static function approval(): ?ApprovalRequest

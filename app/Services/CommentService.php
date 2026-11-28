@@ -17,7 +17,7 @@ class CommentService
     public function add(Issue $issue, User $author, string $body): Comment
     {
         return DB::transaction(function () use ($issue, $author, $body) {
-            $comment = $issue->comments()->create(['user_id' => $author->id, 'body' => $body, 'agent_id' => $author->agent()?->id]);
+            $comment = $issue->comments()->create(['user_id' => $author->id, 'body' => $body, 'agent_id' => ActivityLogger::attribution($author)['agent_id']]);
             $this->activity->log($issue, $author, 'commented', ['comment_id' => $comment->id]);
             $this->watchers->autoWatch($issue, $author);
             $comment->warnings = $this->mentions->sync($issue, $comment, null, $body, $author);

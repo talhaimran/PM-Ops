@@ -32,7 +32,7 @@ use Throwable;
 /**
  * Step B (Mode C): starting, working and stopping in-app agent runs. A person starts one in the web app (never a token,
  * never automatically) with one of their own active agents; the queued RunAgent job then loops provider ↔ tools within
- * the workspace's limits, re-checking before every step (B-R15). Runs only propose (B-D8, direct apply is Task 3).
+ * the workspace's limits, re-checking before every step (B-R15). Runs propose (B-D8) unless their role applies directly (B-D3).
  */
 class AgentRunService
 {
@@ -50,6 +50,7 @@ class AgentRunService
         private RunTools $tools,
         private NotificationService $notifications,
         private AiClient $client,
+        private ChangeSetService $changes,
     ) {}
 
     public function start(User $starter, Agent $agent, Issue $issue, ?AgentRole $role, ?string $instruction): AgentRun
@@ -123,12 +124,13 @@ class AgentRunService
         return $runs;
     }
 
-    /** The starter stops their run; a call in flight finishes first and its tokens count (B-R15). No notification. */
+    /** The starter stops their run, while they may still edit its issue; a call in flight finishes first and its tokens count (B-R15). No notification. */
     public function cancel(AgentRun $run, User $user): void
     {
         if (! AgentRun::visibleTo($user)->whereKey($run->id)->exists()) {
             throw ValidationException::withMessages(['run' => "Run {$run->id} was not found."])->status(404);
         }
+        $this->changes->editable($run, $user);
         if (AgentRun::whereKey($run->id)->whereIn('status', [AgentRunStatus::Queued, AgentRunStatus::Running])->update(['status' => AgentRunStatus::Cancelled, 'finished_at' => now()])) {
             event(new AgentRunChanged($run->user_id, $run->id, 'cancelled'));
         }
@@ -240,6 +242,10 @@ class AgentRunService
                 }
                 $result = $this->tools->call($run, (string) $call['name'], (array) $call['args']);
                 $failed = isset($result['error']);
+                // A cancel that landed during the call: the change stays proposed.
+                if (! $failed && isset($result['proposed']) && ! $this->cancelled($run)) {
+                    $this->applyDirectly($run);
+                }
                 // shortcut: results are cut to RESULT_CHARS in the stored log (the model got them whole), keep more if the run panel needs it.
                 $entry['calls'][] = ['tool' => $call['name'], 'args' => $call['args'], ...($failed ? ['error' => $result['error']] : ['result' => Str::limit(json_encode($result, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), self::RESULT_CHARS)])];
                 // Results (errors too: they can echo model or issue text) are issue data, so they go back marked like the first message.
@@ -287,6 +293,23 @@ class AgentRunService
             : null;
     }
 
+    /**
+     * B-D3, B-R1, B-R6: a role switched to apply makes its proposed changes now, as the agent (the job's forRun binding);
+     * a typed instruction (B-R17) or an agent below Write level only proposes. A conflict stays for the panel; a refusal
+     * of the whole set (the starter can no longer edit the issue) leaves the changes proposed. The run goes on either way.
+     */
+    private function applyDirectly(AgentRun $run): void
+    {
+        if (! $run->user || ! $run->role?->appliesDirectly($this->current->get()) || ! $run->agent?->permission_level->canWrite()) {
+            return;
+        }
+        try {
+            $this->changes->apply($run, $run->user, direct: true);
+        } catch (AuthorizationException|ValidationException) {
+            // Left proposed: the starter decides in the panel.
+        }
+    }
+
     /** Why nothing may change in $workspace (suspended or archived), or null. */
     private function readOnly(Workspace $workspace): ?string
     {
@@ -305,14 +328,14 @@ class AgentRunService
         $run->save();
     }
 
-    /** Ends a run still queued or running (a cancelled one stays cancelled); the reply becomes a proposed comment (B-D8); the starter hears (B-R12). */
+    /** Ends a run still queued or running (a cancelled one stays cancelled); the reply becomes a proposed comment (B-D8), applied after commit when the role applies directly; the starter hears (B-R12). */
     private function end(AgentRun $run, AgentRunStatus $status, ?string $error, ?string $reply = null): void
     {
-        DB::transaction(function () use ($run, $status, $error, $reply) {
+        $ended = DB::transaction(function () use ($run, $status, $error, $reply) {
             $ended = AgentRun::whereKey($run->id)->whereIn('status', [AgentRunStatus::Queued, AgentRunStatus::Running])
                 ->update(['status' => $status, 'error' => $error === null ? null : Str::limit($error, 250), 'finished_at' => now()]);
             if (! $ended) {
-                return;
+                return false;
             }
             // Loaded here: crashed() and the issue-gone path come with nothing loaded.
             $run->loadMissing(['issue.project', 'user', 'agent']);
@@ -325,6 +348,12 @@ class AgentRunService
                     ['action' => $status->value, 'from' => null, 'to' => $error], null, $run->agent, 'agent_run', batch: false));
             }
             event(new AgentRunChanged($run->user_id, $run->id, $status->value));
+
+            return true;
         });
+        // After the commit: applying takes the link lock and row locks, never while the run row is held (2-R4).
+        if ($ended && filled($reply)) {
+            $this->applyDirectly($run);
+        }
     }
 }

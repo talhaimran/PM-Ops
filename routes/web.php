@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\SocialSignInController;
 use App\Http\Controllers\Auth\TwoFactorController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\Web\AgentController;
+use App\Http\Controllers\Web\AgentRunController;
 use App\Http\Controllers\Web\AiSettingsController;
 use App\Http\Controllers\Web\ApprovalController;
 use App\Http\Controllers\Web\AuditLogController;
@@ -129,6 +130,13 @@ Route::prefix('{workspace}')->where(['workspace' => '[a-z0-9-]{3,40}'])->middlew
     Route::post('/issues/{key}/move', [BoardController::class, 'move'])->name('issues.move');
     Route::post('/issues/{key}/rank', [SprintController::class, 'rank'])->name('issues.rank');
     Route::post('/issues/{key}/comments', [IssueController::class, 'comment'])->name('issues.comments.store');
+    // Step B: in-app agent runs, only ever their starter's (B-D6).
+    Route::post('/issues/{key}/runs', [AgentRunController::class, 'start'])->name('runs.store');
+    Route::post('/runs/{run}/cancel', [AgentRunController::class, 'cancel'])->name('runs.cancel')->whereNumber('run');
+    Route::post('/runs/{run}/apply', [AgentRunController::class, 'apply'])->name('runs.apply')->whereNumber('run');
+    Route::post('/runs/{run}/discard', [AgentRunController::class, 'discard'])->name('runs.discard')->whereNumber('run');
+    Route::post('/runs/{run}/changes/{change}/apply', [AgentRunController::class, 'apply'])->name('runs.changes.apply')->whereNumber(['run', 'change']);
+    Route::post('/runs/{run}/changes/{change}/discard', [AgentRunController::class, 'discard'])->name('runs.changes.discard')->whereNumber(['run', 'change']);
     Route::patch('/comments/{comment}', [IssueController::class, 'updateComment'])->name('comments.update');
     Route::delete('/comments/{comment}', [IssueController::class, 'destroyComment'])->name('comments.destroy');
     Route::post('/comments/{comment}/reactions', [IssueController::class, 'react'])->name('comments.reactions.store')->whereNumber('comment');
