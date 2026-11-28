@@ -276,7 +276,7 @@ export default function IssueView({
 
                     {issue.watchers && <Watchers issue={issue} options={options} canAdd={can.contribute} canRemove={can.manage} />}
 
-                    <AiBox approvals={issue.pending_approvals} />
+                    <AiBox issue={issue} full={full} />
 
                     <section className="rounded-card bg-card-2">
                         <h2 className="px-4 pt-3 text-lg text-text">Details</h2>

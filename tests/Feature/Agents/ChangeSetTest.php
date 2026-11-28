@@ -313,17 +313,18 @@ test('the starter cancels their run from the web', function () {
     expect($run->fresh()->status)->toBe(AgentRunStatus::Cancelled);
 });
 
-test('AgentRunResource: the run panel\'s shape, never the instruction, key or endpoint', function () {
+test('AgentRunResource: the run panel\'s shape, with the instruction but never the key or endpoint', function () {
     $run = proposingRun($this);
     $change = changeOf($run, 'field', 'priority');
 
     $data = (new AgentRunResource($run->load(['agent', 'changes'])))->resolve();
 
-    expect(array_keys($data))->toBe(['id', 'status', 'role_name', 'agent', 'steps', 'tokens_in', 'tokens_out', 'error', 'changes'])
+    expect(array_keys($data))->toBe(['id', 'status', 'role_id', 'role_name', 'instruction', 'agent_id', 'agent', 'steps', 'tokens_in', 'tokens_out', 'error', 'changes'])
         ->and($data['agent'])->toBe('Helper')
         ->and($data['status'])->toBe('finished')
         ->and(collect($data['changes'])->firstWhere('id', $change->id))->toEqual([
             'id' => $change->id, 'kind' => 'field', 'target' => 'priority', 'before' => ['value' => 'medium'], 'after' => ['value' => 'high'], 'status' => 'proposed', 'message' => null,
         ])
-        ->and(json_encode($data))->not->toContain('Tidy this up.')->not->toContain('sk-RUN-SECRET');
+        ->and($data['instruction'])->toBe('Tidy this up.')
+        ->and(json_encode($data))->not->toContain('sk-RUN-SECRET')->not->toContain('endpoint');
 });

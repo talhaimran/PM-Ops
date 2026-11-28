@@ -144,6 +144,8 @@ export interface Issue {
     epic_issues?: IssueLink[];
     comments?: Comment[];
     pending_approvals?: ApprovalRequest[];
+    /** Spec 5.1: the viewer's latest agent run here and what "Ask agent" offers (null without Mode C or a provider). */
+    ai?: { run: AgentRun | null; ask: AskAgentData | null };
     /** Spec 7.5: an unresolved blocker you can see. On lists and the single issue. */
     blocked?: boolean;
     /** Spec 5.1: the Focus group; only on My issues, null for done ones. */
@@ -202,4 +204,44 @@ export interface IssueOptions {
     types: string[];
     priorities: string[];
     sprints: string[];
+}
+
+export type AgentRunStatus = 'queued' | 'running' | 'finished' | 'failed' | 'cancelled';
+export type AgentRunChangeStatus = 'proposed' | 'applied' | 'discarded' | 'conflict';
+
+export interface AgentRunChange {
+    id: number;
+    kind: 'field' | 'child_issue' | 'link' | 'comment';
+    target: string | null;
+    before: Record<string, unknown> | null;
+    after: Record<string, unknown> | null;
+    status: AgentRunChangeStatus;
+    message: string | null;
+}
+
+export interface AgentRunCall {
+    tool: string;
+    args?: unknown;
+    result?: unknown;
+    error?: string;
+}
+
+export interface AgentRun {
+    id: number;
+    status: AgentRunStatus;
+    role_id: number | null;
+    role_name: string | null;
+    instruction: string | null;
+    agent_id: number;
+    agent: string;
+    steps: { calls?: AgentRunCall[] }[] | null;
+    tokens_in: number;
+    tokens_out: number;
+    error: string | null;
+    changes: AgentRunChange[];
+}
+
+export interface AskAgentData {
+    agents: { id: number; label: string }[];
+    roles: { id: number; name: string }[];
 }

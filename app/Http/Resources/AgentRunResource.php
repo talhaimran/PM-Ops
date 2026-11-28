@@ -8,8 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * Step B: one run for its starter's run panel (B-D6: only they see it). Needs agent and changes loaded. Never the
- * instruction, the AI key or the endpoint.
+ * Step B: one run for its starter's run panel (B-D6: only they see it). Needs agent and changes loaded. Carries the
+ * instruction, agent and role so "Propose again" can start the same run; never the AI key or the endpoint.
  *
  * @mixin AgentRun
  */
@@ -20,7 +20,10 @@ class AgentRunResource extends JsonResource
         return [
             'id' => $this->id,
             'status' => $this->status->value,
+            'role_id' => $this->role_id,
             'role_name' => $this->role_name,
+            'instruction' => $this->instruction,
+            'agent_id' => $this->agent_id,
             'agent' => $this->agent?->label(),
             'steps' => $this->steps,
             'tokens_in' => $this->tokens_in,

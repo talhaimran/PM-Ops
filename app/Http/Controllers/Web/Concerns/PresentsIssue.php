@@ -2,10 +2,16 @@
 
 namespace App\Http\Controllers\Web\Concerns;
 
+use App\Enums\AgentStatus;
+use App\Http\Resources\AgentRunResource;
 use App\Http\Resources\IssueResource;
+use App\Models\Agent;
+use App\Models\AgentRole;
+use App\Models\AgentRun;
 use App\Models\Issue;
 use App\Models\Project;
 use App\Models\User;
+use App\Services\AiSettingsService;
 use App\Services\IssueService;
 use App\Services\ProjectService;
 use App\Services\RenderedText;
@@ -32,6 +38,7 @@ trait PresentsIssue
             ...$data['pending_approvals'][$i],
             'can_decide' => $user->can('decide', $approval),
         ])->all();
+        $data['ai'] = $this->aiBox($issue, $user);
 
         return [
             'issue' => $data,
@@ -41,6 +48,31 @@ trait PresentsIssue
                 'manage' => $user->can('manage', $issue->project),
             ],
         ];
+    }
+
+    /**
+     * Spec 5.1: the viewer's latest run on this issue (B-D6) and what "Ask agent" offers. No `ask` without a provider, Mode C on
+     * and the right to write; a run stays even without a provider because its proposals can still be applied. Never the key.
+     *
+     * @return array{run: ?array<string, mixed>, ask: ?array<string, mixed>}
+     */
+    private function aiBox(Issue $issue, User $user): array
+    {
+        $run = AgentRun::visibleTo($user)->where('issue_id', $issue->id)->with(['agent', 'changes'])->latest('id')->first();
+        $workspaceId = $issue->project->workspace_id;
+        $ask = null;
+        if (app(AiSettingsService::class)->modeCEnabled($issue->project) && $user->can('contribute', $issue->project)) {
+            $lastRun = AgentRun::selectRaw('agent_id, max(id) as last_run')->groupBy('agent_id');
+            $ask = [
+                'agents' => Agent::where('agents.owner_user_id', $user->id)->where('agents.workspace_id', $workspaceId)->where('status', AgentStatus::Active)
+                    ->leftJoinSub($lastRun, 'lr', 'lr.agent_id', '=', 'agents.id')->orderByRaw('lr.last_run is null')->orderByDesc('lr.last_run')->orderBy('agents.name')
+                    ->get(['agents.id', 'agents.name'])->map(fn (Agent $a) => ['id' => $a->id, 'label' => $a->label()])->all(),
+                'roles' => AgentRole::where(fn ($q) => $q->whereNull('workspace_id')->orWhere('workspace_id', $workspaceId))->orderBy('name')->get(['id', 'name'])
+                    ->map(fn (AgentRole $r) => ['id' => $r->id, 'name' => $r->name])->all(),
+            ];
+        }
+
+        return ['run' => $run ? (new AgentRunResource($run))->resolve() : null, 'ask' => $ask];
     }
 
     /**
