@@ -213,20 +213,18 @@ class AgentRunService
             $entry = ['tokens_in' => $reply->tokensIn, 'tokens_out' => $reply->tokensOut, ...($reply->usageEstimated ? ['estimated' => true] : [])];
             $run->tokens_in += (int) $reply->tokensIn;
             $run->tokens_out += (int) $reply->tokensOut;
+            // Saved at once: the provider has spent these, whatever happens to the calls below.
+            $this->save($run, [...$steps, $entry]);
             if ($this->cancelled($run)) {
-                $this->save($run, [...$steps, $entry]);
-
                 return;
             }
             // A reply that crosses the budget is not acted on: its calls aren't run and its text isn't proposed.
             if ($stop = $this->overBudget($run, (int) $workspace->setting('run_token_budget'))) {
-                $this->save($run, [...$steps, $entry]);
                 $this->end($run, AgentRunStatus::Failed, $stop);
 
                 return;
             }
             if (! $reply->toolCalls) {
-                $this->save($run, [...$steps, $entry]);
                 $this->end($run, AgentRunStatus::Finished, null, $reply->text);
 
                 return;

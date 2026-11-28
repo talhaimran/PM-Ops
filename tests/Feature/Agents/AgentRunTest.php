@@ -572,3 +572,14 @@ test('a cancel that lands during one tool call stops the rest of that reply\'s c
         ->and($run->changes()->pluck('target')->all())->toBe(['priority'])
         ->and(collect($run->steps)->flatMap(fn ($s) => $s['calls'] ?? [])->pluck('args')->all())->toBe([['priority' => 'high']]);
 });
+
+test('a reply\'s tokens are kept when one of its tool calls crashes', function () {
+    scriptAi([toolReply('propose_fields', ['priority' => 'high'], 300, 40)]);
+    AgentRunChange::creating(fn () => throw new RuntimeException('boom'));
+
+    $run = runAgentNow(startTriage($this));
+
+    expect($run->status)->toBe(AgentRunStatus::Failed)
+        ->and([$run->tokens_in, $run->tokens_out])->toBe([300, 40])
+        ->and(AgentRun::monthTokens($this->ws))->toBe(340);
+});
