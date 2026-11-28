@@ -11,6 +11,7 @@ use App\Jobs\RunAgent;
 use App\Models\Activity;
 use App\Models\AgentRole;
 use App\Models\AgentRun;
+use App\Models\AgentRunChange;
 use App\Models\AiProvider;
 use App\Models\AuditLog;
 use App\Models\InboxItem;
@@ -554,4 +555,20 @@ test('fix 4: a run the worker gave up on ends failed and notifies the starter, w
 
     expect($run->fresh()->only(['status', 'error']))->toEqual(['status' => AgentRunStatus::Failed, 'error' => 'The run stopped unexpectedly. Try again.'])
         ->and(InboxItem::where('user_id', $this->owner->id)->sole()->only(['event', 'agent_run_id']))->toEqual(['event' => 'agent_run.failed', 'agent_run_id' => $run->id]);
+});
+
+test('a cancel that lands during one tool call stops the rest of that reply\'s calls', function () {
+    $run = startTriage($this);
+    scriptAi([new AiReply(null, [
+        ['id' => 'c1', 'name' => 'propose_fields', 'args' => ['priority' => 'high']],
+        ['id' => 'c2', 'name' => 'propose_fields', 'args' => ['type' => 'bug']],
+    ], 100, 10)]);
+    // The starter cancels while the first call is being made.
+    AgentRunChange::created(fn () => $this->runs->cancel($run, $this->owner));
+
+    $run = runAgentNow($run);
+
+    expect($run->status)->toBe(AgentRunStatus::Cancelled)
+        ->and($run->changes()->pluck('target')->all())->toBe(['priority'])
+        ->and(collect($run->steps)->flatMap(fn ($s) => $s['calls'] ?? [])->pluck('args')->all())->toBe([['priority' => 'high']]);
 });

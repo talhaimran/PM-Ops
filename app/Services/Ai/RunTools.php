@@ -119,7 +119,7 @@ class RunTools
 
     /**
      * The run's role allowlist; a typed instruction (no role, B-R17) gets every tool.
-     * shortcut: a custom role named "Instruction" that is deleted before its run starts gets every tool (propose-only), check role_id at start if custom roles make that matter.
+     * A custom role named "Instruction" would be mistaken for a typed instruction once deleted: Task 5 refuses that name.
      */
     private static function allowed(AgentRun $run): array
     {

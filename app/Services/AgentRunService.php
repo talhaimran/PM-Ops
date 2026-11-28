@@ -234,6 +234,12 @@ class AgentRunService
 
             $messages[] = ['role' => 'assistant', 'content' => $reply->text, 'tool_calls' => $reply->toolCalls];
             foreach ($reply->toolCalls as $call) {
+                // A cancel that landed during an earlier call of this reply stops the rest.
+                if ($this->cancelled($run)) {
+                    $this->save($run, [...$steps, $entry]);
+
+                    return;
+                }
                 $result = $this->tools->call($run, (string) $call['name'], (array) $call['args']);
                 $failed = isset($result['error']);
                 // shortcut: results are cut to RESULT_CHARS in the stored log (the model got them whole), keep more if the run panel needs it.
@@ -270,7 +276,10 @@ class AgentRunService
         return $run->tokens_in + $run->tokens_out >= $budget ? 'Stopped: reached the '.number_format($budget).'-token budget' : null;
     }
 
-    /** B-D10: the month's usage reached the workspace's cap (none set: no cap). */
+    /**
+     * B-D10: the month's usage reached the workspace's cap (none set: no cap). A soft cap by decision: nothing is
+     * reserved for queued or running runs, so each active run can pass it by the step it is on.
+     */
     private function overCap(Workspace $workspace): ?string
     {
         ['cap' => $cap, 'used' => $used] = $this->ai->usage($workspace);
