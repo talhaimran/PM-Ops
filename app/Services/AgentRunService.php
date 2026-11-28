@@ -32,7 +32,7 @@ use Throwable;
 /**
  * Step B (Mode C): starting, working and stopping in-app agent runs. A person starts one in the web app (never a token,
  * never automatically) with one of their own active agents; the queued RunAgent job then loops provider ↔ tools within
- * the workspace's limits, re-checking before every step (B-R15). Runs only propose (B-D8, direct apply is Task 3).
+ * the workspace's limits, re-checking before every step (B-R15). Runs propose (B-D8) unless their role applies directly (B-D3).
  */
 class AgentRunService
 {
@@ -50,6 +50,7 @@ class AgentRunService
         private RunTools $tools,
         private NotificationService $notifications,
         private AiClient $client,
+        private ChangeSetService $changes,
     ) {}
 
     public function start(User $starter, Agent $agent, Issue $issue, ?AgentRole $role, ?string $instruction): AgentRun
@@ -240,6 +241,9 @@ class AgentRunService
                 }
                 $result = $this->tools->call($run, (string) $call['name'], (array) $call['args']);
                 $failed = isset($result['error']);
+                if (! $failed && isset($result['proposed'])) {
+                    $this->applyDirectly($run);
+                }
                 // shortcut: results are cut to RESULT_CHARS in the stored log (the model got them whole), keep more if the run panel needs it.
                 $entry['calls'][] = ['tool' => $call['name'], 'args' => $call['args'], ...($failed ? ['error' => $result['error']] : ['result' => Str::limit(json_encode($result, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE), self::RESULT_CHARS)])];
                 // Results (errors too: they can echo model or issue text) are issue data, so they go back marked like the first message.
@@ -287,6 +291,23 @@ class AgentRunService
             : null;
     }
 
+    /**
+     * B-D3, B-R1, B-R6: a role switched to apply makes its proposed changes now, as the agent (the job's forRun binding);
+     * a typed instruction (B-R17) or an agent below Write level only proposes. A conflict stays for the panel; a refusal
+     * of the whole set (the starter can no longer edit the issue) leaves the changes proposed. The run goes on either way.
+     */
+    private function applyDirectly(AgentRun $run): void
+    {
+        if (! $run->user || ! $run->role?->appliesDirectly($this->current->get()) || ! $run->agent?->permission_level->canWrite()) {
+            return;
+        }
+        try {
+            $this->changes->apply($run, $run->user);
+        } catch (AuthorizationException|ValidationException) {
+            // Left proposed: the starter decides in the panel.
+        }
+    }
+
     /** Why nothing may change in $workspace (suspended or archived), or null. */
     private function readOnly(Workspace $workspace): ?string
     {
@@ -319,6 +340,7 @@ class AgentRunService
             $issue = $run->issue;
             if (filled($reply)) {
                 AgentRunChange::create(['run_id' => $run->id, 'kind' => 'comment', 'after' => ['body' => $reply], 'issue_version' => $issue?->version, 'status' => AgentRunChangeStatus::Proposed]);
+                $this->applyDirectly($run);
             }
             if ($issue && $run->user) {
                 ActivityLogger::forRun($run, fn () => $this->notifications->notify($run->user, $issue, "agent_run.{$status->value}",

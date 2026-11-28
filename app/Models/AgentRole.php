@@ -13,4 +13,10 @@ class AgentRole extends Model
     {
         return ['allowed_tools' => 'array'];
     }
+
+    /** B-R6: whether runs in this role apply their changes directly: built-in roles by the workspace's agent_role_apply setting, custom ones by apply_mode. */
+    public function appliesDirectly(Workspace $workspace): bool
+    {
+        return ($this->workspace_id === null ? ($workspace->setting('agent_role_apply') ?? [])[$this->id] ?? 'propose' : $this->apply_mode) === 'apply';
+    }
 }

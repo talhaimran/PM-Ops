@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AgentRunChangeStatus;
 use App\Enums\AgentRunStatus;
 use App\Enums\AgentStatus;
 use App\Enums\ProjectRole;
@@ -10,6 +11,7 @@ use App\Mcp\Servers\PmServer;
 use App\Mcp\Tools;
 use App\Models\Agent;
 use App\Models\AgentRun;
+use App\Models\AgentRunChange;
 use App\Models\AiProvider;
 use App\Models\Column;
 use App\Models\Comment;
@@ -51,7 +53,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 const B_MARKER = 'B-SECRET';
 
-/** Placeholders: {P} project key, {I} issue key, {C} comment id, {COL}/{COLN} column id/name, {L}/{LN} label id/name, {S}/{SN} sprint id/name, {T} token id, {INV} invitation id, {AR} approval request id, {N} notification id, {U} user id, {E} member email. */
+/** Placeholders: {P} project key, {I} issue key, {C} comment id, {COL}/{COLN} column id/name, {L}/{LN} label id/name, {S}/{SN} sprint id/name, {T} token id, {INV} invitation id, {AR} approval request id, {N} notification id, {U} user id, {E} member email, {RUN}/{RCH} agent run/change id. */
 function isolationRouteCases(): array
 {
     $confirm = ['confirm' => true];
@@ -121,6 +123,13 @@ function isolationRouteCases(): array
         'GET {workspace}/dashboard' => ['alpha/dashboard', []],
         'POST {workspace}/approvals/{approval}/approve' => ['alpha/approvals/{AR}/approve', ['confirm_changed' => true]],
         'POST {workspace}/approvals/{approval}/reject' => ['alpha/approvals/{AR}/reject', ['note' => 'x']],
+        // Step B: B's issue and ann's B agent; then ann's own run in B, and (child in A) her run in A with B's change.
+        'POST {workspace}/issues/{key}/runs' => ['alpha/issues/{I}/runs', ['agent' => '{T}', 'instruction' => 'x']],
+        'POST {workspace}/runs/{run}/cancel' => ['alpha/runs/{RUN}/cancel', []],
+        'POST {workspace}/runs/{run}/apply' => ['alpha/runs/{RUN}/apply', []],
+        'POST {workspace}/runs/{run}/discard' => ['alpha/runs/{RUN}/discard', []],
+        'POST {workspace}/runs/{run}/changes/{change}/apply' => ['alpha/runs/{RUN}/changes/{RCH}/apply', []],
+        'POST {workspace}/runs/{run}/changes/{change}/discard' => ['alpha/runs/{RUN}/changes/{RCH}/discard', []],
         'GET {workspace}/notifications' => ['alpha/notifications', []],
         'POST {workspace}/notifications/read-all' => ['alpha/notifications/read-all', []],
         'POST {workspace}/notifications/{notification}/read' => ['alpha/notifications/{N}/read', []],
@@ -315,7 +324,7 @@ function isolationToolCases(): array
     ];
 }
 
-const CHILD_PLACEHOLDERS = ['{C}', '{COL}', '{COLN}', '{L}', '{LN}', '{S}', '{SN}', '{T}', '{INV}', '{ST}', '{STN}'];
+const CHILD_PLACEHOLDERS = ['{C}', '{COL}', '{COLN}', '{L}', '{LN}', '{S}', '{SN}', '{T}', '{INV}', '{ST}', '{STN}', '{RCH}'];
 
 /** @return array<string, array<string, string>> variant name => placeholder values; paired variants must answer alike. */
 function isolationVariants($t): array
@@ -325,14 +334,16 @@ function isolationVariants($t): array
         '{L}' => (string) $t->bLabel->id, '{LN}' => 'b-secret', '{S}' => (string) $t->bSprint->id, '{SN}' => 'B-SECRET sprint',
         '{T}' => (string) $t->annB[0]->id, '{INV}' => (string) $t->bInvitation->id, '{U}' => (string) $t->bob->id, '{E}' => $t->bob->email,
         '{AR}' => (string) $t->bApproval->id, '{N}' => (string) $t->bNotification->id, '{ST}' => (string) $t->bStatus->id, '{STN}' => $t->bStatus->name,
+        '{RUN}' => (string) $t->bRun->id, '{RCH}' => (string) $t->bRunChange->id,
     ];
     $missing = [
         '{P}' => 'NOPE', '{I}' => 'NOPE-1', '{C}' => '999999', '{COL}' => '999998', '{COLN}' => 'No such col',
         '{L}' => '999997', '{LN}' => 'no-such', '{S}' => '999996', '{SN}' => 'No such sprint',
         '{T}' => '999995', '{INV}' => '999994', '{U}' => '999993', '{E}' => 'nobody@example.com',
         '{AR}' => '999992', '{N}' => '999990', '{ST}' => '999991', '{STN}' => 'No such status',
+        '{RUN}' => '999989', '{RCH}' => '999988',
     ];
-    $inA = ['{P}' => 'WEB', '{I}' => 'WEB-1'];
+    $inA = ['{P}' => 'WEB', '{I}' => 'WEB-1', '{RUN}' => (string) $t->aRun->id];
 
     return [
         'b' => $b, 'missing' => $missing,
@@ -381,6 +392,8 @@ function workspaceSnapshot(Workspace $w): string
         DB::table('ai_providers')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('statuses')->where('workspace_id', $w->id)->orderBy('id')->get(),
         DB::table('column_statuses')->whereIn('column_id', Column::whereIn('project_id', $projects)->select('id'))->orderBy('column_id')->get(),
+        DB::table('agent_runs')->where('workspace_id', $w->id)->orderBy('id')->get(),
+        DB::table('agent_run_changes')->whereIn('run_id', DB::table('agent_runs')->where('workspace_id', $w->id)->select('id'))->orderBy('id')->get(),
     ]));
 }
 
@@ -407,6 +420,11 @@ beforeEach(function () {
     $this->bNotification = app(NotificationService::class)->notify($this->ann, $opsIssue, 'commented', ['action' => 'commented', 'from' => null, 'to' => null], $this->bob, null, 'web');
     $this->annB = app(AgentService::class)->create($this->ann, ['name' => 'B-SECRET token', 'level' => 'delete']);
     AiProvider::create(['workspace_id' => $this->b->id, 'provider' => 'anthropic', 'model' => 'B-SECRET model', 'key' => 'B-SECRET-key', 'monthly_token_cap' => 7]);
+    // ann's own run in B, with a proposed change: only the workspace boundary stops her.
+    $this->bRun = AgentRun::create(['workspace_id' => $this->b->id, 'issue_id' => $opsIssue->id, 'issue_key' => 'OPS-1', 'user_id' => $this->ann->id, 'agent_id' => $this->annB[0]->id,
+        'role_name' => 'Instruction', 'instruction' => 'B-SECRET instruction', 'status' => AgentRunStatus::Finished]);
+    $this->bRunChange = AgentRunChange::create(['run_id' => $this->bRun->id, 'kind' => 'field', 'target' => 'title', 'before' => ['value' => 'B-SECRET ops issue'],
+        'after' => ['value' => 'B-SECRET new title'], 'issue_version' => $opsIssue->fresh()->version, 'status' => AgentRunChangeStatus::Proposed]);
     $this->bApproval = app(ApprovalService::class)->requestDone($opsIssue->setRelation('project', $ops), $this->ann, $this->annB[0], app(StatusService::class)->resolveFor($ops, 'Done'), 'B-SECRET reason');
 
     // Workspace A: ann's current workspace.
@@ -417,6 +435,8 @@ beforeEach(function () {
     app(LabelService::class)->create($web, ['name' => 'alpha']);
     app(SprintService::class)->create($web, ['name' => 'Alpha sprint']);
     $this->annA = app(AgentService::class)->create($this->ann, ['name' => 'ann in A', 'level' => 'delete']);
+    $this->aRun = AgentRun::create(['workspace_id' => $this->a->id, 'issue_id' => $issue->id, 'issue_key' => 'WEB-1', 'user_id' => $this->ann->id, 'agent_id' => $this->annA[0]->id,
+        'role_name' => 'Instruction', 'status' => AgentRunStatus::Finished]);
 
     $this->bBefore = workspaceSnapshot($this->b);
 });
@@ -598,7 +618,7 @@ test('agent runs: a run of another workspace or another person is never listed, 
     $carolsRun = $run($this->a, $carol);
     $annsRun = $run($this->a, $this->ann);
 
-    expect(AgentRun::visibleTo($this->ann)->pluck('id')->all())->toBe([$annsRun->id])
+    expect(AgentRun::visibleTo($this->ann)->orderBy('id')->pluck('id')->all())->toBe([$this->aRun->id, $annsRun->id])
         ->and(AgentRun::visibleTo($carol)->pluck('id')->all())->toBe([$carolsRun->id])
         ->and(AgentRun::visibleTo($this->ann)->whereKey($bRun->id)->exists())->toBeFalse()
         ->and((new AgentRunChanged($this->ann->id, $annsRun->id, 'finished'))->broadcastOn()->name)->toBe("private-user.{$this->ann->id}");
